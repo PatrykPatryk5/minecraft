@@ -15,10 +15,12 @@ import DebugScreen from './ui/DebugScreen';
 import PauseMenu from './ui/PauseMenu';
 import Inventory from './ui/Inventory';
 import CraftingScreen from './ui/CraftingScreen';
+import FurnaceScreen from './ui/FurnaceScreen';
 import ChatBox from './ui/ChatBox';
 import DeathScreen from './ui/DeathScreen';
 import ErrorBoundary from './ui/ErrorBoundary';
 import MainMenu from './ui/MainMenu';
+import MobRenderer from './mobs/MobRenderer';
 import useGameStore from './store/gameStore';
 import { getRendererCaps, type RendererCapabilities } from './core/renderer';
 import { preloadAllTextures } from './core/textures';
@@ -41,6 +43,7 @@ const SceneContent: React.FC = () => (
         <WaterSurface />
         <Clouds />
         <BlockParticles />
+        <MobRenderer />
     </>
 );
 
@@ -131,6 +134,7 @@ const App: React.FC = () => {
             {isPlaying && <PauseMenu />}
             {isPlaying && <Inventory />}
             {isPlaying && <CraftingScreen />}
+            {isPlaying && <FurnaceScreen />}
             {isPlaying && <DeathScreen />}
 
             {/* Chat */}
@@ -149,6 +153,9 @@ const App: React.FC = () => {
                     {gameMode === 'spectator' && '👁 Spectator'}
                 </div>
             )}
+
+            {/* Vignette overlay for cinematic effect */}
+            {isPlaying && <div className="vignette" />}
         </ErrorBoundary>
     );
 };

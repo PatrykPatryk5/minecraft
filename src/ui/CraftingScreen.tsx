@@ -1,5 +1,6 @@
 /**
- * Crafting Screen (C key) — With 3D block icons
+ * Crafting Screen (3×3 crafting table) — Opens via right-click on Crafting Table block
+ * Also accessible via C key as before
  */
 
 import React, { useEffect, useState, useMemo } from 'react';
@@ -24,6 +25,7 @@ const CraftingScreen: React.FC = () => {
         const onKey = (e: KeyboardEvent) => {
             if (e.code !== 'KeyC' || screen !== 'playing') return;
             const s = useGameStore.getState();
+            if (s.isChatOpen) return;
             if (s.activeOverlay === 'none') {
                 setOverlay('crafting');
                 playSound('open');
@@ -61,7 +63,7 @@ const CraftingScreen: React.FC = () => {
         document.querySelector('canvas')?.requestPointerLock();
     };
 
-    const result = useMemo(() => matchRecipe(craftingGrid), [craftingGrid]);
+    const result = useMemo(() => matchRecipe(craftingGrid, 3), [craftingGrid]);
 
     const setSlot = (index: number, blockId: number) => {
         const newGrid = [...craftingGrid];
@@ -119,15 +121,25 @@ const CraftingScreen: React.FC = () => {
 
     const loadRecipe = (recipeIndex: number) => {
         const recipe = RECIPES[recipeIndex];
-        if (!recipe) return;
+        if (!recipe || recipe.type !== 'shaped') return;
+        const pattern = recipe.ingredients as number[][];
+
         if (gameMode === 'survival') {
             for (const id of craftingGrid) {
                 if (id) useGameStore.getState().addItem(id, 1);
             }
         }
-        const flat = recipe.pattern.flat();
+
+        // Flatten pattern into 3x3 grid
+        const flat = Array(9).fill(0);
+        for (let r = 0; r < pattern.length && r < 3; r++) {
+            for (let c = 0; c < (pattern[r]?.length ?? 0) && c < 3; c++) {
+                flat[r * 3 + c] = pattern[r][c] ?? 0;
+            }
+        }
 
         if (gameMode === 'survival') {
+            // Check availability
             const needed: Record<number, number> = {};
             for (const id of flat) { if (id) needed[id] = (needed[id] || 0) + 1; }
             const s = useGameStore.getState();
@@ -138,6 +150,7 @@ const CraftingScreen: React.FC = () => {
             for (const [id, n] of Object.entries(needed)) {
                 if ((available[+id] || 0) < n) { playSound('click'); return; }
             }
+            // Consume items
             const newHotbar = s.hotbar.map(sl => ({ ...sl }));
             const newInv = s.inventory.map(sl => ({ ...sl }));
             for (const [id, n] of Object.entries(needed)) {
@@ -175,7 +188,7 @@ const CraftingScreen: React.FC = () => {
     return (
         <div className="crafting-overlay" onClick={closeCrafting}>
             <div className="crafting-window" onClick={(e) => e.stopPropagation()}>
-                <h3>⚒ Stół Rzemieślniczy</h3>
+                <h3>⚒ Stół Rzemieślniczy (3×3)</h3>
 
                 <div style={{ display: 'flex', gap: '4px', marginBottom: '12px', justifyContent: 'center' }}>
                     <button className={`mc-btn half${activeTab === 'grid' ? ' primary' : ''}`} onClick={() => setActiveTab('grid')}>Siatka</button>

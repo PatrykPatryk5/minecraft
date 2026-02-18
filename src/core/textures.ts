@@ -274,6 +274,7 @@ export function getBlockMaterial(blockId: number, face: 'top' | 'bottom' | 'side
         emissive: isGlow ? new THREE.Color(data?.color ?? '#eedd66') : undefined,
         emissiveIntensity: isGlow ? 0.5 : 0,
         alphaTest: isLeaf ? 0.15 : 0,
+        vertexColors: true,
     });
 
     materialCache.set(key, mat);

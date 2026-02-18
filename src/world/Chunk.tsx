@@ -12,8 +12,8 @@ import React, { useMemo, useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import { BLOCK_DATA } from '../core/blockTypes';
 import { getBlockMaterial } from '../core/textures';
-import useGameStore, { chunkKey, blockKey } from '../store/gameStore';
-import { CHUNK_SIZE, type ChunkData } from '../core/terrainGen';
+import useGameStore, { chunkKey } from '../store/gameStore';
+import { CHUNK_SIZE, blockIndex, type ChunkData, MAX_HEIGHT } from '../core/terrainGen';
 
 // ─── Face Definitions ────────────────────────────────────
 interface FaceDef {
@@ -85,6 +85,25 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz }) => {
         const nPz = state.chunks[chunkKey(cx, cz + 1)];
         const nNz = state.chunks[chunkKey(cx, cz - 1)];
 
+        // Helper: check if block at absolute position is solid
+        const isSolidAt = (lx: number, y: number, lz: number): boolean => {
+            if (y < 0) return true;
+            if (y >= MAX_HEIGHT) return false;
+            let type = 0;
+            if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
+                type = chunkData[blockIndex(lx, y, lz)];
+            } else {
+                let nc: ChunkData | undefined;
+                let nlx = lx, nlz = lz;
+                if (lx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
+                else if (lx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
+                else if (lz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
+                else if (lz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
+                if (nc) type = nc[blockIndex(nlx, y, nlz)];
+            }
+            return type > 0 && (BLOCK_DATA[type]?.solid ?? false);
+        };
+
         // Group faces by material key
         const groups: Record<string, {
             bt: number;
@@ -92,57 +111,93 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz }) => {
             positions: number[];
             normals: number[];
             uvs: number[];
+            colors: number[];
             indices: number[];
         }> = {};
 
-        const entries = Object.entries(chunkData);
-        for (let e = 0; e < entries.length; e++) {
-            const [bk, bt] = entries[e];
-            if (!bt) continue;
+        // Iterate blocks using flat index — no string keys, no Object.entries
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+            for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+                for (let y = 0; y < MAX_HEIGHT; y++) {
+                    const bt = chunkData[blockIndex(lx, y, lz)];
+                    if (!bt) continue;
 
-            const parts = bk.split(',');
-            const lx = +parts[0], y = +parts[1], lz = +parts[2];
+                    for (let f = 0; f < FACES.length; f++) {
+                        const face = FACES[f];
+                        const nx = lx + face.dir[0];
+                        const ny = y + face.dir[1];
+                        const nz = lz + face.dir[2];
 
-            for (let f = 0; f < FACES.length; f++) {
-                const face = FACES[f];
-                const nx = lx + face.dir[0];
-                const ny = y + face.dir[1];
-                const nz = lz + face.dir[2];
+                        // Determine neighbor block type
+                        let nbt = 0;
+                        if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0 && ny < MAX_HEIGHT) {
+                            nbt = chunkData[blockIndex(nx, ny, nz)];
+                        } else if (ny >= 0) {
+                            let nc: ChunkData | undefined;
+                            let nlx = nx, nlz = nz;
+                            if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
+                            else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
+                            else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
+                            else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
+                            if (nc) nbt = nc[blockIndex(nlx, ny, nlz)];
+                        }
 
-                // Determine neighbor block type
-                let nbt = 0;
-                if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0) {
-                    nbt = chunkData[blockKey(nx, ny, nz)] ?? 0;
-                } else if (ny >= 0) {
-                    let nc: ChunkData | undefined;
-                    let nlx = nx, nlz = nz;
-                    if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
-                    else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
-                    else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
-                    else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                    if (nc) nbt = nc[blockKey(nlx, ny, nlz)] ?? 0;
+                        if (!isTransparent(nbt)) continue;
+                        if (bt === nbt) continue;
+
+                        const ft = faceType(face.name);
+                        const mk = `${bt}_${ft}`;
+
+                        if (!groups[mk]) {
+                            groups[mk] = { bt, ft, positions: [], normals: [], uvs: [], colors: [], indices: [] };
+                        }
+
+                        const g = groups[mk];
+                        const vo = g.positions.length / 3;
+
+                        for (let i = 0; i < 4; i++) {
+                            const cx0 = lx + face.corners[i][0];
+                            const cy0 = y + face.corners[i][1];
+                            const cz0 = lz + face.corners[i][2];
+                            g.positions.push(cx0, cy0, cz0);
+                            g.normals.push(face.dir[0], face.dir[1], face.dir[2]);
+                            g.uvs.push(face.uv[i][0], face.uv[i][1]);
+
+                            // ─── Fake AO ──────────────────────────────
+                            // Check 3 neighbors around this corner perpendicular to face normal
+                            // to determine shadow level (0=fully lit, 3=deep shadow)
+                            let aoLevel = 0;
+                            const dx = face.dir[0], dy = face.dir[1], dz = face.dir[2];
+                            // Offsets perpendicular to face normal at this corner
+                            const ox = face.corners[i][0] * 2 - 1; // -1 or 1
+                            const oy = face.corners[i][1] * 2 - 1;
+                            const oz = face.corners[i][2] * 2 - 1;
+                            if (Math.abs(dx) === 1) {
+                                // YZ plane face
+                                const s1 = isSolidAt(lx + dx, y + face.corners[i][1], lz + oz);
+                                const s2 = isSolidAt(lx + dx, y + oy, lz + face.corners[i][2]);
+                                const corner = isSolidAt(lx + dx, y + oy, lz + oz);
+                                aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : corner ? 1 : 0);
+                            } else if (Math.abs(dy) === 1) {
+                                // XZ plane face (top/bottom)
+                                const s1 = isSolidAt(lx + ox, y + dy, lz + face.corners[i][2]);
+                                const s2 = isSolidAt(lx + face.corners[i][0], y + dy, lz + oz);
+                                const corner = isSolidAt(lx + ox, y + dy, lz + oz);
+                                aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : corner ? 1 : 0);
+                            } else {
+                                // XY plane face (front/back)
+                                const s1 = isSolidAt(lx + ox, y + face.corners[i][1], lz + dz);
+                                const s2 = isSolidAt(lx + face.corners[i][0], y + oy, lz + dz);
+                                const corner = isSolidAt(lx + ox, y + oy, lz + dz);
+                                aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : corner ? 1 : 0);
+                            }
+                            const brightness = 1.0 - aoLevel * 0.18; // 0.46 to 1.0
+                            g.colors.push(brightness, brightness, brightness);
+                        }
+
+                        g.indices.push(vo, vo + 1, vo + 2, vo, vo + 2, vo + 3);
+                    }
                 }
-
-                if (!isTransparent(nbt)) continue;
-                if (bt === nbt) continue;
-
-                const ft = faceType(face.name);
-                const mk = `${bt}_${ft}`;
-
-                if (!groups[mk]) {
-                    groups[mk] = { bt, ft, positions: [], normals: [], uvs: [], indices: [] };
-                }
-
-                const g = groups[mk];
-                const vo = g.positions.length / 3;
-
-                for (let i = 0; i < 4; i++) {
-                    g.positions.push(lx + face.corners[i][0], y + face.corners[i][1], lz + face.corners[i][2]);
-                    g.normals.push(face.dir[0], face.dir[1], face.dir[2]);
-                    g.uvs.push(face.uv[i][0], face.uv[i][1]);
-                }
-
-                g.indices.push(vo, vo + 1, vo + 2, vo, vo + 2, vo + 3);
             }
         }
 
@@ -157,6 +212,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz }) => {
             geo.setAttribute('position', new THREE.Float32BufferAttribute(g.positions, 3));
             geo.setAttribute('normal', new THREE.Float32BufferAttribute(g.normals, 3));
             geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2));
+            geo.setAttribute('color', new THREE.Float32BufferAttribute(g.colors, 3));
             geo.setIndex(g.indices);
             geo.computeBoundingSphere();
 

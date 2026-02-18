@@ -1043,6 +1043,126 @@
 }
 
 /* ================================================================
+   2x2 INVENTORY CRAFTING
+   ================================================================ */
+.inv-crafting-section {
+    border: 1px solid #555;
+    border-radius: 2px;
+    padding: 10px;
+    margin-bottom: 12px;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.inv-crafting-layout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin: 8px 0;
+}
+
+.inv-crafting-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2px;
+}
+
+.craft-result.small {
+    width: 48px;
+    height: 48px;
+}
+
+/* Mini palette (for 2x2 crafting in inventory) */
+.craft-palette.mini {
+    grid-template-columns: repeat(10, 1fr);
+    max-height: 80px;
+    margin-bottom: 4px;
+}
+
+/* ================================================================
+   FURNACE
+   ================================================================ */
+.furnace-window {
+    min-width: 420px;
+}
+
+.furnace-layout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    margin: 16px 0;
+}
+
+.furnace-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.furnace-slot {
+    width: 52px;
+    height: 52px;
+}
+
+.furnace-slot.output {
+    width: 56px;
+    height: 56px;
+}
+
+.furnace-progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.furnace-fire {
+    font-size: 24px;
+    transition: opacity 0.3s;
+    animation: firePulse 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes firePulse {
+    0% {
+        transform: scale(1);
+    }
+
+    100% {
+        transform: scale(1.15);
+    }
+}
+
+.furnace-bar-container {
+    width: 60px;
+    height: 8px;
+    background: #333;
+    border: 1px solid #555;
+    border-radius: 1px;
+    overflow: hidden;
+}
+
+.furnace-bar {
+    height: 100%;
+    background: linear-gradient(to right, #e2b714, #ff6600);
+    transition: width 0.05s linear;
+}
+
+.item-count {
+    position: absolute;
+    bottom: 1px;
+    right: 3px;
+    font-size: 7px;
+    color: #fff;
+    font-weight: bold;
+    text-shadow: 1px 1px 1px #000;
+    font-family: var(--font);
+    pointer-events: none;
+}
+
+/* ================================================================
    MODE INDICATOR
    ================================================================ */
 .mode-indicator {
@@ -1277,4 +1397,70 @@
 
 .bubble.empty {
     opacity: 0;
+}
+
+/* ================================================================
+   VIGNETTE EFFECT
+   ================================================================ */
+.vignette {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+    z-index: 1;
+}
+
+/* ================================================================
+   Z-INDEX STACKING
+   ================================================================ */
+.hud {
+    z-index: 10;
+}
+
+.chat-container {
+    z-index: 15;
+}
+
+.inventory-window,
+.crafting-window,
+.furnace-window {
+    z-index: 100;
+}
+
+.pause-menu {
+    z-index: 200;
+}
+
+.death-screen {
+    z-index: 300;
+}
+
+.debug-screen {
+    z-index: 50;
+}
+
+/* ================================================================
+   OVERLAY BACKDROP POLISH
+   ================================================================ */
+.inventory-window,
+.crafting-window,
+.furnace-window {
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* ================================================================
+   IMPROVED SLOT HOVER EFFECTS
+   ================================================================ */
+.hotbar-slot:hover {
+    border-color: var(--mc-accent);
+    transform: scale(1.08);
+    transition: transform 0.08s;
+}
+
+.inv-slot:hover,
+.craft-slot:hover {
+    border-color: #fff;
+    background: rgba(255, 255, 255, 0.1);
 }

@@ -229,12 +229,21 @@ const ChatBox: React.FC = () => {
         }
     }, [addMessage]);
 
+    // Close chat helper — centralized
+    const closeChat = () => {
+        setIsOpen(false);
+        setChatOpen(false);
+        setInput('');
+        setTimeout(() => {
+            document.querySelector('canvas')?.requestPointerLock();
+        }, 50);
+    };
+
     // Handle T key to open chat — CAPTURE PHASE blocks all keys when open
     useEffect(() => {
         if (screen !== 'playing') return;
 
         const onKeyDown = (e: KeyboardEvent) => {
-            // If chat is open, block ALL key events from reaching other handlers
             if (isOpen) {
                 e.stopPropagation();
                 return;
@@ -253,13 +262,15 @@ const ChatBox: React.FC = () => {
             }
         };
 
-        // CAPTURE PHASE = fires before bubble listeners
-        window.addEventListener('keydown', onKeyDown, true);
-        window.addEventListener('keyup', (e) => {
+        const onKeyUp = (e: KeyboardEvent) => {
             if (isOpen) e.stopPropagation();
-        }, true);
+        };
+
+        window.addEventListener('keydown', onKeyDown, true);
+        window.addEventListener('keyup', onKeyUp, true);
         return () => {
             window.removeEventListener('keydown', onKeyDown, true);
+            window.removeEventListener('keyup', onKeyUp, true);
         };
     }, [screen, isOpen, setChatOpen]);
 
@@ -280,8 +291,7 @@ const ChatBox: React.FC = () => {
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!input.trim()) {
-            setIsOpen(false);
-            setChatOpen(false);
+            closeChat();
             return;
         }
 
@@ -289,13 +299,12 @@ const ChatBox: React.FC = () => {
         setHistory((prev) => [input, ...prev].slice(0, 50));
         setHistoryIndex(-1);
         setInput('');
+        closeChat();
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Escape') {
-            setIsOpen(false);
-            setChatOpen(false);
-            setInput('');
+            closeChat();
             return;
         }
         if (e.key === 'ArrowUp') {

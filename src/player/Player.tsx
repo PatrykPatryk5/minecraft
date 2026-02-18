@@ -25,6 +25,9 @@ import { BLOCK_DATA, BlockType, getBlockDrop } from '../core/blockTypes';
 import { getSpawnHeight, MAX_HEIGHT } from '../core/terrainGen';
 import { emitBlockBreak } from '../effects/BlockParticles';
 import { playSound, startAmbience } from '../audio/sounds';
+import { checkWaterFill, spreadWater } from '../core/waterSystem';
+import { handleBlockAction, isOnLadder } from '../core/blockActions';
+import { attackMob } from '../mobs/MobSystem';
 
 // ─── Constants ───────────────────────────────────────────
 const GRAVITY = -28;
@@ -140,8 +143,16 @@ const Player: React.FC = () => {
             const hit = raycastBlock();
 
             if (e.button === 0) {
-                // ── Break Block ──
-                if (!hit) return;
+                // ── Break Block or Attack Mob ──
+                if (!hit) {
+                    // Try hitting a mob instead
+                    const dir = camera.getWorldDirection(new THREE.Vector3());
+                    attackMob(
+                        pos.current.x, pos.current.y, pos.current.z,
+                        [dir.x, dir.y, dir.z], 4 // base fist damage
+                    );
+                    return;
+                }
                 const [bx, by, bz] = hit.block;
                 const type = s.getBlock(bx, by, bz);
                 if (type && type !== BlockType.BEDROCK) {
@@ -153,6 +164,7 @@ const Player: React.FC = () => {
                         playSound('break');
                         s.removeBlock(bx, by, bz);
                         bumpAround(bx, bz);
+                        checkWaterFill(bx, by, bz);
                         return;
                     }
 
@@ -161,6 +173,7 @@ const Player: React.FC = () => {
                     playSound('break');
                     s.removeBlock(bx, by, bz);
                     bumpAround(bx, bz);
+                    checkWaterFill(bx, by, bz);
 
                     const drop = getBlockDrop(type);
                     if (drop && drop !== BlockType.AIR) {
@@ -169,14 +182,46 @@ const Player: React.FC = () => {
                     }
                 }
             } else if (e.button === 2) {
-                // ── Place Block ──
+                // ── Right Click: Interact or Place Block ──
                 if (!hit) return;
                 if (s.gameMode === 'spectator') return;
+
+                // Check if we right-clicked a functional block
+                const [bx2, by2, bz2] = hit.block;
+                const clickedType = s.getBlock(bx2, by2, bz2);
+
+                if (clickedType === BlockType.CRAFTING) {
+                    // Open 3x3 crafting table
+                    s.setOverlay('crafting');
+                    playSound('open');
+                    document.exitPointerLock();
+                    return;
+                }
+                if (clickedType === BlockType.FURNACE || clickedType === BlockType.FURNACE_ON) {
+                    // Open furnace
+                    s.setOverlay('furnace');
+                    playSound('open');
+                    document.exitPointerLock();
+                    return;
+                }
+
+                // Check block actions (TNT, trapdoor, chest, etc.)
+                if (handleBlockAction(bx2, by2, bz2, clickedType)) {
+                    return;
+                }
+
                 const [px, py, pz] = hit.place;
                 if (py < 0 || py > MAX_HEIGHT - 1) return;
 
                 const selected = s.getSelectedBlock();
                 if (!selected) return;
+
+                // If holding food, try eating instead of placing
+                if (BLOCK_DATA[selected]?.foodRestore && BLOCK_DATA[selected]?.isItem) {
+                    s.eatFood();
+                    return;
+                }
+
                 if (BLOCK_DATA[selected]?.isItem) return;
 
                 // Don't place inside player
@@ -190,6 +235,11 @@ const Player: React.FC = () => {
                 s.consumeHotbarItem(s.hotbarSlot);
                 playSound('place');
                 bumpAround(px, pz);
+
+                // If placing water, trigger spreading
+                if (selected === BlockType.WATER) {
+                    spreadWater(px, py, pz);
+                }
             }
         };
 
@@ -240,226 +290,261 @@ const Player: React.FC = () => {
         };
     }, []);
 
-    // ─── Game Loop ─────────────────────────────────────────
+    // ─── Fixed 20 TPS Game Loop ──────────────────────────────
+    const accumulator = useRef(0);
+    const TICK_RATE = 1 / 20; // 50ms per tick
+    const MAX_TICKS_PER_FRAME = 4; // prevent spiral of death
+
     useFrame((_, rawDelta) => {
         const s = storeRef.current;
         if (s.activeOverlay !== 'none' || !s.isLocked || s.screen !== 'playing') return;
 
-        const dt = Math.min(rawDelta, 0.1);
-        const vel = velocity.current;
-        const p = pos.current;
-        const mode = s.gameMode;
+        // Accumulate time, clamp to prevent huge jumps after tab defocus
+        accumulator.current += Math.min(rawDelta, 0.25);
 
-        const forward = new THREE.Vector3();
-        camera.getWorldDirection(forward);
-        const flatForward = forward.clone(); flatForward.y = 0; flatForward.normalize();
-        const right = new THREE.Vector3().crossVectors(flatForward, new THREE.Vector3(0, 1, 0)).normalize();
+        let ticksThisFrame = 0;
 
-        const k = keys.current ?? {};
-        const inWater = isInWater(p.x, p.y - 0.5, p.z);
-        const isSprinting = k.ShiftLeft && !inWater;
+        while (accumulator.current >= TICK_RATE && ticksThisFrame < MAX_TICKS_PER_FRAME) {
+            accumulator.current -= TICK_RATE;
+            ticksThisFrame++;
 
-        // ─── Spectator ───────────────────────────────────────
-        if (mode === 'spectator') {
+            // ── One Physics Tick (dt = TICK_RATE = 50ms) ──
+            const dt = TICK_RATE;
+            const vel = velocity.current;
+            const p = pos.current;
+            const mode = s.gameMode;
+
+            const forward = new THREE.Vector3();
+            camera.getWorldDirection(forward);
+            const flatForward = forward.clone(); flatForward.y = 0; flatForward.normalize();
+            const right = new THREE.Vector3().crossVectors(flatForward, new THREE.Vector3(0, 1, 0)).normalize();
+
+            const k = keys.current ?? {};
+            const feetInWater = isInWater(p.x, p.y - PLAYER_HEIGHT + 0.1, p.z);
+            const bodyInWater = isInWater(p.x, p.y - 0.5, p.z);
+            const headInWater = isInWater(p.x, p.y + 0.1, p.z);
+            const inWater = feetInWater || bodyInWater;
+            const isSprinting = k.ShiftLeft && !inWater;
+
+            // ─── Spectator ───────────────────────────────────
+            if (mode === 'spectator') {
+                const move = new THREE.Vector3();
+                const spd = k.ShiftLeft ? SPECTATOR_SPEED * 2 : SPECTATOR_SPEED;
+                if (k.KeyW) move.add(forward);
+                if (k.KeyS) move.sub(forward);
+                if (k.KeyA) move.sub(right);
+                if (k.KeyD) move.add(right);
+                if (k.Space) move.y += 1;
+                if (k.ControlLeft) move.y -= 1;
+                if (move.lengthSq() > 0) move.normalize().multiplyScalar(spd);
+                p.add(move.multiplyScalar(dt));
+                camera.position.copy(p);
+                s.setPlayerPos([p.x, p.y, p.z]);
+                if (highlightRef.current) highlightRef.current.visible = false;
+                continue;
+            }
+
+            // ─── Creative Fly Toggle ─────────────────────────
+            if (mode === 'creative' && k.Space) {
+                const now = performance.now();
+                if (now - lastJumpTime.current < 300 && !onGround.current) {
+                    isFlying.current = !isFlying.current;
+                    lastJumpTime.current = 0;
+                } else if (onGround.current) {
+                    lastJumpTime.current = now;
+                }
+            }
+
+            // ─── Movement ────────────────────────────────────
+            const flying = mode === 'creative' && isFlying.current;
+            const speed = inWater ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : (flying ? FLY_SPEED : WALK_SPEED));
             const move = new THREE.Vector3();
-            const spd = k.ShiftLeft ? SPECTATOR_SPEED * 2 : SPECTATOR_SPEED;
-            if (k.KeyW) move.add(forward);
-            if (k.KeyS) move.sub(forward);
+            if (k.KeyW) move.add(flatForward);
+            if (k.KeyS) move.sub(flatForward);
             if (k.KeyA) move.sub(right);
             if (k.KeyD) move.add(right);
-            if (k.Space) move.y += 1;
-            if (k.ControlLeft) move.y -= 1;
-            if (move.lengthSq() > 0) move.normalize().multiplyScalar(spd);
-            p.add(move.multiplyScalar(dt));
-            camera.position.copy(p);
-            s.setPlayerPos([p.x, p.y, p.z]);
-            if (highlightRef.current) highlightRef.current.visible = false;
-            return;
-        }
+            if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed);
 
-        // ─── Creative Fly Toggle ─────────────────────────────
-        if (mode === 'creative' && k.Space) {
-            const now = performance.now();
-            if (now - lastJumpTime.current < 300 && !onGround.current) {
-                isFlying.current = !isFlying.current;
-                lastJumpTime.current = 0;
-            } else if (onGround.current) {
-                lastJumpTime.current = now;
-            }
-        }
+            vel.x = move.x;
+            vel.z = move.z;
 
-        // ─── Movement ────────────────────────────────────────
-        const flying = mode === 'creative' && isFlying.current;
-        const speed = inWater ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : (flying ? FLY_SPEED : WALK_SPEED));
-        const move = new THREE.Vector3();
-        if (k.KeyW) move.add(flatForward);
-        if (k.KeyS) move.sub(flatForward);
-        if (k.KeyA) move.sub(right);
-        if (k.KeyD) move.add(right);
-        if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed);
+            if (flying) {
+                vel.y = 0;
+                if (k.Space) vel.y = FLY_SPEED;
+                if (k.ShiftLeft) vel.y = -FLY_SPEED;
+            } else if (inWater) {
+                // ─── Improved Swimming Physics ──────────────
+                // Depth-proportional water resistance
+                const submersion = (feetInWater ? 0.33 : 0) + (bodyInWater ? 0.33 : 0) + (headInWater ? 0.34 : 0);
+                const waterDrag = 0.8 - (submersion * 0.15); // 0.65 to 0.80
 
-        vel.x = move.x;
-        vel.z = move.z;
+                vel.y *= waterDrag;
 
-        if (flying) {
-            vel.y = 0;
-            if (k.Space) vel.y = FLY_SPEED;
-            if (k.ShiftLeft) vel.y = -FLY_SPEED;
-        } else if (inWater) {
-            // Swimming physics
-            vel.y *= 0.85; // Water resistance
-            if (k.Space) vel.y = Math.min(vel.y + 12 * dt, 3);
-            else vel.y += (GRAVITY * 0.3) * dt; // Slow sinking
-            vel.x *= 0.85;
-            vel.z *= 0.85;
-            // Swim sounds
-            swimTimer.current += dt;
-            if (swimTimer.current > 0.8 && (Math.abs(vel.x) > 0.3 || Math.abs(vel.z) > 0.3)) {
-                playSound('swim');
-                swimTimer.current = 0;
-            }
-        } else {
-            if (k.Space && onGround.current) {
-                vel.y = JUMP_FORCE;
-                onGround.current = false;
-                fallStart.current = p.y;
-            }
-            vel.y += GRAVITY * dt;
-            if (vel.y < TERMINAL_VEL) vel.y = TERMINAL_VEL;
-        }
-
-        // Track fall start
-        if (!onGround.current && vel.y > 0 && !flying && !inWater) {
-            fallStart.current = Math.max(fallStart.current, p.y);
-        }
-        if (!onGround.current && vel.y < -1 && !flying && !inWater) {
-            fallStart.current = Math.max(fallStart.current, p.y);
-        }
-
-        // ─── Collision ───────────────────────────────────────
-        const w = PLAYER_WIDTH;
-
-        const nx = p.x + vel.x * dt;
-        if (
-            isSolid(nx - w, p.y - PLAYER_HEIGHT, p.z) || isSolid(nx + w, p.y - PLAYER_HEIGHT, p.z) ||
-            isSolid(nx - w, p.y - 0.5, p.z) || isSolid(nx + w, p.y - 0.5, p.z) ||
-            isSolid(nx - w, p.y, p.z) || isSolid(nx + w, p.y, p.z)
-        ) { vel.x = 0; } else { p.x = nx; }
-
-        const nz = p.z + vel.z * dt;
-        if (
-            isSolid(p.x, p.y - PLAYER_HEIGHT, nz - w) || isSolid(p.x, p.y - PLAYER_HEIGHT, nz + w) ||
-            isSolid(p.x, p.y - 0.5, nz - w) || isSolid(p.x, p.y - 0.5, nz + w) ||
-            isSolid(p.x, p.y, nz - w) || isSolid(p.x, p.y, nz + w)
-        ) { vel.z = 0; } else { p.z = nz; }
-
-        const prevY = p.y;
-        const ny = p.y + vel.y * dt;
-        const wasInAir = !onGround.current;
-        onGround.current = false;
-
-        if (vel.y < 0 && !flying) {
-            if (
-                isSolid(p.x - w, ny - PLAYER_HEIGHT, p.z - w) || isSolid(p.x + w, ny - PLAYER_HEIGHT, p.z - w) ||
-                isSolid(p.x - w, ny - PLAYER_HEIGHT, p.z + w) || isSolid(p.x + w, ny - PLAYER_HEIGHT, p.z + w)
-            ) {
-                p.y = Math.floor(ny - PLAYER_HEIGHT) + 1 + PLAYER_HEIGHT;
-
-                // ─── Fall Damage ─────────────────────────────────
-                if (wasInAir && mode === 'survival' && !inWater) {
-                    const fallDist = fallStart.current - p.y;
-                    if (fallDist > FALL_DAMAGE_THRESHOLD) {
-                        const damage = Math.floor(fallDist - FALL_DAMAGE_THRESHOLD);
-                        if (damage > 0) {
-                            s.setHealth(s.health - damage);
-                            playSound('hurt');
-                            playSound('land');
-                        }
-                    } else if (fallDist > 1) {
-                        playSound('land');
+                if (k.Space) {
+                    // Buoyancy: stronger when not at surface, weaker at surface
+                    if (headInWater) {
+                        vel.y = Math.min(vel.y + 15 * dt, 3.5); // Strong upward push
+                    } else if (bodyInWater) {
+                        vel.y = Math.min(vel.y + 8 * dt, 2.0); // At surface, gentle float
+                    } else {
+                        // Head is above water, can jump out
+                        vel.y = JUMP_FORCE * 0.6;
                     }
+                } else {
+                    // Slow sinking with buoyancy equilibrium
+                    const buoyancy = bodyInWater ? GRAVITY * 0.15 : GRAVITY * 0.4;
+                    vel.y += buoyancy * dt;
                 }
 
-                vel.y = 0;
-                onGround.current = true;
+                // Horizontal water resistance
+                vel.x *= waterDrag;
+                vel.z *= waterDrag;
+
+                // Swim sounds
+                swimTimer.current += dt;
+                if (swimTimer.current > 0.8 && (Math.abs(vel.x) > 0.3 || Math.abs(vel.z) > 0.3)) {
+                    playSound('swim');
+                    swimTimer.current = 0;
+                }
+            } else {
+                if (k.Space && onGround.current) {
+                    vel.y = JUMP_FORCE;
+                    onGround.current = false;
+                    fallStart.current = p.y;
+                }
+                vel.y += GRAVITY * dt;
+                if (vel.y < TERMINAL_VEL) vel.y = TERMINAL_VEL;
+            }
+
+            // Track fall start
+            if (!onGround.current && !flying && !inWater) {
+                if (vel.y > 0) fallStart.current = Math.max(fallStart.current, p.y);
+            }
+
+            // ─── Collision ───────────────────────────────────
+            const w = PLAYER_WIDTH;
+
+            const nx = p.x + vel.x * dt;
+            if (
+                isSolid(nx - w, p.y - PLAYER_HEIGHT, p.z) || isSolid(nx + w, p.y - PLAYER_HEIGHT, p.z) ||
+                isSolid(nx - w, p.y - 0.5, p.z) || isSolid(nx + w, p.y - 0.5, p.z) ||
+                isSolid(nx - w, p.y, p.z) || isSolid(nx + w, p.y, p.z)
+            ) { vel.x = 0; } else { p.x = nx; }
+
+            const nz = p.z + vel.z * dt;
+            if (
+                isSolid(p.x, p.y - PLAYER_HEIGHT, nz - w) || isSolid(p.x, p.y - PLAYER_HEIGHT, nz + w) ||
+                isSolid(p.x, p.y - 0.5, nz - w) || isSolid(p.x, p.y - 0.5, nz + w) ||
+                isSolid(p.x, p.y, nz - w) || isSolid(p.x, p.y, nz + w)
+            ) { vel.z = 0; } else { p.z = nz; }
+
+            const ny = p.y + vel.y * dt;
+            const wasInAir = !onGround.current;
+            onGround.current = false;
+
+            if (vel.y < 0 && !flying) {
+                if (
+                    isSolid(p.x - w, ny - PLAYER_HEIGHT, p.z - w) || isSolid(p.x + w, ny - PLAYER_HEIGHT, p.z - w) ||
+                    isSolid(p.x - w, ny - PLAYER_HEIGHT, p.z + w) || isSolid(p.x + w, ny - PLAYER_HEIGHT, p.z + w)
+                ) {
+                    p.y = Math.floor(ny - PLAYER_HEIGHT) + 1 + PLAYER_HEIGHT;
+
+                    // ─── Fall Damage ───────────────────────────
+                    if (wasInAir && mode === 'survival' && !inWater) {
+                        const fallDist = fallStart.current - p.y;
+                        if (fallDist > FALL_DAMAGE_THRESHOLD) {
+                            const damage = Math.floor(fallDist - FALL_DAMAGE_THRESHOLD);
+                            if (damage > 0) {
+                                s.setHealth(s.health - damage);
+                                playSound('hurt');
+                                playSound('land');
+                            }
+                        } else if (fallDist > 1) {
+                            playSound('land');
+                        }
+                    }
+
+                    vel.y = 0;
+                    onGround.current = true;
+                    isFlying.current = false;
+                    fallStart.current = p.y;
+                } else { p.y = ny; }
+            } else {
+                if (!flying && isSolid(p.x, ny + 0.2, p.z)) { vel.y = 0; }
+                else { p.y = ny; }
+            }
+
+            // Track fall distance going up
+            if (!onGround.current && !flying && !inWater && vel.y > 0) {
+                fallStart.current = p.y;
+            }
+
+            // ─── Sprint Hunger Drain ─────────────────────────
+            if (mode === 'survival' && isSprinting && (Math.abs(vel.x) > 0.5 || Math.abs(vel.z) > 0.5)) {
+                hungerTimer.current += dt;
+                if (hungerTimer.current > 1) {
+                    s.setHunger(s.hunger - SPRINT_HUNGER_RATE);
+                    hungerTimer.current = 0;
+                }
+            }
+
+            // ─── Health regen from full hunger ────────────────
+            if (mode === 'survival' && s.hunger >= 18 && s.health < s.maxHealth) {
+                hungerTimer.current += dt;
+                if (hungerTimer.current > 4) {
+                    s.setHealth(s.health + 1);
+                    s.setHunger(s.hunger - 0.5);
+                    hungerTimer.current = 0;
+                }
+            }
+
+            // ─── Starvation damage ───────────────────────────
+            if (mode === 'survival' && s.hunger <= 0) {
+                hungerTimer.current += dt;
+                if (hungerTimer.current > 4) {
+                    s.setHealth(s.health - 1);
+                    playSound('hurt');
+                    hungerTimer.current = 0;
+                }
+            }
+
+            // ─── Void Safety ─────────────────────────────────
+            if (p.y < -64) {
+                if (mode === 'survival') {
+                    s.setHealth(s.health - 4);
+                    playSound('hurt');
+                }
+                const spawnY = getSpawnHeight(8, 8);
+                p.set(8, spawnY + 2, 8);
+                vel.set(0, 0, 0);
                 isFlying.current = false;
                 fallStart.current = p.y;
-            } else { p.y = ny; }
-        } else {
-            if (!flying && isSolid(p.x, ny + 0.2, p.z)) { vel.y = 0; }
-            else { p.y = ny; }
-        }
+            }
+            if (p.y > MAX_HEIGHT + 50) {
+                p.y = MAX_HEIGHT + 10;
+                vel.y = 0;
+            }
 
-        // Track fall distance
-        if (!onGround.current && !flying && !inWater && vel.y > 0) {
-            fallStart.current = p.y;
-        }
+            // ─── Step Sounds ─────────────────────────────────
+            if (onGround.current && (Math.abs(vel.x) > 0.5 || Math.abs(vel.z) > 0.5)) {
+                stepTimer.current += dt;
+                const interval = isSprinting ? 0.32 : 0.45;
+                if (stepTimer.current > interval) {
+                    playSound('step');
+                    stepTimer.current = 0;
+                }
+            } else { stepTimer.current = 0.3; }
 
-        // ─── Sprint Hunger Drain ─────────────────────────────
-        if (mode === 'survival' && isSprinting && (Math.abs(vel.x) > 0.5 || Math.abs(vel.z) > 0.5)) {
-            hungerTimer.current += dt;
-            if (hungerTimer.current > 1) {
-                s.setHunger(s.hunger - SPRINT_HUNGER_RATE);
-                hungerTimer.current = 0;
+            // ─── View Bobbing ────────────────────────────────
+            if (s.settings.viewBobbing && onGround.current && move.lengthSq() > 0) {
+                bobPhase.current += dt * speed * 1.2;
+                p.y += Math.sin(bobPhase.current * 2) * 0.03;
             }
         }
 
-        // ─── Health regen from full hunger ────────────────────
-        if (mode === 'survival' && s.hunger >= 18 && s.health < s.maxHealth) {
-            // Slow regen
-            hungerTimer.current += dt;
-            if (hungerTimer.current > 4) {
-                s.setHealth(s.health + 1);
-                s.setHunger(s.hunger - 0.5);
-                hungerTimer.current = 0;
-            }
-        }
-
-        // ─── Starvation damage ───────────────────────────────
-        if (mode === 'survival' && s.hunger <= 0) {
-            hungerTimer.current += dt;
-            if (hungerTimer.current > 4) {
-                s.setHealth(s.health - 1);
-                playSound('hurt');
-                hungerTimer.current = 0;
-            }
-        }
-
-        // ─── Void Safety ─────────────────────────────────────
-        if (p.y < -64) {
-            if (mode === 'survival') {
-                s.setHealth(s.health - 4);
-                playSound('hurt');
-            }
-            const spawnY = getSpawnHeight(8, 8);
-            p.set(8, spawnY + 2, 8);
-            vel.set(0, 0, 0);
-            isFlying.current = false;
-            fallStart.current = p.y;
-        }
-        if (p.y > MAX_HEIGHT + 50) {
-            p.y = MAX_HEIGHT + 10;
-            vel.y = 0;
-        }
-
-        // ─── Step Sounds ─────────────────────────────────────
-        if (onGround.current && (Math.abs(vel.x) > 0.5 || Math.abs(vel.z) > 0.5)) {
-            stepTimer.current += dt;
-            const interval = isSprinting ? 0.32 : 0.45;
-            if (stepTimer.current > interval) {
-                playSound('step');
-                stepTimer.current = 0;
-            }
-        } else { stepTimer.current = 0.3; }
-
-        // ─── View Bobbing ────────────────────────────────────
-        if (s.settings.viewBobbing && onGround.current && move.lengthSq() > 0) {
-            bobPhase.current += dt * speed * 1.2;
-            p.y += Math.sin(bobPhase.current * 2) * 0.03;
-        }
-
-        camera.position.copy(p);
-        s.setPlayerPos([p.x, p.y, p.z]);
+        // ── Camera sync (runs every frame for smooth visuals) ──
+        camera.position.copy(pos.current);
+        s.setPlayerPos([pos.current.x, pos.current.y, pos.current.z]);
 
         // ─── Block Highlight ─────────────────────────────────
         const hit = raycastBlock();

@@ -24,10 +24,21 @@ function mulberry32(a: number): () => number {
     };
 }
 
-const WORLD_SEED = 42069;
-const rng = mulberry32(WORLD_SEED);
-const n2 = createNoise2D(rng);
-const n3 = createNoise3D(rng);
+let currentSeed = Math.floor(Math.random() * 2147483647);
+let n2 = createNoise2D(mulberry32(currentSeed));
+let n3 = createNoise3D(mulberry32(currentSeed));
+
+/** Initialize terrain with a specific seed. Must be called before any chunks are generated. */
+export function initSeed(seed: number): void {
+    currentSeed = seed;
+    n2 = createNoise2D(mulberry32(seed));
+    n3 = createNoise3D(mulberry32(seed));
+}
+
+/** Get the current world seed */
+export function getCurrentSeed(): number {
+    return currentSeed;
+}
 
 // ─── Noise Helpers ───────────────────────────────────────
 function octave2D(x: number, z: number, octaves: number, persistence: number, scale: number): number {
@@ -104,16 +115,25 @@ function getOre(x: number, y: number, z: number): number | null {
     return null;
 }
 
-// ─── Chunk Data Type ─────────────────────────────────────
-export type ChunkData = Record<string, number>;
+// ─── Chunk Data Type ─────────────────────────────
+// Flat Uint16Array: index = y * 256 + lz * 16 + lx
+// Size = MAX_HEIGHT * CHUNK_SIZE * CHUNK_SIZE = 256 * 16 * 16 = 65536
+export const CHUNK_VOLUME = MAX_HEIGHT * CHUNK_SIZE * CHUNK_SIZE;
+export type ChunkData = Uint16Array;
 
+/** Fast block index: y * 256 + lz * 16 + lx */
+export function blockIndex(lx: number, y: number, lz: number): number {
+    return (y << 8) | (lz << 4) | lx; // equivalent to y*256 + lz*16 + lx
+}
+
+/** Legacy string key (kept for backwards compat) */
 export function bkey(lx: number, y: number, lz: number): string {
     return `${lx},${y},${lz}`;
 }
 
 // ─── Main Generator ─────────────────────────────────────
 export function generateChunk(cx: number, cz: number): ChunkData {
-    const blocks: ChunkData = {};
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     const wx0 = cx * CHUNK_SIZE;
     const wz0 = cz * CHUNK_SIZE;
     const trees: { x: number; y: number; z: number; biome: Biome }[] = [];
@@ -132,7 +152,7 @@ export function generateChunk(cx: number, cz: number): ChunkData {
                 if (y === 0) {
                     bt = BlockType.BEDROCK;
                 } else if (y <= 3 && n3(wx * 0.5, y * 0.5, wz * 0.5) > 0.3) {
-                    bt = BlockType.BEDROCK; // Mixed bedrock layer
+                    bt = BlockType.BEDROCK;
                 } else if (y === h) {
                     switch (biome) {
                         case 'desert': bt = BlockType.SAND; break;
@@ -145,42 +165,44 @@ export function generateChunk(cx: number, cz: number): ChunkData {
                 } else {
                     bt = getOre(wx, y, wz) ?? BlockType.STONE;
                 }
-                blocks[bkey(lx, y, lz)] = bt;
+                blocks[blockIndex(lx, y, lz)] = bt;
             }
 
             // Water
             for (let y = h + 1; y <= SEA_LEVEL; y++) {
-                if (!blocks[bkey(lx, y, lz)]) blocks[bkey(lx, y, lz)] = BlockType.WATER;
+                const idx = blockIndex(lx, y, lz);
+                if (!blocks[idx]) blocks[idx] = BlockType.WATER;
             }
 
             // Sandstone under desert
             if (biome === 'desert') {
                 for (let y = h - 4; y > h - 8 && y > 0; y--) {
-                    if (blocks[bkey(lx, y, lz)] === BlockType.STONE) {
-                        blocks[bkey(lx, y, lz)] = BlockType.SANDSTONE;
+                    const idx = blockIndex(lx, y, lz);
+                    if (blocks[idx] === BlockType.STONE) {
+                        blocks[idx] = BlockType.SANDSTONE;
                     }
                 }
             }
 
-            // Flora (skip corners for tree spacing)
+            // Flora
             if (h > SEA_LEVEL) {
                 const fn = n2(wx * 0.8, wz * 0.8);
                 if ((biome === 'plains' || biome === 'forest') && fn > 0.3 && (wx + wz) % 3 === 0) {
-                    blocks[bkey(lx, h + 1, lz)] = BlockType.TALL_GRASS;
+                    blocks[blockIndex(lx, h + 1, lz)] = BlockType.TALL_GRASS;
                 }
                 if (biome === 'plains' && fn > 0.5 && (wx * wz) % 7 === 0) {
-                    blocks[bkey(lx, h + 1, lz)] = (wx + wz) % 2 === 0 ? BlockType.FLOWER_RED : BlockType.FLOWER_YELLOW;
+                    blocks[blockIndex(lx, h + 1, lz)] = (wx + wz) % 2 === 0 ? BlockType.FLOWER_RED : BlockType.FLOWER_YELLOW;
                 }
                 if (biome === 'desert' && fn > 0.6 && lx > 2 && lx < 13 && lz > 2 && lz < 13) {
                     const ch = 1 + ((wx * 7 + wz * 13) % 3);
-                    for (let dy = 0; dy < ch; dy++) blocks[bkey(lx, h + 1 + dy, lz)] = BlockType.CACTUS;
+                    for (let dy = 0; dy < ch; dy++) blocks[blockIndex(lx, h + 1 + dy, lz)] = BlockType.CACTUS;
                 }
                 if (biome === 'plains' && fn > 0.72 && (wx * wz) % 31 === 0) {
-                    blocks[bkey(lx, h + 1, lz)] = BlockType.PUMPKIN;
+                    blocks[blockIndex(lx, h + 1, lz)] = BlockType.PUMPKIN;
                 }
             }
 
-            // Trees (keep within chunk bounds for perf)
+            // Trees
             if (
                 (biome === 'forest' || biome === 'plains' || biome === 'swamp' || biome === 'jungle' || biome === 'taiga') &&
                 h > SEA_LEVEL && lx > 2 && lx < 13 && lz > 2 && lz < 13
@@ -206,7 +228,7 @@ export function generateChunk(cx: number, cz: number): ChunkData {
         const trunkH = t.biome === 'jungle' ? 6 + ((Math.abs(n2(wx0 + t.x, wz0 + t.z) * 3)) | 0) :
             4 + ((Math.abs(n2(wx0 + t.x, wz0 + t.z) * 3)) | 0);
         for (let dy = 0; dy < trunkH; dy++) {
-            blocks[bkey(t.x, t.y + dy, t.z)] = logType;
+            blocks[blockIndex(t.x, t.y + dy, t.z)] = logType;
         }
         const leafStart = trunkH - 2;
         const isCone = t.biome === 'taiga';
@@ -218,8 +240,8 @@ export function generateChunk(cx: number, cz: number): ChunkData {
                     if (Math.abs(dx) === r && Math.abs(dz) === r && r > 1) continue;
                     const lx2 = t.x + dx, lz2 = t.z + dz;
                     if (lx2 >= 0 && lx2 < CHUNK_SIZE && lz2 >= 0 && lz2 < CHUNK_SIZE) {
-                        const k = bkey(lx2, t.y + dy, lz2);
-                        if (!blocks[k]) blocks[k] = BlockType.LEAVES;
+                        const idx = blockIndex(lx2, t.y + dy, lz2);
+                        if (!blocks[idx]) blocks[idx] = BlockType.LEAVES;
                     }
                 }
             }

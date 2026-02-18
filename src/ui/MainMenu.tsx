@@ -56,6 +56,7 @@ const WorldCreate: React.FC = () => {
     const setScreen = useGameStore((s) => s.setScreen);
     const setGameMode = useGameStore((s) => s.setGameMode);
     const resetWorld = useGameStore((s) => s.resetWorld);
+    const setWorldSeed = useGameStore((s) => s.setWorldSeed);
     const gameMode = useGameStore((s) => s.gameMode);
     const setHotbar = useGameStore((s) => s.setHotbar);
 
@@ -69,7 +70,24 @@ const WorldCreate: React.FC = () => {
         spectator: '👁 Lataj przez bloki, obserwuj świat',
     };
 
+    /** Convert string to deterministic hash */
+    const hashSeed = (s: string): number => {
+        let h = 0;
+        for (let i = 0; i < s.length; i++) {
+            h = ((h << 5) - h) + s.charCodeAt(i);
+            h = h & h; // Convert to 32-bit int
+        }
+        return Math.abs(h) || 1;
+    };
+
     const startGame = () => {
+        // Compute seed: use hash of string, or random if empty
+        const finalSeed = seed.trim()
+            ? (/^\d+$/.test(seed.trim()) ? parseInt(seed.trim()) : hashSeed(seed.trim()))
+            : Math.floor(Math.random() * 2147483647);
+
+        // Set seed BEFORE resetting world
+        setWorldSeed(finalSeed);
         setGameMode(mode);
         resetWorld();
 
@@ -80,16 +98,7 @@ const WorldCreate: React.FC = () => {
             setHotbar(EMPTY_HOTBAR.map(() => ({ id: 0, count: 0 })));
         }
 
-        if (seed) {
-            // Simple seed hash
-            let h = 0;
-            for (let i = 0; i < seed.length; i++) {
-                h = ((h << 5) - h) + seed.charCodeAt(i);
-                h = h & h;
-            }
-            // Would pass to terrain gen if we had seed support
-        }
-
+        console.log(`[MC] Starting world "${worldName}" with seed: ${finalSeed}`);
         setScreen('playing');
     };
 

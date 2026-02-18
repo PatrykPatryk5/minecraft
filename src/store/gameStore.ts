@@ -12,8 +12,9 @@
  */
 
 import { create } from 'zustand';
-import { BlockType, DEFAULT_HOTBAR, EMPTY_HOTBAR } from '../core/blockTypes';
+import { BlockType, DEFAULT_HOTBAR, EMPTY_HOTBAR, BLOCK_DATA } from '../core/blockTypes';
 import type { ChunkData } from '../core/terrainGen';
+import { blockIndex, CHUNK_VOLUME } from '../core/terrainGen';
 
 // ─── Helpers ─────────────────────────────────────────────
 export const chunkKey = (cx: number, cz: number): string => `${cx},${cz}`;
@@ -24,7 +25,7 @@ export type GameMode = 'survival' | 'creative' | 'spectator';
 export type GameScreen = 'mainMenu' | 'worldCreate' | 'settings' | 'playing' | 'paused';
 
 /** Which overlay is open (only one at a time) */
-export type ActiveOverlay = 'none' | 'pause' | 'inventory' | 'crafting';
+export type ActiveOverlay = 'none' | 'pause' | 'inventory' | 'crafting' | 'furnace';
 
 export interface InventorySlot {
     id: number;   // block/item type
@@ -40,6 +41,16 @@ export interface GameSettings {
     graphics: 'fast' | 'fancy' | 'fabulous';
     showFps: boolean;
     viewBobbing: boolean;
+}
+
+export interface FurnaceState {
+    inputSlot: InventorySlot;
+    fuelSlot: InventorySlot;
+    outputSlot: InventorySlot;
+    burnTimeRemaining: number;   // ticks remaining of current fuel
+    burnTimeTotal: number;       // total burn time of current fuel
+    cookProgress: number;        // ticks cooked so far
+    cookTimeTotal: number;       // ticks needed (200 = 10s at 20tps)
 }
 
 export interface GameState {
@@ -68,6 +79,7 @@ export interface GameState {
     removeBlock: (x: number, y: number, z: number) => void;
     bumpVersion: (cx: number, cz: number) => void;
     resetWorld: () => void;
+    setWorldSeed: (seed: number) => void;
 
     // ── Player ────────────────────────────────────────────
     playerPos: [number, number, number];
@@ -83,7 +95,7 @@ export interface GameState {
     // ── XP System ──────────────────────────────────────────
     xp: number;
     xpLevel: number;
-    xpProgress: number; // 0-1 within current level
+    xpProgress: number;
     addXp: (amount: number) => void;
 
     // ── Oxygen (underwater) ────────────────────────────────
@@ -100,25 +112,32 @@ export interface GameState {
     setHotbarSlot: (s: number) => void;
     hotbar: InventorySlot[];
     setHotbar: (h: InventorySlot[]) => void;
-
-    /** Main inventory (27 slots like MC) */
     inventory: InventorySlot[];
     setInventory: (inv: InventorySlot[]) => void;
-
-    /** Add an item to inventory/hotbar (returns false if full) */
     addItem: (id: number, count?: number) => boolean;
-    /** Remove item from hotbar by slot index (decrements count) */
     consumeHotbarItem: (slot: number) => void;
-    /** Get selected block type from hotbar */
     getSelectedBlock: () => number;
 
-    // Crafting grid (3x3 = 9 slots)
-    craftingGrid: number[];
+    // ── Crafting ──────────────────────────────────────────
+    craftingGrid: number[];           // 3x3 for table
     setCraftingGrid: (g: number[]) => void;
+    inventoryCraftingGrid: number[];  // 2x2 for inventory
+    setInventoryCraftingGrid: (g: number[]) => void;
+
+    // ── Furnace ───────────────────────────────────────────
+    furnace: FurnaceState;
+    setFurnace: (f: FurnaceState) => void;
+
+    // ── Food / Eat ────────────────────────────────────────
+    eatFood: () => void;
 
     // ── Day/Night ─────────────────────────────────────────
     dayTime: number;
     setDayTime: (t: number) => void;
+
+    // ── Mobs ──────────────────────────────────────────────
+    mobs: any[];
+    setMobs: (m: any[]) => void;
 
     // ── UI State ──────────────────────────────────────────
     isPaused: boolean;
@@ -210,13 +229,14 @@ const useGameStore = create<GameState>((set, get) => ({
     },
 
     getBlock: (x, y, z) => {
+        if (y < 0 || y > 255) return 0;
         const cx = Math.floor(x / 16);
         const cz = Math.floor(z / 16);
         const chunk = get().chunks[chunkKey(cx, cz)];
         if (!chunk) return 0;
         const lx = ((x % 16) + 16) % 16;
         const lz = ((z % 16) + 16) % 16;
-        return chunk[blockKey(lx, y, lz)] ?? 0;
+        return chunk[blockIndex(lx, y, lz)];
     },
 
     addBlock: (x, y, z, typeId) => {
@@ -226,22 +246,25 @@ const useGameStore = create<GameState>((set, get) => ({
         const key = chunkKey(cx, cz);
         const lx = ((x % 16) + 16) % 16;
         const lz = ((z % 16) + 16) % 16;
-        set((s) => ({
-            chunks: { ...s.chunks, [key]: { ...(s.chunks[key] ?? {}), [blockKey(lx, y, lz)]: typeId } },
-        }));
+        const state = get();
+        let chunk = state.chunks[key];
+        if (!chunk) {
+            chunk = new Uint16Array(CHUNK_VOLUME);
+            set((s) => ({ chunks: { ...s.chunks, [key]: chunk! } }));
+        }
+        chunk[blockIndex(lx, y, lz)] = typeId;
     },
 
     removeBlock: (x, y, z) => {
+        if (y < 0 || y > 255) return;
         const cx = Math.floor(x / 16);
         const cz = Math.floor(z / 16);
         const key = chunkKey(cx, cz);
         const lx = ((x % 16) + 16) % 16;
         const lz = ((z % 16) + 16) % 16;
-        set((s) => {
-            const chunk = { ...(s.chunks[key] ?? {}) };
-            delete chunk[blockKey(lx, y, lz)];
-            return { chunks: { ...s.chunks, [key]: chunk } };
-        });
+        const chunk = get().chunks[key];
+        if (!chunk) return;
+        chunk[blockIndex(lx, y, lz)] = 0;
     },
 
     bumpVersion: (cx, cz) => {
@@ -255,13 +278,14 @@ const useGameStore = create<GameState>((set, get) => ({
         chunks: {},
         chunkVersions: {},
         generatedChunks: new Set(),
-        worldSeed: Math.floor(Math.random() * 999999),
         playerPos: [0, 80, 0] as [number, number, number],
         health: 20,
         hunger: 20,
         dayTime: 0.3,
         activeOverlay: 'none' as ActiveOverlay,
     }),
+
+    setWorldSeed: (seed) => set({ worldSeed: seed }),
 
     // ── Player ────────────────────────────────────────────
     playerPos: [0, 80, 0] as [number, number, number],
@@ -375,10 +399,40 @@ const useGameStore = create<GameState>((set, get) => ({
     // ── Crafting ──────────────────────────────────────────
     craftingGrid: Array(9).fill(0),
     setCraftingGrid: (g) => set({ craftingGrid: g }),
+    inventoryCraftingGrid: Array(4).fill(0),
+    setInventoryCraftingGrid: (g) => set({ inventoryCraftingGrid: g }),
+
+    // ── Furnace ───────────────────────────────────────────
+    furnace: {
+        inputSlot: emptySlot(),
+        fuelSlot: emptySlot(),
+        outputSlot: emptySlot(),
+        burnTimeRemaining: 0,
+        burnTimeTotal: 0,
+        cookProgress: 0,
+        cookTimeTotal: 200,
+    },
+    setFurnace: (f) => set({ furnace: f }),
+
+    // ── Food / Eat ────────────────────────────────────────
+    eatFood: () => {
+        const s = get();
+        const slot = s.hotbar[s.hotbarSlot];
+        if (!slot || !slot.id) return;
+        const info = BLOCK_DATA[slot.id];
+        if (!info?.foodRestore) return;
+        if (s.hunger >= s.maxHunger) return;
+        s.setHunger(Math.min(s.maxHunger, s.hunger + info.foodRestore));
+        s.consumeHotbarItem(s.hotbarSlot);
+    },
 
     // ── Day/Night ─────────────────────────────────────────
     dayTime: 0.3,
     setDayTime: (t) => set({ dayTime: t }),
+
+    // ── Mobs ──────────────────────────────────────────────
+    mobs: [],
+    setMobs: (m) => set({ mobs: m }),
 
     // ── UI ────────────────────────────────────────────────
     isPaused: false,

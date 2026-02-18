@@ -12,11 +12,12 @@
 import React, { useRef, useCallback, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import useGameStore, { chunkKey } from '../store/gameStore';
-import { generateChunk, CHUNK_SIZE } from '../core/terrainGen';
+import { generateChunk, CHUNK_SIZE, initSeed } from '../core/terrainGen';
 import Chunk from './Chunk';
 
 const UNLOAD_BUFFER = 3;
-const MAX_PENDING = 4; // max chunks being generated at once
+const MAX_PENDING = 6; // max chunks being generated at once
+const RECALCULATE_COOLDOWN = 1000; // ms between recalculates
 
 interface ChunkEntry {
     cx: number;
@@ -34,6 +35,7 @@ const World: React.FC = () => {
     const pendingKeysRef = useRef(new Set<string>());
     const activeChunksRef = useRef<ChunkEntry[]>([]);
     const lastPlayerChunkRef = useRef<string>('');
+    const lastRecalcTime = useRef(0);
     const [renderTick, setRenderTick] = React.useState(0);
     const workerRef = useRef<Worker | null>(null);
     const workerReady = useRef(false);
@@ -47,7 +49,11 @@ const World: React.FC = () => {
             );
 
             worker.onmessage = (e: MessageEvent) => {
-                const { cx, cz, data } = e.data;
+                const { type: msgType, cx, cz, data } = e.data;
+
+                // Ignore non-chunk messages (like 'ready' from seed init)
+                if (msgType === 'ready') return;
+
                 const key = chunkKey(cx, cz);
 
                 // Update Zustand store (triggers Chunk component re-render)
@@ -65,9 +71,14 @@ const World: React.FC = () => {
                 workerReady.current = false;
             };
 
+            // Initialize seed in both main thread and worker
+            const seed = useGameStore.getState().worldSeed;
+            initSeed(seed);
+            worker.postMessage({ type: 'init', seed });
+
             workerRef.current = worker;
             workerReady.current = true;
-            console.log('[World] Terrain Worker initialized');
+            console.log(`[World] Terrain Worker initialized with seed: ${seed}`);
         } catch (err) {
             console.warn('[World] Worker not available, using sync fallback');
             workerReady.current = false;
@@ -153,23 +164,30 @@ const World: React.FC = () => {
 
     // Per-frame: send chunk generation requests + check player movement
     useFrame(() => {
-        // Send pending requests to worker (limited to MAX_PENDING)
+        // Send pending requests to worker (throttled)
+        let sent = 0;
         while (
             loadQueueRef.current.length > 0 &&
-            pendingKeysRef.current.size < MAX_PENDING
+            pendingKeysRef.current.size < MAX_PENDING &&
+            sent < 2
         ) {
             const entry = loadQueueRef.current.shift()!;
             requestChunk(entry.cx, entry.cz);
+            sent++;
         }
 
-        // Check if player moved to new chunk
+        // Check if player moved to new chunk (throttled)
         const pos = useGameStore.getState().playerPos;
         const pcx = Math.floor(pos[0] / CHUNK_SIZE);
         const pcz = Math.floor(pos[2] / CHUNK_SIZE);
         const currentKey = chunkKey(pcx, pcz);
         if (currentKey !== lastPlayerChunkRef.current) {
-            lastPlayerChunkRef.current = currentKey;
-            recalculate();
+            const now = performance.now();
+            if (now - lastRecalcTime.current > RECALCULATE_COOLDOWN) {
+                lastPlayerChunkRef.current = currentKey;
+                lastRecalcTime.current = now;
+                recalculate();
+            }
         }
     });
 
