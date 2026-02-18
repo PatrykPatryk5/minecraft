@@ -8,9 +8,9 @@
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import useGameStore, { chunkKey, blockKey } from '../store/gameStore';
+import useGameStore, { chunkKey } from '../store/gameStore';
 import { BlockType } from '../core/blockTypes';
-import { CHUNK_SIZE, SEA_LEVEL } from '../core/terrainGen';
+import { CHUNK_SIZE, SEA_LEVEL, blockIndex } from '../core/terrainGen';
 
 const waterVertexShader = `
   uniform float uTime;
@@ -85,7 +85,7 @@ const WaterSurface: React.FC = () => {
                 let hasWater = false;
                 for (let lx = 0; lx < CHUNK_SIZE; lx += 4) {
                     for (let lz = 0; lz < CHUNK_SIZE; lz += 4) {
-                        if (chunk[blockKey(lx, SEA_LEVEL, lz)] === BlockType.WATER) {
+                        if (chunk[blockIndex(lx, SEA_LEVEL, lz)] === BlockType.WATER) {
                             hasWater = true;
                             break;
                         }
