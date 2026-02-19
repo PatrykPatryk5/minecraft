@@ -695,7 +695,94 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.FLOWER_YELLOW: fillNoise(ctx, [60, 140, 40], 20, seed);
             for (let y = 4; y < 9; y++) for (let x = 5; x < 11; x++) if (rng() < 0.6) px(ctx, x, y, 240, 220, 40); return;
         case BlockType.TALL_GRASS: fillNoise(ctx, [60, 140, 40], 25, seed); return;
+        case BlockType.OAK_SAPLING: {
+            // Sapling: small stem + leaves
+            const rng = sRng(seed);
+            // Stem
+            for (let y = 8; y < 16; y++) px(ctx, 7, y, 107, 84, 51);
+            // Leaves
+            for (let i = 0; i < 15; i++) {
+                const sx = (rng() * 10 + 3) | 0;
+                const sy = (rng() * 10 + 2) | 0;
+                if (Math.abs(sx - 7.5) + Math.abs(sy - 10) < 6) {
+                    px(ctx, sx, sy, 40 + (rng() * 20 | 0), 100 + (rng() * 40 | 0), 30);
+                }
+            }
+            return;
+        }
         case BlockType.LAVA: drawLava(ctx, seed); return;
+
+        case BlockType.END_STONE: {
+            // Inverted/Negative cobble look
+            ctx.fillStyle = '#dfdfaa';
+            ctx.fillRect(0, 0, 16, 16);
+            for (let i = 0; i < 40; i++) {
+                ctx.fillStyle = Math.random() > 0.5 ? '#dcdc99' : '#e6e6bb';
+                ctx.fillRect(Math.random() * 16, Math.random() * 16, 1, 1);
+            }
+            break;
+        }
+        case BlockType.OBSIDIAN: {
+            ctx.fillStyle = '#140e1e';
+            ctx.fillRect(0, 0, 16, 16);
+            // Purple specks
+            for (let i = 0; i < 15; i++) {
+                ctx.fillStyle = '#3c3056';
+                ctx.fillRect(Math.random() * 16, Math.random() * 16, 2, 2);
+            }
+            break;
+        }
+        case BlockType.END_PORTAL_FRAME: {
+            ctx.fillStyle = '#556655'; // End stone color ish
+            ctx.fillRect(0, 0, 16, 16);
+            // Top eye socket
+            if (face === 'top') {
+                ctx.fillStyle = '#1a4a4a';
+                ctx.fillRect(4, 4, 8, 8);
+                // Eye
+                ctx.fillStyle = '#00cc77';
+                ctx.fillRect(6, 6, 4, 4);
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(7, 7, 2, 2);
+            } else {
+                // Side detail
+                ctx.fillStyle = '#445544';
+                ctx.fillRect(2, 2, 12, 12);
+            }
+            break;
+        }
+        case BlockType.END_PORTAL_BLOCK: {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, 16, 16);
+            // Stars
+            for (let i = 0; i < 30; i++) {
+                ctx.fillStyle = Math.random() > 0.5 ? '#204060' : '#102030';
+                ctx.fillRect(Math.random() * 16, Math.random() * 16, 1, 1);
+            }
+            break;
+        }
+        case BlockType.DRAGON_EGG: {
+            ctx.fillStyle = '#0d0016';
+            ctx.fillRect(0, 0, 16, 16);
+            // Purple scales
+            for (let i = 0; i < 50; i++) {
+                ctx.fillStyle = '#32006b';
+                ctx.fillRect(Math.random() * 16, Math.random() * 16, 1, 1);
+            }
+            break;
+        }
+        default:
+            // Missing texture (Magenta/Black checkerboard)
+            if (seed === 0) { // Only log once or for one seed variant?
+                // No logging to console to avoid spam
+            }
+            ctx.fillStyle = '#ff00ff';
+            ctx.fillRect(0, 0, 8, 8);
+            ctx.fillRect(8, 8, 8, 8);
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(8, 0, 8, 8);
+            ctx.fillRect(0, 8, 8, 8);
+            return;
 
         // ─── Nether & End Blocks ────────────────────────
         case BlockType.SOUL_SAND:
@@ -1021,8 +1108,8 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
 
     // Generic fallback: use block color with noise
     let color = data.color;
-    if (face === 'top' && data.top) color = data.top;
-    if (face === 'bottom' && data.bottom) color = data.bottom;
+    if (face === 'top' && data.top) color = data.top!;
+    if (face === 'bottom' && data.bottom) color = data.bottom!;
     fillNoise(ctx, hex(color), 22, seed);
 }
 
@@ -1234,4 +1321,93 @@ export function getBlockIcon(blockId: number): string {
     const url = canvas.toDataURL();
     iconCache.set(blockId, url);
     return url;
+}
+
+// ─── Texture Atlas System ────────────────────────────────
+
+const ATLAS_SIZE = 512; // 32x32 slots of 16px
+const SLOT_SIZE = 16;
+const SLOTS_PER_ROW = ATLAS_SIZE / SLOT_SIZE;
+
+interface AtlasUV {
+    u: number;
+    v: number;
+    su: number; // width in uv space
+    sv: number; // height in uv space
+}
+
+let atlasTexture: THREE.CanvasTexture | null = null;
+const atlasUVs = new Map<string, AtlasUV>();
+
+export function getAtlasTexture(): THREE.CanvasTexture {
+    if (atlasTexture) return atlasTexture;
+
+    // Create Atlas
+    const canvas = document.createElement('canvas');
+    canvas.width = ATLAS_SIZE;
+    canvas.height = ATLAS_SIZE;
+    const ctx = canvas.getContext('2d')!;
+
+    // Fill with magenta for debug
+    ctx.fillStyle = '#ff00ff';
+    ctx.fillRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
+
+    let currentSlot = 0;
+
+    // Helper to assign slot
+    const assignSlot = (key: string, drawFn: (c: CanvasRenderingContext2D) => void) => {
+        const col = currentSlot % SLOTS_PER_ROW;
+        const row = Math.floor(currentSlot / SLOTS_PER_ROW);
+
+        const pxX = col * SLOT_SIZE;
+        const pxY = row * SLOT_SIZE;
+
+        ctx.save();
+        ctx.translate(pxX, pxY);
+        // Clip to slot to prevent bleeding during draw
+        ctx.beginPath();
+        ctx.rect(0, 0, SLOT_SIZE, SLOT_SIZE);
+        ctx.clip();
+
+        drawFn(ctx);
+        ctx.restore();
+
+        // Calculate UVs (bottom-left origin for Three.js, but canvas is top-left)
+        // Add 0.5px padding to prevent bleeding (pixel center sampling)
+        const pad = 0.5; // half pixel
+        const u = (pxX + pad) / ATLAS_SIZE;
+        const v = 1.0 - ((pxY + SLOT_SIZE - pad) / ATLAS_SIZE);
+        const su = (SLOT_SIZE - 2 * pad) / ATLAS_SIZE;
+        const sv = (SLOT_SIZE - 2 * pad) / ATLAS_SIZE;
+
+        atlasUVs.set(key, { u, v, su, sv });
+        currentSlot++;
+    };
+
+    // Iterate all blocks
+    Object.keys(BLOCK_DATA).forEach((key) => {
+        const id = Number(key);
+        const faces: ('top' | 'bottom' | 'side')[] = ['top', 'bottom', 'side'];
+
+        for (const face of faces) {
+            const cacheKey = `${id}_${face}`;
+            assignSlot(cacheKey, (c) => drawBlockTexture(c, id, face, id));
+        }
+    });
+
+    atlasTexture = new THREE.CanvasTexture(canvas);
+    atlasTexture.magFilter = THREE.NearestFilter;
+    atlasTexture.minFilter = THREE.NearestFilter;
+    atlasTexture.colorSpace = THREE.SRGBColorSpace;
+
+    return atlasTexture;
+}
+
+export function getAtlasUV(blockId: number, face: 'top' | 'bottom' | 'side'): AtlasUV {
+    if (!atlasTexture) getAtlasTexture(); // Ensure init
+    const uv = atlasUVs.get(`${blockId}_${face}`);
+    if (!uv) {
+        return { u: 0, v: 0, su: 0, sv: 0 };
+    }
+    return uv;
 }

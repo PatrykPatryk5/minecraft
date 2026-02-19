@@ -175,7 +175,7 @@ const SettingsScreen: React.FC = () => {
             <div className="settings-grid">
                 <div className="setting-item">
                     <label>Zasięg renderowania: <strong>{settings.renderDistance}</strong> chunków</label>
-                    <input type="range" min={2} max={16} value={settings.renderDistance} onChange={(e) => updateSettings({ renderDistance: +e.target.value })} className="mc-slider" />
+                    <input type="range" min={2} max={32} value={settings.renderDistance} onChange={(e) => updateSettings({ renderDistance: +e.target.value })} className="mc-slider" />
                 </div>
                 <div className="setting-item">
                     <label>FOV: <strong>{settings.fov}°</strong></label>

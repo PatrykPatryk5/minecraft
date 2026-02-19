@@ -1,66 +1,89 @@
 
 import useGameStore from '../store/gameStore';
 import { BlockType } from './blockTypes';
-import { growCrop, updateFarmland } from './farmingSystem';
-import { CHUNK_SIZE } from './terrainGen';
+import { growCrop, updateFarmland, growSapling } from './farmingSystem';
+import { CHUNK_SIZE, CHUNK_VOLUME } from './terrainGen';
 
 /**
- * Random Tick Logic
- * Minecraft updates randomly selected blocks in each chunk.
- * Standard is 3 random ticks per section per tick (20tps).
- * We run at 60fps, so maybe 1 random tick per chunk per frame?
- * Or iterate loaded chunks and pick N blocks.
+ * Optimized Random Tick
+ * 
+ * Instead of scanning world coords (slow), we pick random indices in chunks.
+ * We only convert to world coords if we hit a block that actually needs ticking.
  */
 export const tickWorld = () => {
     const s = useGameStore.getState();
-    const chunks = s.chunks;
-    const loadedKeys = Object.keys(chunks);
+    let keys = Object.keys(s.chunks);
+    // Optimization: If keys count is huge, we might want to cache it, 
+    // but Object.keys on 2000 props is ~0.1ms. The loop is the heavy part.
+    // However, we can bail early if nothing loaded.
+    if (keys.length === 0) return;
 
-    // Rate limiter: Process 10% of loaded chunks per frame to save CPU
-    // Or just pick 5 random chunks.
-    for (let i = 0; i < 5; i++) {
-        const key = loadedKeys[Math.floor(Math.random() * loadedKeys.length)];
-        if (!key) continue;
+    // Filter keys to only "active" chunks near player to save budget?
+    // For now, simple random sampling is fine as long as we don't iterate ALL.
 
-        const chunk = chunks[key];
-        // Pick 3 random blocks in this chunk
-        for (let j = 0; j < 3; j++) {
-            const lx = Math.floor(Math.random() * CHUNK_SIZE);
-            const ly = Math.floor(Math.random() * CHUNK_SIZE); // Height variation
-            const lz = Math.floor(Math.random() * CHUNK_SIZE);
+    // Budget: Attempt to tick roughly this many blocks per frame total.
+    // Minecraft does ~3 ticks per sub-chunk (16x16x16) per game tick (20tps).
+    // Start conservative: 1000 random probes per frame.
+    const TICK_BUDGET = 500; // Reduced from 1000 for performance safety
+    const attemptsPerChunk = Math.ceil(TICK_BUDGET / Math.max(1, keys.length));
 
-            // Convert to world coords (need to parse key "x,z")
-            const [cx, cz] = key.split(',').map(Number);
+    for (const key of keys) {
+        const chunk = s.chunks[key];
+        const [cx, cz] = key.split(',').map(Number); // Parse only once per chunk if needed? 
+        // Actually, parsing per chunk is fine.
+
+        for (let i = 0; i < attemptsPerChunk; i++) {
+            // Pick random index directly from flat array
+            const randIdx = Math.floor(Math.random() * CHUNK_VOLUME);
+            const block = chunk[randIdx];
+
+            // Fast exit for non-ticking blocks (Air, Stone, etc)
+            if (block === BlockType.AIR || block === BlockType.STONE || block === BlockType.DIRT || block === BlockType.WATER) continue;
+
+            const needsTick = (
+                block === BlockType.GRASS ||
+                block === BlockType.FARMLAND ||
+                block === BlockType.OAK_SAPLING ||
+                (block >= BlockType.WHEAT_0 && block < BlockType.WHEAT_7)
+            );
+
+            if (!needsTick) continue;
+
+            // Reconstruct coordinates only when needed
+            // index = (y << 8) | (lz << 4) | lx
+            // y = index >> 8
+            // lz = (index >> 4) & 0xF
+            // lx = index & 0xF
+            const ly = randIdx >> 8;
+            const lz = (randIdx >> 4) & 0xF;
+            const lx = randIdx & 0xF;
             const wx = cx * CHUNK_SIZE + lx;
             const wz = cz * CHUNK_SIZE + lz;
-            const wy = ly + 60; // Bias towards surface? Or random y.
 
-            // Simplify: Just random wx, wy, wz in loaded range? 
-            // Better: Iterate chunk data directly? No, complexity.
-            // Let's stick to simple randoms.
-
-            // Actually, we need to know the block type at that location.
-            // We can use s.getBlock(wx, wy, wz).
-            // But probing random air blocks is wasteful.
-            // MC optimized this by sections. We don't have sections.
-            // Let's optimize: Only meaningful Y levels (surface).
-            const sy = Math.floor(Math.random() * 80) + 20; // 20-100 range
-
-            const block = s.getBlock(wx, sy, wz);
-
-            if (block === BlockType.FARMLAND) {
-                updateFarmland(wx, sy, wz);
-            } else if (block >= BlockType.WHEAT_0 && block < BlockType.WHEAT_7) {
-                growCrop(wx, sy, wz);
-            } else if (block === BlockType.GRASS && s.getBlock(wx, sy + 1, wz) !== BlockType.AIR) {
-                // Grass dies if covered
-                s.addBlock(wx, sy, wz, BlockType.DIRT);
-            } else if (block === BlockType.DIRT) {
-                // Grass spread logic (simplified)
-                if (s.getBlock(wx, sy + 1, wz) === BlockType.AIR) {
-                    // Check neighbors for grass
-                    // ...
+            // Logic
+            if (block === BlockType.GRASS) {
+                // Grass Spread / Death
+                if (s.getBlock(wx, ly + 1, wz) !== BlockType.AIR) {
+                    s.addBlock(wx, ly, wz, BlockType.DIRT);
+                } else {
+                    // Spread to dirt
+                    // (Simplified: just check one random neighbor)
+                    const dx = Math.floor(Math.random() * 3) - 1;
+                    const dz = Math.floor(Math.random() * 3) - 1;
+                    const dy = Math.floor(Math.random() * 3) - 1;
+                    if (s.getBlock(wx + dx, ly + dy, wz + dz) === BlockType.DIRT &&
+                        s.getBlock(wx + dx, ly + dy + 1, wz + dz) === BlockType.AIR) {
+                        s.addBlock(wx + dx, ly + dy, wz + dz, BlockType.GRASS);
+                    }
                 }
+            } else if (block === BlockType.FARMLAND) {
+                updateFarmland(wx, ly, wz);
+            } else if (block === BlockType.OAK_SAPLING) {
+                // 1% chance to grow per random tick
+                if (Math.random() < 0.05) growSapling(wx, ly, wz);
+            } else if (block >= BlockType.WHEAT_0 && block < BlockType.WHEAT_7) {
+                // Crop growth
+                growCrop(wx, ly, wz);
             }
         }
     }

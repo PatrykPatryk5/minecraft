@@ -24,7 +24,7 @@ import useGameStore from '../store/gameStore';
 import { BLOCK_DATA, BlockType, getBlockDrop } from '../core/blockTypes';
 import { getSpawnHeight, MAX_HEIGHT } from '../core/terrainGen';
 import { emitBlockBreak } from '../effects/BlockParticles';
-import { playSound, startAmbience } from '../audio/sounds';
+import { playSound, startAmbience, updateListener } from '../audio/sounds';
 import { checkWaterFill, spreadWater } from '../core/waterSystem';
 import { handleBlockAction, isOnLadder } from '../core/blockActions';
 import { attackMob } from '../mobs/MobSystem';
@@ -43,7 +43,7 @@ const FLY_SPEED = 11;
 const SPECTATOR_SPEED = 15;
 const SWIM_SPEED = 2.2;
 const PLAYER_HEIGHT = 1.62;
-const PLAYER_WIDTH = 0.3;
+const PLAYER_WIDTH = 0.25; // Slightly reduced from 0.3 to prevent snagging on walls
 const REACH = 5;
 const STEP_SIZE = 0.05;
 const FALL_DAMAGE_THRESHOLD = 3;
@@ -82,11 +82,27 @@ const Player: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        const y = getSpawnHeight(8, 8);
-        pos.current.set(8, y + 2, 8);
-        camera.position.copy(pos.current);
+        // Safe spawn logic:
+        // 1. Get terrain height at 0,0
+        // 2. Add player height + buffer
+        const spawnX = 0;
+        const spawnZ = 0;
+        let y = getSpawnHeight(spawnX, spawnZ);
+
+        // If y is remarkably low (e.g. 0), it might mean the chunk isn't loaded yet.
+        // In that case, spawn high up (80) to fall safely.
+        if (y <= 5) y = 80;
+        if (y < 65) y = 65; // Minimum height (sea level)
+
+        pos.current.set(spawnX, y + 2, spawnZ);
+        velocity.current.set(0, 0, 0);
+        onGround.current = false;
         fallStart.current = y + 2;
-    }, [camera]);
+
+        // Force camera to spawn
+        camera.position.set(spawnX, y + 2, spawnZ);
+        camera.rotation.set(0, 0, 0);
+    }, []); // Run once on mount
 
     // Start ambience on first interaction
     useEffect(() => {
@@ -397,10 +413,10 @@ const Player: React.FC = () => {
         const s = storeRef.current;
         if (s.activeOverlay !== 'none' || !s.isLocked || s.screen !== 'playing') return;
 
-        // Accumulate time, clamp to prevent huge jumps after tab defocus
         accumulator.current += Math.min(rawDelta, 0.25);
 
         let ticksThisFrame = 0;
+        let bobY = 0; // Visual offset for this frame
 
         while (accumulator.current >= TICK_RATE && ticksThisFrame < MAX_TICKS_PER_FRAME) {
             accumulator.current -= TICK_RATE;
@@ -763,6 +779,31 @@ const Player: React.FC = () => {
                 vel.y = 0;
             }
 
+            // ─── Portal Check ────────────────────────────────
+            const curBlock = s.getBlock(Math.floor(p.x), Math.floor(p.y + 0.1), Math.floor(p.z));
+            const legBlock = s.getBlock(Math.floor(p.x), Math.floor(p.y - 0.5), Math.floor(p.z));
+
+            if (curBlock === BlockType.END_PORTAL_BLOCK || legBlock === BlockType.END_PORTAL_BLOCK) {
+                if (s.dimension === 'overworld') {
+                    s.setDimension('end');
+                    // Spawn on obsidian platform or safe spot
+                    p.set(0, 65, 0);
+                    vel.set(0, 0, 0);
+                    fallStart.current = 65;
+                    playSound('portal'); // assume texture/sound exists or just silent
+                } else if (s.dimension === 'end') {
+                    // Return to overworld
+                    s.setDimension('overworld');
+                    const h = getSpawnHeight(8, 8);
+                    p.set(8, h + 2, 8);
+                    vel.set(0, 0, 0);
+                    fallStart.current = h + 2;
+                    if (s.dragonDefeated) {
+                        s.setScreen('credits');
+                    }
+                }
+            }
+
             // ─── Step Sounds ─────────────────────────────────
             if (onGround.current && (Math.abs(vel.x) > 0.5 || Math.abs(vel.z) > 0.5)) {
                 stepTimer.current += dt;
@@ -775,13 +816,14 @@ const Player: React.FC = () => {
 
             // ─── View Bobbing ────────────────────────────────
             if (s.settings.viewBobbing && onGround.current && move.lengthSq() > 0) {
-                bobPhase.current += dt * speed * 1.2;
-                p.y += Math.sin(bobPhase.current * 2) * 0.03;
+                bobPhase.current += dt * speed * 14;
+                bobY = Math.sin(bobPhase.current) * 0.1;
             }
-        }
+        } // End physics loop
 
         // ── Camera sync (runs every frame for smooth visuals) ──
         camera.position.copy(pos.current);
+        camera.position.y += bobY;
         s.setPlayerPos([pos.current.x, pos.current.y, pos.current.z]);
 
         // ─── Block Highlight ─────────────────────────────────
@@ -791,6 +833,14 @@ const Player: React.FC = () => {
                 highlightRef.current.position.set(hit.block[0] + 0.5, hit.block[1] + 0.5, hit.block[2] + 0.5);
                 highlightRef.current.visible = true;
             } else { highlightRef.current.visible = false; }
+        }
+
+        // ─── Audio Listener ──────────────────────────────────
+        {
+            const cam = camera;
+            const dir = new THREE.Vector3();
+            cam.getWorldDirection(dir);
+            updateListener(cam.position.x, cam.position.y, cam.position.z, dir.x, dir.y, dir.z);
         }
     });
 

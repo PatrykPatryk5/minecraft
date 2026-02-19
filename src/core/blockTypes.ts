@@ -41,6 +41,11 @@ export enum BlockType {
     FLOWER_YELLOW = 29,
     TALL_GRASS = 30,
     CACTUS = 31,
+    OAK_SAPLING = 3100, // High ID to avoid conflict
+
+    // The End (Reusing existing IDs)
+    // END_STONE, OBSIDIAN etc are already defined below
+
     MELON = 32,
     PUMPKIN = 33,
     WOOL_WHITE = 34,
@@ -403,7 +408,7 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     // ─── Farming ────────────────────────────────────────
     [BlockType.FARMLAND]: { name: 'Ziemia Uprawna', color: '#6b4226', top: '#4b3216', transparent: false, solid: true, breakTime: 0.6, tool: 'shovel' },
     [BlockType.SEEDS]: { name: 'Nasiona', color: '#88cc44', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.BONE_MEAL]: { name: 'Mączka Kostna', color: '#ffffff', transparent: false, solid: false, breakTime: 0, isItem: true },
+
     [BlockType.WHEAT_0]: { name: 'Pszenica (etap 0)', color: '#00cc00', transparent: true, solid: false, breakTime: 0 },
     [BlockType.WHEAT_1]: { name: 'Pszenica (etap 1)', color: '#22cc00', transparent: true, solid: false, breakTime: 0 },
     [BlockType.WHEAT_2]: { name: 'Pszenica (etap 2)', color: '#44cc00', transparent: true, solid: false, breakTime: 0 },
@@ -431,6 +436,12 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.BLAZE_POWDER]: { name: 'Proszek Blaze', color: '#ffcc00', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.EYE_OF_ENDER]: { name: 'Oko Endera', color: '#00cc77', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.NETHER_STAR]: { name: 'Gwiazda Netheru', color: '#ffffff', transparent: false, solid: false, breakTime: 0, isItem: true },
+    // ─── Vegetation ──────────────────────────────────────
+    [BlockType.OAK_SAPLING]: { name: 'Sadzonka Dębu', color: '#4a8c30', transparent: true, solid: false, breakTime: 0.0 },
+
+
+    // The End blocks are defined below
+
     // ─── Redstone Devices ────────────────────────────────
     [BlockType.LEVER]: { name: 'Dźwignia', color: '#8b7355', top: '#666666', transparent: true, solid: false, breakTime: 0.3, tool: 'hand' },
     [BlockType.REDSTONE_TORCH]: { name: 'Pochodnia Redstone', color: '#cc0000', transparent: true, solid: false, breakTime: 0, tool: 'hand', emissive: true },

@@ -69,14 +69,44 @@ export type SoundType =
     | 'open' | 'close' | 'levelup'
     | 'explode' | 'bow' | 'pop'
     | 'anvil' | 'xp' | 'fireball' | 'portal'
-    | 'piston_out' | 'piston_in' | 'gravel';
+    | 'piston_out' | 'piston_in' | 'gravel' | 'roar';
 
-export function playSound(type: SoundType): void {
+// ─── 3D Audio Listener ───────────────────────────────────
+export function updateListener(x: number, y: number, z: number, fx: number, fy: number, fz: number): void {
+    if (!audioCtx) return;
+    const l = audioCtx.listener;
+    if (l.positionX) {
+        l.positionX.value = x; l.positionY.value = y; l.positionZ.value = z;
+        l.forwardX.value = fx; l.forwardY.value = fy; l.forwardZ.value = fz;
+        l.upX.value = 0; l.upY.value = 1; l.upZ.value = 0;
+    } else {
+        // Fallback for older browsers
+        l.setPosition(x, y, z);
+        l.setOrientation(fx, fy, fz, 0, 1, 0);
+    }
+}
+
+export function playSound(type: SoundType, pos?: [number, number, number]): void {
     try {
         const ctx = getCtx();
         if (!masterGain) return;
         const mg = masterGain;
         const now = ctx.currentTime;
+
+        let output: AudioNode = mg;
+        if (pos) {
+            const panner = ctx.createPanner();
+            panner.panningModel = 'HRTF';
+            panner.distanceModel = 'exponential';
+            panner.refDistance = 10;
+            panner.maxDistance = 100;
+            panner.rolloffFactor = 1;
+            panner.positionX.value = pos[0];
+            panner.positionY.value = pos[1];
+            panner.positionZ.value = pos[2];
+            panner.connect(mg);
+            output = panner;
+        }
 
         switch (type) {
             case 'break': {
@@ -89,13 +119,13 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.6, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
-                noise.connect(filter).connect(env).connect(mg);
+                noise.connect(filter).connect(env).connect(output);
                 // Add a brief tone for "crunch"
                 const osc = createTone(ctx, 200 + Math.random() * 100, 0.1, 'square');
                 const tEnv = ctx.createGain();
                 tEnv.gain.setValueAtTime(0.15, now);
                 tEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-                osc.connect(tEnv).connect(mg);
+                osc.connect(tEnv).connect(output);
                 osc.start(now); osc.stop(now + 0.1);
                 noise.start(now); noise.stop(now + 0.2);
                 break;
@@ -106,7 +136,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.5, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
-                osc.connect(env).connect(mg);
+                osc.connect(env).connect(output);
                 // Impact noise
                 const noise = createNoise(ctx, 0.08);
                 const nEnv = ctx.createGain();
@@ -115,7 +145,7 @@ export function playSound(type: SoundType): void {
                 const lp = ctx.createBiquadFilter();
                 lp.type = 'lowpass';
                 lp.frequency.value = 600;
-                noise.connect(lp).connect(nEnv).connect(mg);
+                noise.connect(lp).connect(nEnv).connect(output);
                 osc.start(now); osc.stop(now + 0.15);
                 noise.start(now); noise.stop(now + 0.08);
                 break;
@@ -130,7 +160,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.25, now);
                 env.gain.exponentialRampToValueAtTime(0.05, now + 0.1);
-                noise.connect(filter).connect(env).connect(mg);
+                noise.connect(filter).connect(env).connect(output);
                 noise.start(now); noise.stop(now + 0.12);
                 break;
             }
@@ -143,7 +173,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.15 + Math.random() * 0.1, now);
                 env.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-                noise.connect(filter).connect(env).connect(mg);
+                noise.connect(filter).connect(env).connect(output);
                 noise.start(now); noise.stop(now + 0.1);
                 break;
             }
@@ -153,7 +183,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.25, now);
                 env.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
-                osc.connect(env).connect(mg);
+                osc.connect(env).connect(output);
                 osc.start(now); osc.stop(now + 0.04);
                 break;
             }
@@ -166,7 +196,7 @@ export function playSound(type: SoundType): void {
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
                 const filter = ctx.createBiquadFilter();
                 filter.type = 'lowpass'; filter.frequency.value = 800;
-                osc.connect(filter).connect(env).connect(mg);
+                osc.connect(filter).connect(env).connect(output);
                 osc.start(now); osc.stop(now + 0.22);
                 break;
             }
@@ -180,7 +210,7 @@ export function playSound(type: SoundType): void {
                     const t = now + i * 0.1;
                     env.gain.setValueAtTime(0.2, t);
                     env.gain.exponentialRampToValueAtTime(0.01, t + 0.05);
-                    noise.connect(filter).connect(env).connect(mg);
+                    noise.connect(filter).connect(env).connect(output);
                     noise.start(t); noise.stop(t + 0.06);
                 }
                 break;
@@ -192,7 +222,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.2, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
-                osc.connect(env).connect(mg);
+                osc.connect(env).connect(output);
                 osc.start(now); osc.stop(now + 0.3);
                 break;
             }
@@ -203,7 +233,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.3, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
-                osc.connect(env).connect(mg);
+                osc.connect(env).connect(output);
                 osc2.connect(env);
                 osc.start(now); osc.stop(now + 0.15);
                 osc2.start(now); osc2.stop(now + 0.15);
@@ -219,7 +249,7 @@ export function playSound(type: SoundType): void {
                 env.gain.setValueAtTime(0.02, now);
                 env.gain.linearRampToValueAtTime(0.3, now + 0.3);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
-                noise.connect(filter).connect(env).connect(mg);
+                noise.connect(filter).connect(env).connect(output);
                 noise.start(now); noise.stop(now + 0.4);
                 break;
             }
@@ -229,14 +259,14 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.5, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
-                osc.connect(env).connect(mg);
+                osc.connect(env).connect(output);
                 const noise = createNoise(ctx, 0.1);
                 const lp = ctx.createBiquadFilter();
                 lp.type = 'lowpass'; lp.frequency.value = 300;
                 const nEnv = ctx.createGain();
                 nEnv.gain.setValueAtTime(0.3, now);
                 nEnv.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
-                noise.connect(lp).connect(nEnv).connect(mg);
+                noise.connect(lp).connect(nEnv).connect(output);
                 osc.start(now); osc.stop(now + 0.15);
                 noise.start(now); noise.stop(now + 0.1);
                 break;
@@ -249,7 +279,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.15, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
-                noise.connect(filter).connect(env).connect(mg);
+                noise.connect(filter).connect(env).connect(output);
                 noise.start(now); noise.stop(now + 0.15);
                 break;
             }
@@ -262,7 +292,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.5, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
-                noise.connect(filter).connect(env).connect(mg);
+                noise.connect(filter).connect(env).connect(output);
                 noise.start(now); noise.stop(now + 0.5);
                 break;
             }
@@ -273,7 +303,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.3, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
-                osc.connect(env).connect(mg);
+                osc.connect(env).connect(output);
                 osc.start(now); osc.stop(now + 0.15);
                 break;
             }
@@ -284,7 +314,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.3, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-                osc.connect(env).connect(mg);
+                osc.connect(env).connect(output);
                 osc.start(now); osc.stop(now + 0.12);
                 break;
             }
@@ -296,7 +326,7 @@ export function playSound(type: SoundType): void {
                     const t = now + i * 0.08;
                     env.gain.setValueAtTime(0.2, t);
                     env.gain.exponentialRampToValueAtTime(0.01, t + 0.18);
-                    osc.connect(env).connect(mg);
+                    osc.connect(env).connect(output);
                     osc.start(t); osc.stop(t + 0.2);
                 }
                 break;
@@ -307,7 +337,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.15, now);
                 env.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-                osc.connect(env).connect(mg);
+                osc.connect(env).connect(output);
                 osc.start(now); osc.stop(now + 0.1);
                 break;
             }
@@ -320,13 +350,13 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.7, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
-                noise.connect(lp).connect(env).connect(mg);
+                noise.connect(lp).connect(env).connect(output);
                 // Bass thump
                 const bass = createTone(ctx, 40, 0.3, 'sine');
                 const bEnv = ctx.createGain();
                 bEnv.gain.setValueAtTime(0.5, now);
                 bEnv.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
-                bass.connect(bEnv).connect(mg);
+                bass.connect(bEnv).connect(output);
                 noise.start(now); noise.stop(now + 0.8);
                 bass.start(now); bass.stop(now + 0.3);
                 break;
@@ -340,7 +370,7 @@ export function playSound(type: SoundType): void {
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
                 const hp = ctx.createBiquadFilter();
                 hp.type = 'highpass'; hp.frequency.value = 200;
-                osc.connect(hp).connect(env).connect(mg);
+                osc.connect(hp).connect(env).connect(output);
                 osc.start(now); osc.stop(now + 0.2);
                 break;
             }
@@ -351,7 +381,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.2, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
-                osc.connect(env).connect(mg);
+                osc.connect(env).connect(output);
                 osc.start(now); osc.stop(now + 0.08);
                 break;
             }
@@ -363,7 +393,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.4, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
-                osc1.connect(env).connect(mg);
+                osc1.connect(env).connect(output);
                 osc2.connect(env);
                 osc1.start(now); osc1.stop(now + 0.4);
                 osc2.start(now); osc2.stop(now + 0.3);
@@ -378,7 +408,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.3, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-                noise.connect(filter).connect(env).connect(mg);
+                noise.connect(filter).connect(env).connect(output);
                 noise.start(now); noise.stop(now + 0.5);
                 break;
             }
@@ -398,7 +428,7 @@ export function playSound(type: SoundType): void {
                 lfo.connect(lfoGain).connect(osc.frequency);
                 lfo.start(now); lfo.stop(now + 1.5);
 
-                osc.connect(gain).connect(mg);
+                osc.connect(gain).connect(output);
                 osc2.connect(gain);
                 osc.start(now); osc.stop(now + 1.5);
                 osc2.start(now); osc2.stop(now + 1.5);
@@ -411,7 +441,7 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.3, now);
                 env.gain.linearRampToValueAtTime(0, now + 0.15);
-                osc.connect(env).connect(mg);
+                osc.connect(env).connect(output);
                 osc.start(now); osc.stop(now + 0.2);
                 break;
             }
@@ -436,8 +466,24 @@ export function playSound(type: SoundType): void {
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.4, now);
                 env.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
-                noise.connect(filter).connect(env).connect(mg);
+                noise.connect(filter).connect(env).connect(output);
                 noise.start(now); noise.stop(now + 0.15);
+                break;
+            }
+            case 'roar': {
+                // Dragon roar — deep saw + noise
+                const osc = createTone(ctx, 100, 2.0, 'sawtooth');
+                osc.frequency.exponentialRampToValueAtTime(50, now + 1.5);
+                const noise = createNoise(ctx, 2.0);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass'; filter.frequency.value = 400;
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.6, now);
+                env.gain.exponentialRampToValueAtTime(0.01, now + 1.8);
+                osc.connect(env).connect(output);
+                noise.connect(filter).connect(env).connect(output);
+                osc.start(now); osc.stop(now + 2.0);
+                noise.start(now); noise.stop(now + 2.0);
                 break;
             }
         }

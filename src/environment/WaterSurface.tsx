@@ -84,33 +84,50 @@ const WaterSurface: React.FC = () => {
         if (lavaMatRef.current) lavaMatRef.current.uniforms.uTime.value += delta;
     });
 
-    // Build water geometry
+    // Track global chunk version to trigger updates
+    const chunkVersionSum = useGameStore(s => Object.values(s.chunkVersions).reduce((a, b) => a + b, 0));
+
+    // Build water geometry — scan for water blocks at any Y level
     const waterGeo = useMemo(() => {
         const state = useGameStore.getState();
         const pp = state.playerPos;
         const pcx = Math.floor(pp[0] / CHUNK_SIZE), pcz = Math.floor(pp[2] / CHUNK_SIZE);
         const rd = state.renderDistance;
         const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+        const waterY = new Set<string>(); // track unique positions
 
         for (let dx = -rd; dx <= rd; dx++) for (let dz = -rd; dz <= rd; dz++) {
             if (dx * dx + dz * dz > rd * rd) continue;
             const cx = pcx + dx, cz = pcz + dz;
             const chunk = state.chunks[chunkKey(cx, cz)];
             if (!chunk) continue;
-            let hasWater = false;
-            for (let lx = 0; lx < CHUNK_SIZE; lx += 4) {
-                for (let lz = 0; lz < CHUNK_SIZE; lz += 4) {
-                    if (chunk[blockIndex(lx, SEA_LEVEL, lz)] === BlockType.WATER) { hasWater = true; break; }
+
+            for (let lx = 0; lx < CHUNK_SIZE; lx++) for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+                // Scan FULL height for water (up to MAX_HEIGHT)
+                // Optimization: Start from top down could be faster for surface finding, 
+                // but water can be underground too.
+                for (let ly = MAX_HEIGHT - 1; ly >= 1; ly--) {
+                    const bt = chunk[blockIndex(lx, ly, lz)];
+                    if (bt === BlockType.WATER) {
+                        // Check above
+                        const above = ly < MAX_HEIGHT - 1 ? chunk[blockIndex(lx, ly + 1, lz)] : 0;
+                        if (above === BlockType.AIR || above === 0 || above === undefined) {
+                            const wx = cx * CHUNK_SIZE + lx, wz = cz * CHUNK_SIZE + lz;
+                            // Visual height: 0.9 (standard Minecraft water level)
+                            const wy = ly + 0.9;
+
+                            const key = `${wx},${ly},${wz}`;
+                            if (waterY.has(key)) continue;
+                            waterY.add(key);
+
+                            const vo = pos.length / 3;
+                            pos.push(wx, wy, wz, wx + 1, wy, wz,
+                                wx + 1, wy, wz + 1, wx, wy, wz + 1);
+                            uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+                            idx.push(vo, vo + 1, vo + 2, vo, vo + 2, vo + 3);
+                        }
+                    }
                 }
-                if (hasWater) break;
-            }
-            if (hasWater) {
-                const wx = cx * CHUNK_SIZE, wz = cz * CHUNK_SIZE;
-                const vo = pos.length / 3;
-                pos.push(wx, SEA_LEVEL + 0.9, wz, wx + CHUNK_SIZE, SEA_LEVEL + 0.9, wz,
-                    wx + CHUNK_SIZE, SEA_LEVEL + 0.9, wz + CHUNK_SIZE, wx, SEA_LEVEL + 0.9, wz + CHUNK_SIZE);
-                uv.push(0, 0, 1, 0, 1, 1, 0, 1);
-                idx.push(vo, vo + 1, vo + 2, vo, vo + 2, vo + 3);
             }
         }
         const geo = new THREE.BufferGeometry();
@@ -120,7 +137,7 @@ const WaterSurface: React.FC = () => {
             geo.setIndex(idx);
         }
         return geo;
-    }, [renderDistance]);
+    }, [renderDistance, chunkVersionSum]);
 
     // Build lava geometry — scan for lava blocks at any Y level
     const lavaGeo = useMemo(() => {

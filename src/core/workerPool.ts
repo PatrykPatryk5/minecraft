@@ -79,33 +79,33 @@ export class WorkerPool {
     }
 
     /** Submit a chunk generation task */
-    submit(cx: number, cz: number, callback: WorkerCallback): void {
+    submit(cx: number, cz: number, dimension: string, callback: WorkerCallback): void {
         const id = `${cx},${cz}`;
 
         if (this.pending.has(id)) return; // Already processing
 
         if (this.activeTasks >= this.maxConcurrent) {
             // Queue it
-            this.taskQueue.push({ msg: { cx, cz, id }, id, resolve: callback });
+            this.taskQueue.push({ msg: { cx, cz, id, dimension }, id, resolve: callback });
             return;
         }
 
-        this.dispatch(cx, cz, id, callback);
+        this.dispatch(cx, cz, dimension, id, callback);
     }
 
-    private dispatch(cx: number, cz: number, id: string, callback: WorkerCallback): void {
+    private dispatch(cx: number, cz: number, dimension: string, id: string, callback: WorkerCallback): void {
         const worker = this.workers[this.nextWorker % this.workers.length];
         this.nextWorker++;
         this.activeTasks++;
 
         this.pending.set(id, { id, resolve: callback });
-        worker.postMessage({ cx, cz, id });
+        worker.postMessage({ cx, cz, id, dimension });
     }
 
     private processQueue(): void {
         while (this.taskQueue.length > 0 && this.activeTasks < this.maxConcurrent) {
             const task = this.taskQueue.shift()!;
-            this.dispatch(task.msg.cx, task.msg.cz, task.id, task.resolve);
+            this.dispatch(task.msg.cx, task.msg.cz, task.msg.dimension, task.id, task.resolve);
         }
     }
 
@@ -117,6 +117,11 @@ export class WorkerPool {
     /** Get queue length */
     getQueueLength(): number {
         return this.taskQueue.length;
+    }
+
+    /** Clear pending queue (useful when switching dimensions) */
+    clearQueue(): void {
+        this.taskQueue = [];
     }
 
     /** Terminate all workers */

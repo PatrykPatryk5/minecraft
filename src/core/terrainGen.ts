@@ -132,7 +132,15 @@ export function bkey(lx: number, y: number, lz: number): string {
 }
 
 // ─── Main Generator ─────────────────────────────────────
-export function generateChunk(cx: number, cz: number): ChunkData {
+// ─── Main Generator ─────────────────────────────────────
+export function generateChunk(cx: number, cz: number, dimension: string = 'overworld'): ChunkData {
+    if (dimension === 'end') {
+        return generateEndChunk(cx, cz);
+    }
+    return generateOverworldChunk(cx, cz);
+}
+
+export function generateOverworldChunk(cx: number, cz: number): ChunkData {
     const blocks = new Uint16Array(CHUNK_VOLUME);
     const wx0 = cx * CHUNK_SIZE;
     const wz0 = cz * CHUNK_SIZE;
@@ -231,35 +239,163 @@ export function generateChunk(cx: number, cz: number): ChunkData {
 
     // Generate trees
     for (const t of trees) {
-        const logType = t.biome === 'taiga' ? BlockType.SPRUCE :
-            t.biome === 'jungle' ? BlockType.BIRCH_LOG : BlockType.OAK_LOG;
-        const trunkH = t.biome === 'jungle' ? 6 + ((Math.abs(n2(wx0 + t.x, wz0 + t.z) * 3)) | 0) :
-            4 + ((Math.abs(n2(wx0 + t.x, wz0 + t.z) * 3)) | 0);
-        for (let dy = 0; dy < trunkH; dy++) {
-            blocks[blockIndex(t.x, t.y + dy, t.z)] = logType;
+        placeTree(t.x, t.y, t.z, t.biome, (x, y, z, bt) => {
+            const idx = blockIndex(x, y, z);
+            // Safety check for chunk bounds
+            if (!blocks[idx]) blocks[idx] = bt;
+        });
+    }
+
+    return blocks;
+}
+
+/**
+ * Places a tree at the given LOCAL coordinates (0-15).
+ * callback(x, y, z, blockType) is called for each block.
+ * Coordinates passed to callback are LOCAL to the chunk if using local input, 
+ * or WORLD if using world input. It's up to the caller.
+ * 
+ * NOTE: For cross-chunk trees, this simple implementation clips at 0-15 if caller enforces it.
+ */
+export function placeTree(
+    x: number, y: number, z: number,
+    biome: Biome,
+    setBlock: (x: number, y: number, z: number, bt: number) => void
+) {
+    const wx0 = x; // Just for noise seed if needed, but we use consistent random here?
+    // Actually, we use a deterministic RNG based on position usually.
+    // For now, let's use a simple pseudo-random based on coords to decide height/shape.
+
+    // Simple hash for consistency
+    const seed = (x * 374761393) ^ (y * 668265263) ^ (z * 915061699);
+    const rnd = () => {
+        let t = Math.sin(seed) * 10000;
+        return t - Math.floor(t);
+    };
+
+    const logType = biome === 'taiga' ? BlockType.SPRUCE :
+        biome === 'jungle' ? BlockType.BIRCH_LOG : BlockType.OAK_LOG;
+
+    // Height
+    const isJungle = biome === 'jungle';
+    const isTaiga = biome === 'taiga';
+    const baseH = isJungle ? 6 : 4;
+    const varH = isJungle ? 5 : 3;
+    const trunkH = baseH + Math.floor(rnd() * varH); // Use deterministic height
+
+    // Trunk
+    for (let dy = 0; dy < trunkH; dy++) {
+        setBlock(x, y + dy, z, logType);
+    }
+
+    // Leaves
+    const leafStart = trunkH - 2;
+    for (let dy = leafStart; dy < trunkH + 2; dy++) {
+        const r = isTaiga ? Math.max(0, 3 - (dy - leafStart)) : (dy >= trunkH ? 1 : 2);
+        for (let dx = -r; dx <= r; dx++) {
+            for (let dz = -r; dz <= r; dz++) {
+                if (dx === 0 && dz === 0 && dy < trunkH) continue; // Don't replace trunk
+                if (Math.abs(dx) === r && Math.abs(dz) === r && r > 1 && !isTaiga) {
+                    if ((rnd() + dx * dz * 0.1) % 1 > 0.5) continue; // Random corners
+                }
+
+                // We pass relative coords to the callback. Caller handles bounds.
+                setBlock(x + dx, y + dy, z + dz, BlockType.LEAVES);
+            }
         }
-        const leafStart = trunkH - 2;
-        const isCone = t.biome === 'taiga';
-        for (let dy = leafStart; dy < trunkH + 2; dy++) {
-            const r = isCone ? Math.max(0, 3 - (dy - leafStart)) : (dy >= trunkH ? 1 : 2);
-            for (let dx = -r; dx <= r; dx++) {
-                for (let dz = -r; dz <= r; dz++) {
-                    if (dx === 0 && dz === 0 && dy < trunkH) continue;
-                    if (Math.abs(dx) === r && Math.abs(dz) === r && r > 1) continue;
-                    const lx2 = t.x + dx, lz2 = t.z + dz;
-                    if (lx2 >= 0 && lx2 < CHUNK_SIZE && lz2 >= 0 && lz2 < CHUNK_SIZE) {
-                        const idx = blockIndex(lx2, t.y + dy, lz2);
-                        if (!blocks[idx]) blocks[idx] = BlockType.LEAVES;
+    }
+}
+
+/** Get safe spawn height */
+export function getSpawnHeight(x: number, z: number): number {
+    return getHeight(x, z) + 2;
+}
+
+// ─── End Dimension Generator ─────────────────────────────
+export function generateEndChunk(cx: number, cz: number): ChunkData {
+    const blocks = new Uint16Array(CHUNK_VOLUME);
+    const wx0 = cx * CHUNK_SIZE;
+    const wz0 = cz * CHUNK_SIZE;
+
+    // Center of the main island
+    const centerX = 0;
+    const centerZ = 0;
+
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+            const wx = wx0 + lx;
+            const wz = wz0 + lz;
+
+            // Distance from center
+            const dx = wx - centerX;
+            const dz = wz - centerZ;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+
+            // Base height noise
+            // const n = octave2D(wx, wz, 3, 0.5, 0.01);
+
+            // Island shape factor: 1.0 at center, drops off
+            const islandRadius = 120;
+            if (dist > islandRadius) continue; // optimize checking
+
+            // Simple island shape:
+            // height = base + noise - (dist/radius)^2 * falloff
+            let h = 60 + octave2D(wx, wz, 3, 0.5, 0.02) * 20;
+
+            // Taper edges
+            const taper = Math.max(0, 1 - Math.pow(dist / islandRadius, 2));
+            h = (h - 20) * taper + 20; // Ensure bottom doesn't dip too low at center
+
+            if (h < 10 && dist > 50) h = 0; // Cutoff for floating effect
+
+            const surfaceH = Math.floor(h);
+
+            if (surfaceH > 0) {
+                for (let y = 0; y <= surfaceH; y++) {
+                    const idx = blockIndex(lx, y, lz);
+                    // Core is end stone
+                    blocks[idx] = BlockType.END_STONE;
+                }
+            }
+        }
+    }
+
+    // Obsidian Pillars
+    const pillars = [
+        { x: 35, z: 0, r: 3, h: 40 },
+        { x: -35, z: 0, r: 3, h: 40 },
+        { x: 0, z: 35, r: 3, h: 40 },
+        { x: 0, z: -35, r: 3, h: 40 },
+        { x: 25, z: 25, r: 2, h: 25 },
+        { x: -25, z: 25, r: 2, h: 25 },
+        { x: 25, z: -25, r: 2, h: 25 },
+        { x: -25, z: -25, r: 2, h: 25 },
+    ];
+
+    for (const p of pillars) {
+        // Simple bounding box check
+        if (wx0 + CHUNK_SIZE < p.x - p.r || wx0 > p.x + p.r ||
+            wz0 + CHUNK_SIZE < p.z - p.r || wz0 > p.z + p.r) {
+            continue;
+        }
+
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+            for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+                const wx = wx0 + lx;
+                const wz = wz0 + lz;
+                const dx = wx - p.x;
+                const dz = wz - p.z;
+
+                if (dx * dx + dz * dz <= p.r * p.r) {
+                    const groundY = 30; // approx where island surface is
+                    for (let y = groundY; y < groundY + p.h; y++) {
+                        blocks[blockIndex(lx, y, lz)] = BlockType.OBSIDIAN;
                     }
+                    // Fire/Crystal on top?
                 }
             }
         }
     }
 
     return blocks;
-}
-
-/** Get safe spawn height */
-export function getSpawnHeight(x: number, z: number): number {
-    return getHeight(x, z) + 2;
 }

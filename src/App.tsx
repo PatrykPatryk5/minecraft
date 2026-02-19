@@ -7,7 +7,7 @@ import { Canvas } from '@react-three/fiber';
 import World from './world/World';
 import Player from './player/Player';
 import DayNightCycle from './environment/DayNightCycle';
-import WaterSurface from './environment/WaterSurface';
+// import WaterSurface from './environment/WaterSurface';
 import Clouds from './environment/Clouds';
 import BlockParticles from './effects/BlockParticles';
 import HUD from './ui/HUD';
@@ -20,6 +20,7 @@ import ChatBox from './ui/ChatBox';
 import DeathScreen from './ui/DeathScreen';
 import ErrorBoundary from './ui/ErrorBoundary';
 import MainMenu from './ui/MainMenu';
+import CreditsScreen from './ui/CreditsScreen';
 import KeybindScreen from './ui/KeybindScreen';
 import MultiplayerScreen from './ui/MultiplayerScreen';
 import MobRenderer from './mobs/MobRenderer';
@@ -42,7 +43,7 @@ const SceneContent: React.FC = () => (
         <DayNightCycle />
         <World />
         <Player />
-        <WaterSurface />
+        {/* WaterSurface removed for performance/stability; handled in Chunk.tsx */}
         <Clouds />
         <BlockParticles />
         <MobRenderer />
@@ -107,13 +108,14 @@ const App: React.FC = () => {
                 <Canvas
                     camera={{ fov, near: 0.1, far: 1000, position: [0, 80, 0] }}
                     gl={{
-                        antialias: false,
+                        antialias: true,
                         powerPreference: 'high-performance',
                         stencil: false,
                         depth: true,
                         alpha: false,
                         failIfMajorPerformanceCaveat: false,
                     }}
+                    shadows
                     dpr={[1, Math.min(window.devicePixelRatio, 2)]}
                     style={{ width: '100%', height: '100%' }}
                     onContextMenu={(e) => e.preventDefault()}
@@ -143,6 +145,9 @@ const App: React.FC = () => {
 
             {/* Chat */}
             {isPlaying && <ChatBox />}
+
+            {/* Credits */}
+            {screen === 'credits' && <CreditsScreen />}
 
             {/* Underwater overlay */}
             {isPlaying && useGameStore.getState().getBlock(Math.floor(playerPos[0]), Math.floor(playerPos[1] + 1.62), Math.floor(playerPos[2])) === 9 && (

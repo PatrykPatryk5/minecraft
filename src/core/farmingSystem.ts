@@ -1,7 +1,7 @@
 
 import useGameStore, { blockKey } from '../store/gameStore';
 import { BlockType } from './blockTypes';
-import { CHUNK_SIZE, MAX_HEIGHT, blockIndex } from './terrainGen';
+import { CHUNK_SIZE, MAX_HEIGHT, blockIndex, placeTree } from './terrainGen';
 
 // ─── Constants ───────────────────────────────────────────
 const HYDRATION_RANGE = 4;
@@ -96,6 +96,28 @@ export const growCrop = (x: number, y: number, z: number) => {
     }
 };
 
+
+
+/**
+ * Grows a sapling into a tree.
+ */
+export const growSapling = (x: number, y: number, z: number) => {
+    const s = useGameStore.getState();
+    const block = s.getBlock(x, y, z);
+
+    if (block === BlockType.OAK_SAPLING) {
+        // Use shared tree generation logic
+        // 'forest' biome produces Oak trees
+        placeTree(x, y, z, 'forest', (tx, ty, tz, bt) => {
+            // Only replace air or the sapling itself
+            const existing = s.getBlock(tx, ty, tz);
+            if (existing === BlockType.AIR || (tx === x && ty === y && tz === z)) {
+                s.addBlock(tx, ty, tz, bt);
+            }
+        });
+    }
+};
+
 /**
  * Applies Bone Meal to a block.
  * Returns true if successful (consumed).
@@ -113,6 +135,15 @@ export const applyBoneMeal = (x: number, y: number, z: number): boolean => {
 
         s.addBlock(x, y, z, next);
         return true;
+    }
+
+    // Grow saplings
+    if (block === BlockType.OAK_SAPLING) {
+        // 45% chance to grow
+        if (Math.random() < 0.45) {
+            growSapling(x, y, z);
+        }
+        return true; // Consumed even if it doesn't grow immediate (MC logic)
     }
 
     return false;

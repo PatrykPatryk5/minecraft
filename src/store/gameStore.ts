@@ -117,7 +117,7 @@ export interface GameState {
     worldSeed: number;
     worldName: string;
 
-    setChunkData: (cx: number, cz: number, data: ChunkData) => void;
+    setChunkData: (cx: number, cz: number, dimension: string, data: ChunkData) => void;
     getBlock: (x: number, y: number, z: number) => number;
     addBlock: (x: number, y: number, z: number, typeId: number) => void;
     removeBlock: (x: number, y: number, z: number) => void;
@@ -252,7 +252,11 @@ export interface GameState {
     // ── Dimensions ────────────────────────────────────────
     dimension: Dimension;
     setDimension: (d: Dimension) => void;
-    dimensionChunks: Record<string, Record<string, any>>;  // per-dimension chunk storage
+    dimensionChunks: Record<string, {
+        chunks: Record<string, ChunkData>;
+        chunkVersions: Record<string, number>;
+        generatedChunks: Set<string>;
+    }>;
     dragonDefeated: boolean;
     setDragonDefeated: (v: boolean) => void;
 }
@@ -325,7 +329,10 @@ const useGameStore = create<GameState>((set, get) => ({
     worldSeed: Math.floor(Math.random() * 999999),
     worldName: 'Nowy Świat',
 
-    setChunkData: (cx, cz, data) => {
+    setChunkData: (cx, cz, dimension, data) => {
+        // If received chunk is for a different dimension than currently active, discard it
+        if (dimension !== get().dimension) return;
+
         const key = chunkKey(cx, cz);
         set((s) => {
             const newGen = new Set(s.generatedChunks);
@@ -648,8 +655,38 @@ const useGameStore = create<GameState>((set, get) => ({
 
     // ── Dimensions ────────────────────────────────────────
     dimension: 'overworld' as Dimension,
-    setDimension: (d) => set({ dimension: d }),
-    dimensionChunks: { overworld: {}, nether: {}, end: {} },
+    setDimension: (d) => set((s) => {
+        if (s.dimension === d) return {};
+
+        const oldDim = s.dimension;
+        // Save current state
+        const savedChunks = { ...s.chunks };
+        const savedVersions = { ...s.chunkVersions };
+        const savedGenerated = new Set(s.generatedChunks);
+
+        const newDimStore = s.dimensionChunks[d] || { chunks: {}, chunkVersions: {}, generatedChunks: new Set() };
+
+        return {
+            dimension: d,
+            chunks: newDimStore.chunks || {},
+            chunkVersions: newDimStore.chunkVersions || {},
+            generatedChunks: newDimStore.generatedChunks || new Set(),
+            // Save old to storage
+            dimensionChunks: {
+                ...s.dimensionChunks,
+                [oldDim]: {
+                    chunks: savedChunks,
+                    chunkVersions: savedVersions,
+                    generatedChunks: savedGenerated
+                }
+            }
+        };
+    }),
+    dimensionChunks: {
+        overworld: { chunks: {}, chunkVersions: {}, generatedChunks: new Set() },
+        nether: { chunks: {}, chunkVersions: {}, generatedChunks: new Set() },
+        end: { chunks: {}, chunkVersions: {}, generatedChunks: new Set() }
+    },
     dragonDefeated: false,
     setDragonDefeated: (v) => set({ dragonDefeated: v }),
 }));

@@ -14,13 +14,14 @@ import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import useGameStore, { chunkKey } from '../store/gameStore';
 import { generateChunk, CHUNK_SIZE, initSeed } from '../core/terrainGen';
+import { EnderDragon } from '../entities/EnderDragon';
 import { WorkerPool } from '../core/workerPool';
 import Chunk from './Chunk';
 import { checkChunkBorders } from '../core/waterSystem';
 import { tickWorld } from '../core/worldTick';
 
 const UNLOAD_BUFFER = 3;
-const BATCH_PER_FRAME = 4;
+const BATCH_PER_FRAME = 2; // Reduced to prevent main thread stutter
 const RECALCULATE_COOLDOWN = 600;
 
 // LOD thresholds (in chunk distance²)
@@ -48,9 +49,14 @@ const World: React.FC = () => {
     const needsRerenderRef = useRef(false);
     const chunkArrivedCountRef = useRef(0);
     const lastRerenderCount = useRef(0);
+    const lastRerenderTimeRef = useRef(0);
 
     // Minimal state — only updated when the chunk LIST changes (not every arrival)
     const [visibleChunks, setVisibleChunks] = useState<ChunkEntry[]>([]);
+
+    // Track dimension to trigger resets
+    const dimension = useGameStore(s => s.dimension);
+    const lastDimensionRef = useRef(dimension);
 
     // ── Initialize Worker Pool ──────────────────────────
     useEffect(() => {
@@ -58,7 +64,7 @@ const World: React.FC = () => {
         initSeed(seed);
 
         const pool = new WorkerPool(
-            new URL('./terrainWorker.ts', import.meta.url),
+            new URL('../core/generation.worker.ts', import.meta.url),
             4, 16
         );
 
@@ -70,14 +76,27 @@ const World: React.FC = () => {
         return () => { pool.terminate(); };
     }, []);
 
-
+    // Reset refs if dimension changes
+    if (lastDimensionRef.current !== dimension) {
+        lastDimensionRef.current = dimension;
+        loadedKeysRef.current.clear();
+        pendingKeysRef.current.clear();
+        activeChunksRef.current = [];
+        loadQueueRef.current = [];
+        lastPlayerChunkRef.current = '';
+        poolRef.current?.clearQueue(); // Cancel pending generation for old dimension
+    }
 
     // ── Handle worker results — NO setState ─────────────
     const onChunkReady = useCallback((result: any) => {
-        const { cx, cz, id } = result;
+        const { cx, cz, id, dimension: chunkDim } = result;
+
+        // Discard stale chunks from previous dimension
+        if (chunkDim !== useGameStore.getState().dimension) return;
+
         const key = id || chunkKey(cx, cz);
 
-        useGameStore.getState().setChunkData(cx, cz, result.data);
+        useGameStore.getState().setChunkData(cx, cz, chunkDim, result.data);
         useGameStore.getState().bumpVersion(cx, cz);
         checkChunkBorders(cx, cz);
         loadedKeysRef.current.add(key);
@@ -92,13 +111,16 @@ const World: React.FC = () => {
 
         pendingKeysRef.current.add(key);
 
+        const dim = useGameStore.getState().dimension;
+
         if (poolRef.current?.isReady()) {
-            poolRef.current.submit(cx, cz, onChunkReady);
+            poolRef.current.submit(cx, cz, dim, onChunkReady);
+            // Wait, submit() only takes cx, cz, callback. I need to update submit() signature or pass object?
+            // checking workerPool.ts...
         } else {
             // Sync fallback
-            const data = generateChunk(cx, cz);
-            useGameStore.getState().setChunkData(cx, cz, data);
-            useGameStore.getState().bumpVersion(cx, cz);
+            const data = generateChunk(cx, cz, dim); // THIS NEEDS TO SUPPORT DIMENSION
+            useGameStore.getState().setChunkData(cx, cz, dim, data);
             loadedKeysRef.current.add(key);
             pendingKeysRef.current.delete(key);
         }
@@ -199,11 +221,18 @@ const World: React.FC = () => {
         }
 
         // Throttled re-render: only when chunks arrived or list changed
-        // Max 1 re-render per 500ms to prevent physics stutter
+        // Max 1 re-render per 200ms to prevent physics stutter and React overhead
         const arrivedCount = chunkArrivedCountRef.current;
-        if (needsRerenderRef.current || arrivedCount !== lastRerenderCount.current) {
+        const now = performance.now();
+
+        const shouldUpdate =
+            needsRerenderRef.current ||
+            (arrivedCount !== lastRerenderCount.current && now - lastRerenderTimeRef.current > 200);
+
+        if (shouldUpdate) {
             needsRerenderRef.current = false;
             lastRerenderCount.current = arrivedCount;
+            lastRerenderTimeRef.current = now;
             setVisibleChunks([...activeChunksRef.current]);
         }
     });
@@ -213,6 +242,12 @@ const World: React.FC = () => {
             {visibleChunks.map((c) => (
                 <Chunk key={c.key} cx={c.cx} cz={c.cz} lod={c.lod} />
             ))}
+            {dimension === 'end' && !useGameStore.getState().dragonDefeated && <EnderDragon />}
+            <fog attach="fog" args={[
+                dimension === 'nether' ? '#400' : dimension === 'end' ? '#000' : '#87CEEB',
+                dimension === 'end' ? 20 : 10,
+                dimension === 'end' ? 80 : renderDistance * CHUNK_SIZE - 20
+            ]} />
         </>
     );
 };
