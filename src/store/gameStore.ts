@@ -131,6 +131,10 @@ export interface GameState {
     // ── Food / Eat ────────────────────────────────────────
     eatFood: () => void;
 
+    // ── Mining Progress ────────────────────────────────────
+    miningProgressValue: number;
+    setMiningProgress: (p: number) => void;
+
     // ── Day/Night ─────────────────────────────────────────
     dayTime: number;
     setDayTime: (t: number) => void;
@@ -162,6 +166,9 @@ export interface GameState {
     // ── Perf ──────────────────────────────────────────────
     fps: number;
     setFps: (f: number) => void;
+
+    // ── Mining Progress ────────────────────────────────────
+    // (implementation below)
 
     // ── Multiplayer Prep ──────────────────────────────────
     playerId: string;
@@ -464,6 +471,10 @@ const useGameStore = create<GameState>((set, get) => ({
     // ── Perf ──────────────────────────────────────────────
     fps: 0,
     setFps: (f) => set({ fps: f }),
+
+    // ── Mining Progress ──────────────────────────────────
+    miningProgressValue: 0,
+    setMiningProgress: (p) => set({ miningProgressValue: p }),
 
     // ── Multiplayer ───────────────────────────────────────
     playerId: crypto.randomUUID(),

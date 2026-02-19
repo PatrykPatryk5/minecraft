@@ -28,6 +28,8 @@ import { playSound, startAmbience } from '../audio/sounds';
 import { checkWaterFill, spreadWater } from '../core/waterSystem';
 import { handleBlockAction, isOnLadder } from '../core/blockActions';
 import { attackMob } from '../mobs/MobSystem';
+import { spreadLava, tickLava, checkLavaFill } from '../core/lavaSystem';
+import { processGravity } from '../core/gravityBlocks';
 
 // ─── Constants ───────────────────────────────────────────
 const GRAVITY = -28;
@@ -44,6 +46,8 @@ const REACH = 5;
 const STEP_SIZE = 0.05;
 const FALL_DAMAGE_THRESHOLD = 3;
 const SPRINT_HUNGER_RATE = 0.15; // hunger/sec while sprinting
+const LAVA_DAMAGE_RATE = 4; // hp/sec in lava
+const LAVA_DAMAGE_INTERVAL = 0.5; // seconds between lava damage ticks
 
 const Player: React.FC = () => {
     const { camera } = useThree();
@@ -63,6 +67,9 @@ const Player: React.FC = () => {
     const miningTarget = useRef<string | null>(null);
     const miningProgress = useRef(0);
     const ambienceStarted = useRef(false);
+    const lavaTimer = useRef(0);
+    const miningHeld = useRef(false);
+    const lavaTick = useRef(0);
 
     const storeRef = useRef(useGameStore.getState());
     useEffect(() => {
@@ -100,6 +107,11 @@ const Player: React.FC = () => {
     const isInWater = useCallback((x: number, y: number, z: number): boolean => {
         const type = storeRef.current.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
         return type === BlockType.WATER;
+    }, []);
+
+    const isInLava = useCallback((x: number, y: number, z: number): boolean => {
+        const type = storeRef.current.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
+        return type === BlockType.LAVA;
     }, []);
 
     // ─── Raycast ───────────────────────────────────────────
@@ -145,11 +157,10 @@ const Player: React.FC = () => {
             if (e.button === 0) {
                 // ── Break Block or Attack Mob ──
                 if (!hit) {
-                    // Try hitting a mob instead
                     const dir = camera.getWorldDirection(new THREE.Vector3());
                     attackMob(
                         pos.current.x, pos.current.y, pos.current.z,
-                        [dir.x, dir.y, dir.z], 4 // base fist damage
+                        [dir.x, dir.y, dir.z], 4
                     );
                     return;
                 }
@@ -165,15 +176,28 @@ const Player: React.FC = () => {
                         s.removeBlock(bx, by, bz);
                         bumpAround(bx, bz);
                         checkWaterFill(bx, by, bz);
+                        checkLavaFill(bx, by, bz);
+                        processGravity(bx, by, bz);
                         return;
                     }
 
-                    // Survival = break and collect
+                    // Survival = hold-to-mine (start)
+                    const blockData = BLOCK_DATA[type];
+                    if (blockData && blockData.breakTime > 0) {
+                        miningTarget.current = `${bx},${by},${bz}`;
+                        miningProgress.current = 0;
+                        miningHeld.current = true;
+                        return;
+                    }
+
+                    // Instant break blocks (breakTime = 0)
                     emitBlockBreak(bx, by, bz, type);
                     playSound('break');
                     s.removeBlock(bx, by, bz);
                     bumpAround(bx, bz);
                     checkWaterFill(bx, by, bz);
+                    checkLavaFill(bx, by, bz);
+                    processGravity(bx, by, bz);
 
                     const drop = getBlockDrop(type);
                     if (drop && drop !== BlockType.AIR) {
@@ -236,15 +260,30 @@ const Player: React.FC = () => {
                 playSound('place');
                 bumpAround(px, pz);
 
-                // If placing water, trigger spreading
+                // If placing water/lava, trigger spreading
                 if (selected === BlockType.WATER) {
                     spreadWater(px, py, pz);
+                }
+                if (selected === BlockType.LAVA) {
+                    spreadLava(px, py, pz);
                 }
             }
         };
 
+        const onMouseUp = (e: MouseEvent) => {
+            if (e.button === 0) {
+                miningHeld.current = false;
+                miningTarget.current = null;
+                miningProgress.current = 0;
+            }
+        };
+
         window.addEventListener('mousedown', onMouseDown);
-        return () => window.removeEventListener('mousedown', onMouseDown);
+        window.addEventListener('mouseup', onMouseUp);
+        return () => {
+            window.removeEventListener('mousedown', onMouseDown);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
     }, [raycastBlock, bumpAround]);
 
     // ─── Middle Click (pick block) ─────────────────────────
@@ -506,6 +545,99 @@ const Player: React.FC = () => {
                     playSound('hurt');
                     hungerTimer.current = 0;
                 }
+            }
+
+            // ─── Lava Damage ─────────────────────────────────
+            const inLava = isInLava(p.x, p.y - PLAYER_HEIGHT + 0.1, p.z) || isInLava(p.x, p.y - 0.5, p.z);
+            if (mode === 'survival' && inLava) {
+                lavaTimer.current += dt;
+                if (lavaTimer.current >= LAVA_DAMAGE_INTERVAL) {
+                    s.setHealth(s.health - LAVA_DAMAGE_RATE);
+                    playSound('hurt');
+                    lavaTimer.current = 0;
+                }
+                // Slow movement in lava
+                vel.x *= 0.4;
+                vel.z *= 0.4;
+            } else {
+                lavaTimer.current = 0;
+            }
+
+            // ─── Lava Tick ───────────────────────────────────
+            lavaTick.current += dt;
+            if (lavaTick.current >= 0.6) {
+                tickLava();
+                lavaTick.current = 0;
+            }
+
+            // ─── Hold-to-Mine Progress ───────────────────────
+            if (miningHeld.current && miningTarget.current && mode === 'survival') {
+                const hitNow = raycastBlock();
+                if (hitNow) {
+                    const [mbx, mby, mbz] = hitNow.block;
+                    const currentKey = `${mbx},${mby},${mbz}`;
+                    if (currentKey !== miningTarget.current) {
+                        // Looked away, reset
+                        miningTarget.current = currentKey;
+                        miningProgress.current = 0;
+                    }
+                    const mType = s.getBlock(mbx, mby, mbz);
+                    if (mType && mType !== BlockType.BEDROCK) {
+                        const bData = BLOCK_DATA[mType];
+                        if (bData) {
+                            // Tool speed multiplier
+                            let breakTime = bData.breakTime;
+                            const selectedItem = s.getSelectedBlock();
+                            if (selectedItem && BLOCK_DATA[selectedItem]?.isItem) {
+                                // Check if tool matches block type
+                                const toolName = BLOCK_DATA[selectedItem]?.name?.toLowerCase() ?? '';
+                                const isPickaxe = toolName.includes('kilof');
+                                const isAxe = toolName.includes('siekier');
+                                const isShovel = toolName.includes('łopat');
+                                const matchesTool = (bData.tool === 'pickaxe' && isPickaxe) ||
+                                    (bData.tool === 'axe' && isAxe) ||
+                                    (bData.tool === 'shovel' && isShovel);
+                                if (matchesTool) {
+                                    // Tier bonus: higher tier = faster
+                                    const tierMultiplier = toolName.includes('diament') ? 8 :
+                                        toolName.includes('żelaz') ? 6 :
+                                            toolName.includes('złot') ? 10 :
+                                                toolName.includes('kamien') ? 4 : 2;
+                                    breakTime /= tierMultiplier;
+                                }
+                            }
+                            miningProgress.current += dt / Math.max(0.05, breakTime);
+                            s.setMiningProgress(miningProgress.current);
+
+                            if (miningProgress.current >= 1) {
+                                // Block broken!
+                                emitBlockBreak(mbx, mby, mbz, mType);
+                                playSound('break');
+                                s.removeBlock(mbx, mby, mbz);
+                                bumpAround(mbx, mbz);
+                                checkWaterFill(mbx, mby, mbz);
+                                checkLavaFill(mbx, mby, mbz);
+                                processGravity(mbx, mby, mbz);
+                                const drop = getBlockDrop(mType);
+                                if (drop && drop !== BlockType.AIR) {
+                                    s.addItem(drop, 1);
+                                    playSound('pop');
+                                }
+                                miningTarget.current = null;
+                                miningProgress.current = 0;
+                                miningHeld.current = false;
+                                s.setMiningProgress(0);
+                            }
+                        }
+                    }
+                } else {
+                    miningTarget.current = null;
+                    miningProgress.current = 0;
+                    s.setMiningProgress(0);
+                }
+            } else if (!miningHeld.current && miningProgress.current > 0) {
+                miningProgress.current = 0;
+                s.setMiningProgress(0);
             }
 
             // ─── Void Safety ─────────────────────────────────

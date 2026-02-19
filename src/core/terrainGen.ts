@@ -174,6 +174,14 @@ export function generateChunk(cx: number, cz: number): ChunkData {
                 if (!blocks[idx]) blocks[idx] = BlockType.WATER;
             }
 
+            // Underground lava pools (Y 1-10, in caves)
+            for (let y = 1; y <= 10; y++) {
+                const idx = blockIndex(lx, y, lz);
+                if (blocks[idx] === 0 && isCave(wx, y, wz)) {
+                    blocks[idx] = BlockType.LAVA;
+                }
+            }
+
             // Sandstone under desert
             if (biome === 'desert') {
                 for (let y = h - 4; y > h - 8 && y > 0; y--) {

@@ -22,6 +22,7 @@ const HUD: React.FC = () => {
     const oxygen = useGameStore((s) => s.oxygen);
     const maxOxygen = useGameStore((s) => s.maxOxygen);
     const isChatOpen = useGameStore((s) => s.isChatOpen);
+    const miningProg = useGameStore((s) => s.miningProgressValue);
 
     // Number keys 1-9
     useEffect(() => {
@@ -61,6 +62,20 @@ const HUD: React.FC = () => {
                 <div className="crosshair-v" />
             </div>
 
+            {/* Mining Progress */}
+            {miningProg > 0 && miningProg < 1 && (
+                <div style={{
+                    position: 'absolute', top: '52%', left: '50%', transform: 'translate(-50%, 0)',
+                    width: '80px', height: '4px', background: 'rgba(0,0,0,0.6)', borderRadius: '2px'
+                }}>
+                    <div style={{
+                        width: `${miningProg * 100}%`, height: '100%',
+                        background: 'linear-gradient(90deg, #66ff66, #00cc00)', borderRadius: '2px',
+                        transition: 'width 50ms linear'
+                    }} />
+                </div>
+            )}
+
             {/* Start screen */}
             {!isLocked && (
                 <div className="click-to-play">
@@ -76,7 +91,7 @@ const HUD: React.FC = () => {
                             <span>MMB — wybierz blok</span>
                             <span>1-9 / scroll — hotbar</span>
                             <span>E — ekwipunek</span>
-                            <span>C — crafting</span>
+                            <span>PPM na stół — crafting 3×3</span>
                             <span>T — czat / komendy</span>
                             <span>F3 — debug</span>
                             <span>F1 — ukryj HUD</span>

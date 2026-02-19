@@ -72,6 +72,10 @@ export enum BlockType {
     CHEST = 59,
     TRAPDOOR = 60,
     FURNACE_ON = 61,
+    LAVA = 62,
+    BED = 63,
+    FENCE_OAK = 64,
+    DOOR_OAK = 65,
     // ─── Tool Items ─────────────────────────────────────
     STICK = 100,
     // Wooden tools
@@ -251,6 +255,10 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.TNT]: { name: 'TNT', color: '#cc3333', top: '#ddaa44', transparent: false, solid: true, breakTime: 0.0 },
     [BlockType.BOOKSHELF]: { name: 'Biblioteczka', color: '#b8945f', transparent: false, solid: true, breakTime: 1.5, tool: 'axe' },
     [BlockType.TRAPDOOR]: { name: 'Klapa', color: '#806030', transparent: true, solid: false, breakTime: 3.0, tool: 'axe' },
+    [BlockType.LAVA]: { name: 'Lawa', color: '#cc6622', transparent: true, solid: false, breakTime: 999, light: 15 },
+    [BlockType.BED]: { name: 'Łóżko', color: '#cc2222', top: '#cc2222', transparent: true, solid: true, breakTime: 0.2 },
+    [BlockType.FENCE_OAK]: { name: 'Płot Dębowy', color: '#b8945f', transparent: true, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.DOOR_OAK]: { name: 'Drzwi Dębowe', color: '#b8945f', transparent: true, solid: false, breakTime: 3.0, tool: 'axe' },
     // ─── Decorative Blocks ──────────────────────────────
     [BlockType.TORCH]: { name: 'Pochodnia', color: '#ffcc00', transparent: true, solid: false, breakTime: 0.0, light: 14 },
     [BlockType.LADDER]: { name: 'Drabina', color: '#a08050', transparent: true, solid: false, breakTime: 0.4, tool: 'axe' },
@@ -386,7 +394,7 @@ export const PLACEABLE_BLOCKS: number[] = Object.keys(BLOCK_DATA)
     .map(Number)
     .filter((id) => {
         const d = BLOCK_DATA[id];
-        return d && !d.isItem && id !== BlockType.WATER && id !== BlockType.BEDROCK && id !== BlockType.FURNACE_ON;
+        return d && !d.isItem && id !== BlockType.WATER && id !== BlockType.LAVA && id !== BlockType.BEDROCK && id !== BlockType.FURNACE_ON;
     });
 
 /** All item IDs (tools etc.) */

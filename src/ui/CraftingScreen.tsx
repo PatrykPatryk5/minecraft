@@ -20,23 +20,19 @@ const CraftingScreen: React.FC = () => {
 
     const [activeTab, setActiveTab] = useState<'grid' | 'recipes'>('grid');
 
-    // C key toggle
+    // C key closes crafting (if open) — opening is only via right-click on Crafting Table
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.code !== 'KeyC' || screen !== 'playing') return;
             const s = useGameStore.getState();
             if (s.isChatOpen) return;
-            if (s.activeOverlay === 'none') {
-                setOverlay('crafting');
-                playSound('open');
-                document.exitPointerLock();
-            } else if (s.activeOverlay === 'crafting') {
+            if (s.activeOverlay === 'crafting') {
                 closeCrafting();
             }
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [setOverlay, screen]);
+    }, [screen]);
 
     // ESC to close (capture phase!)
     useEffect(() => {
@@ -263,7 +259,7 @@ const CraftingScreen: React.FC = () => {
                     </div>
                 )}
 
-                <div className="inv-hint" style={{ marginTop: 8 }}>C — zamknij • Kliknij slot aby usunąć • Kliknij wynik aby skraftować</div>
+                <div className="inv-hint" style={{ marginTop: 8 }}>ESC — zamknij • Kliknij slot aby usunąć • Kliknij wynik aby skraftować</div>
             </div>
         </div>
     );
