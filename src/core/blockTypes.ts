@@ -76,6 +76,30 @@ export enum BlockType {
     BED = 63,
     FENCE_OAK = 64,
     DOOR_OAK = 65,
+    // ─── Redstone Devices ────────────────────────────────
+    LEVER = 66,
+    REDSTONE_TORCH = 67,
+    REDSTONE_LAMP = 68,
+    REDSTONE_WIRE = 69,
+    // ─── Nether & End Blocks ────────────────────────────
+    END_STONE = 71,
+    NETHER_BRICKS = 72,
+    SOUL_SAND = 73,
+    CRYING_OBSIDIAN = 74,
+    END_PORTAL_FRAME = 75,
+    DRAGON_EGG = 76,
+    NETHER_PORTAL_BLOCK = 77,
+    END_PORTAL_BLOCK = 78,
+    // ─── Advanced Blocks ────────────────────────────────
+    PISTON = 81,
+    STICKY_PISTON = 82,
+    JUKEBOX = 84,
+    SPONGE = 85,
+    ENCHANTING_TABLE = 86,
+    ENDER_CHEST = 87,
+    ANVIL = 88,
+    BEACON = 89,
+    NOTEBLOCK = 91,
     // ─── Tool Items ─────────────────────────────────────
     STICK = 100,
     // Wooden tools
@@ -182,11 +206,6 @@ export enum BlockType {
     BLAZE_POWDER = 502,
     EYE_OF_ENDER = 503,
     NETHER_STAR = 504,
-    // ─── Redstone Devices ────────────────────────────────
-    LEVER = 66,
-    REDSTONE_TORCH = 67,
-    REDSTONE_LAMP = 68,
-    REDSTONE_WIRE = 69,
 }
 
 // ─── Block Data Interface ────────────────────────────────
@@ -393,6 +412,25 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.REDSTONE_TORCH]: { name: 'Pochodnia Redstone', color: '#cc0000', transparent: true, solid: false, breakTime: 0, tool: 'hand', emissive: true },
     [BlockType.REDSTONE_LAMP]: { name: 'Lampa Redstone', color: '#8b6914', top: '#aa8833', transparent: false, solid: true, breakTime: 0.3, tool: 'pickaxe' },
     [BlockType.REDSTONE_WIRE]: { name: 'Redstone', color: '#cc0000', transparent: true, solid: false, breakTime: 0, tool: 'hand' },
+    // ─── Nether & End Blocks ────────────────────────────
+    [BlockType.END_STONE]: { name: 'Kamień Endu', color: '#e8e8aa', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+    [BlockType.NETHER_BRICKS]: { name: 'Cegły Netheru', color: '#44222a', transparent: false, solid: true, breakTime: 2.0, tool: 'pickaxe' },
+    [BlockType.SOUL_SAND]: { name: 'Piasek Dusz', color: '#5b4538', transparent: false, solid: true, breakTime: 0.5, tool: 'shovel' },
+    [BlockType.CRYING_OBSIDIAN]: { name: 'Płaczący Obsydian', color: '#32006b', transparent: false, solid: true, breakTime: 50, tool: 'pickaxe', emissive: true },
+    [BlockType.END_PORTAL_FRAME]: { name: 'Rama Portalu Endu', color: '#3b6b4b', top: '#1a4a4a', transparent: false, solid: true, breakTime: 999 },
+    [BlockType.DRAGON_EGG]: { name: 'Smocze Jajo', color: '#0d0016', transparent: true, solid: true, breakTime: 3.0 },
+    [BlockType.NETHER_PORTAL_BLOCK]: { name: 'Portal Netheru', color: '#7b0099', transparent: true, solid: false, breakTime: 999, emissive: true },
+    [BlockType.END_PORTAL_BLOCK]: { name: 'Portal Endu', color: '#001122', transparent: true, solid: false, breakTime: 999, emissive: true },
+    // ─── Advanced Blocks ────────────────────────────────
+    [BlockType.PISTON]: { name: 'Tłok', color: '#8b7355', top: '#998877', transparent: false, solid: true, breakTime: 0.5 },
+    [BlockType.STICKY_PISTON]: { name: 'Lepki Tłok', color: '#8b7355', top: '#66aa44', transparent: false, solid: true, breakTime: 0.5 },
+    [BlockType.JUKEBOX]: { name: 'Szafa Grająca', color: '#6b4226', top: '#8b6240', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.SPONGE]: { name: 'Gąbka', color: '#c2b74e', transparent: false, solid: true, breakTime: 0.6 },
+    [BlockType.ENCHANTING_TABLE]: { name: 'Stół Zaklęć', color: '#2b0000', top: '#cc0000', transparent: true, solid: true, breakTime: 5.0, tool: 'pickaxe' },
+    [BlockType.ENDER_CHEST]: { name: 'Skrzynia Endera', color: '#0d1117', transparent: false, solid: true, breakTime: 22.5, tool: 'pickaxe' },
+    [BlockType.ANVIL]: { name: 'Kowadło', color: '#444444', top: '#555555', transparent: true, solid: true, breakTime: 5.0, tool: 'pickaxe' },
+    [BlockType.BEACON]: { name: 'Latarnia', color: '#7ae9e9', transparent: true, solid: true, breakTime: 3.0, emissive: true, light: 15 },
+    [BlockType.NOTEBLOCK]: { name: 'Blok Nutowy', color: '#6b4226', top: '#8b5a2b', transparent: false, solid: true, breakTime: 0.8, tool: 'axe' },
 };
 
 /** Get block info safely */

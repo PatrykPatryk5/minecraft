@@ -652,68 +652,6 @@
     font-family: var(--font);
 }
 
-.pause-menu {
-    text-align: center;
-    padding: 40px;
-    min-width: 420px;
-}
-
-.pause-menu h2 {
-    font-size: 18px;
-    color: #fff;
-    margin-bottom: 30px;
-    text-shadow: 2px 2px 0 #000;
-}
-
-.mc-button {
-    display: block;
-    width: 100%;
-    padding: 12px 24px;
-    margin-bottom: 12px;
-    font-family: var(--font);
-    font-size: 10px;
-    color: #fff;
-    background: linear-gradient(to bottom, #5a5a5a, #3a3a3a 40%, #2a2a2a 60%, #3a3a3a);
-    border: 2px solid #000;
-    outline: 2px solid #4a4a4a;
-    cursor: pointer;
-    text-shadow: 2px 2px 0 #222;
-    transition: all .1s;
-}
-
-.mc-button:hover {
-    background: linear-gradient(to bottom, #6a6aff, #4a4aff 40%, #3a3aff 60%, #5a5aff);
-    outline-color: #7a7aff;
-}
-
-.mc-button.secondary {
-    background: linear-gradient(to bottom, #5a3a3a, #3a2a2a 40%, #2a1a1a 60%, #3a2a2a);
-    outline-color: #4a3a3a;
-}
-
-.mc-button.secondary:hover {
-    background: linear-gradient(to bottom, #7a3a3a, #5a2a2a 40%, #4a1a1a 60%, #5a2a2a);
-}
-
-.settings-group {
-    margin: 16px 0;
-    padding: 14px;
-    background: rgba(0, 0, 0, .3);
-    border: 1px solid #555;
-    border-radius: 2px;
-    text-align: left;
-}
-
-.settings-group label {
-    display: block;
-    font-size: 8px;
-    color: var(--mc-gray);
-    margin-bottom: 8px;
-}
-
-.settings-group strong {
-    color: var(--mc-accent);
-}
 
 /* Slider */
 .mc-slider {
@@ -738,6 +676,135 @@
 
 .mc-slider::-webkit-slider-thumb:hover {
     background: linear-gradient(to bottom, #7a7aff, #4a4aff);
+}
+
+/* ─── New Pause Panel (LAN, settings, compact) ─────── */
+.pause-panel {
+    background: rgba(20, 20, 40, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 2px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    padding: 28px 32px;
+    min-width: 380px;
+    max-width: 440px;
+    max-height: 85vh;
+    overflow-y: auto;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    animation: panelSlideIn 0.2s ease-out;
+}
+
+@keyframes panelSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.pause-panel h2 {
+    font-size: 16px;
+    color: #fff;
+    margin-bottom: 16px;
+    text-shadow: 2px 2px 0 #000;
+    letter-spacing: 2px;
+}
+
+.pause-panel .mc-btn {
+    margin-bottom: 6px;
+}
+
+.pause-panel .mc-btn.active {
+    background: linear-gradient(to bottom, #4a7a4a, #3a5a3a 40%, #2a4a2a 60%, #3a5a3a);
+    outline-color: #5a8a5a;
+    box-shadow: 0 0 12px rgba(80, 200, 80, 0.3);
+}
+
+/* Settings compact layout */
+.settings-compact {
+    margin: 12px 0;
+    padding: 12px 14px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    text-align: left;
+}
+
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-size: 8px;
+    color: #bbb;
+}
+
+.setting-row:last-child {
+    margin-bottom: 0;
+}
+
+.setting-row span {
+    white-space: nowrap;
+}
+
+.setting-row strong {
+    color: var(--mc-accent);
+}
+
+.setting-row .mc-slider {
+    flex: 1;
+    min-width: 80px;
+}
+
+.setting-row label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 8px;
+    color: #bbb;
+}
+
+/* Compact mode selector (for pause menu) */
+.mode-selector.compact {
+    display: flex;
+    gap: 2px;
+}
+
+.mode-btn.sm {
+    padding: 4px 8px;
+    font-size: 10px;
+    min-width: 32px;
+    border-radius: 2px;
+}
+
+/* LAN info panel */
+.pause-panel code {
+    font-family: 'Courier New', monospace;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 8px;
+    color: var(--mc-accent);
+}
+
+/* Scrollbar for pause panel */
+.pause-panel::-webkit-scrollbar {
+    width: 4px;
+}
+
+.pause-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.pause-panel::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
 }
 
 /* ================================================================
@@ -1427,7 +1494,7 @@
     z-index: 100;
 }
 
-.pause-menu {
+.pause-overlay {
     z-index: 200;
 }
 

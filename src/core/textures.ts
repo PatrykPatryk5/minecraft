@@ -642,10 +642,266 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.FLOWER_YELLOW: fillNoise(ctx, [60, 140, 40], 20, seed);
             for (let y = 4; y < 9; y++) for (let x = 5; x < 11; x++) if (rng() < 0.6) px(ctx, x, y, 240, 220, 40); return;
         case BlockType.TALL_GRASS: fillNoise(ctx, [60, 140, 40], 25, seed); return;
-    }
+        case BlockType.LAVA: drawLava(ctx, seed); return;
 
-    // Lava (if LAVA = 62 is defined)
-    if (blockId === 62) { drawLava(ctx, seed); return; }
+        // ─── Nether & End Blocks ────────────────────────
+        case BlockType.SOUL_SAND:
+            fillNoise(ctx, [91, 69, 56], 18, seed);
+            // Dark porous holes
+            for (let i = 0; i < 12; i++) {
+                const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
+                px(ctx, sx, sy, 50, 35, 25);
+                if (rng() > 0.5) px(ctx, (sx + 1) & 15, sy, 55, 40, 28);
+            }
+            return;
+        case BlockType.END_STONE:
+            fillNoise(ctx, [232, 232, 170], 15, seed);
+            for (let i = 0; i < 8; i++) {
+                const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
+                px(ctx, sx, sy, 210, 210, 145);
+            }
+            return;
+        case BlockType.NETHER_BRICKS:
+            fillNoise(ctx, [44, 22, 26], 12, seed);
+            // Brick mortar pattern
+            for (let i = 0; i < 16; i++) {
+                px(ctx, i, 0, 35, 15, 18); px(ctx, i, 4, 35, 15, 18);
+                px(ctx, i, 8, 35, 15, 18); px(ctx, i, 12, 35, 15, 18);
+            }
+            for (let y = 0; y < 16; y++) {
+                const off = (Math.floor(y / 4) % 2 === 0) ? 0 : 8;
+                px(ctx, off, y, 35, 15, 18);
+                px(ctx, (off + 8) % 16, y, 35, 15, 18);
+            }
+            return;
+        case BlockType.CRYING_OBSIDIAN:
+            drawObsidian(ctx, seed);
+            // Purple glowing tears
+            for (let i = 0; i < 6; i++) {
+                const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
+                px(ctx, sx, sy, 120, 40, 200);
+                px(ctx, sx, (sy + 1) & 15, 100, 30, 180);
+                px(ctx, sx, (sy + 2) & 15, 80, 20, 160);
+            }
+            return;
+        case BlockType.END_PORTAL_FRAME:
+            if (face === 'top') {
+                fillNoise(ctx, [26, 74, 74], 12, seed);
+                // Eye socket
+                for (let y = 5; y < 11; y++) for (let x = 5; x < 11; x++) {
+                    px(ctx, x, y, 15, 50, 50);
+                }
+                px(ctx, 7, 7, 10, 180, 180); px(ctx, 8, 7, 10, 180, 180);
+                px(ctx, 7, 8, 10, 180, 180); px(ctx, 8, 8, 10, 180, 180);
+            } else {
+                fillNoise(ctx, [59, 107, 75], 15, seed);
+                // Side decorative pattern
+                for (let x = 0; x < 16; x++) px(ctx, x, 0, 45, 88, 58);
+                for (let x = 0; x < 16; x++) px(ctx, x, 15, 45, 88, 58);
+            }
+            return;
+        case BlockType.DRAGON_EGG:
+            fillNoise(ctx, [13, 0, 22], 8, seed);
+            // Purple sparkle highlights
+            for (let i = 0; i < 4; i++) {
+                const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
+                px(ctx, sx, sy, 60, 10, 100);
+            }
+            return;
+        case BlockType.NETHER_PORTAL_BLOCK:
+            for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+                const v = rng() * 40 - 20;
+                const swirl = Math.sin(x * 0.5 + y * 0.3) * 30;
+                px(ctx, x, y, 100 + v + swirl, 0, 160 + v + swirl * 0.5);
+            }
+            return;
+        case BlockType.END_PORTAL_BLOCK:
+            for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+                const starfield = rng() < 0.1;
+                if (starfield) px(ctx, x, y, 100 + (rng() * 155 | 0), 180 + (rng() * 75 | 0), 200 + (rng() * 55 | 0));
+                else px(ctx, x, y, 0, 8 + (rng() * 15 | 0), 20 + (rng() * 15 | 0));
+            }
+            return;
+
+        // ─── Redstone Devices ───────────────────────────
+        case BlockType.LEVER:
+            fillNoise(ctx, [130, 130, 130], 15, seed);
+            // Lever handle
+            for (let y = 3; y < 12; y++) { px(ctx, 7, y, 90, 70, 45); px(ctx, 8, y, 90, 70, 45); }
+            // Base plate
+            for (let x = 4; x < 12; x++) { px(ctx, x, 12, 85, 85, 85); px(ctx, x, 13, 80, 80, 80); }
+            return;
+        case BlockType.REDSTONE_TORCH:
+            fillNoise(ctx, [20, 20, 20], 5, seed);
+            // Torch stick
+            for (let y = 4; y < 14; y++) { px(ctx, 7, y, 90, 70, 45); px(ctx, 8, y, 85, 65, 40); }
+            // Red glowing top
+            for (let y = 2; y < 5; y++) for (let x = 6; x < 10; x++) {
+                px(ctx, x, y, 200 + (rng() * 55 | 0), 20, 10);
+            }
+            return;
+        case BlockType.REDSTONE_LAMP:
+            if (face === 'top' || face === 'bottom') {
+                fillNoise(ctx, [100, 70, 40], 15, seed);
+                for (let y = 3; y < 13; y++) for (let x = 3; x < 13; x++) {
+                    px(ctx, x, y, 180 + (rng() * 40 | 0), 120 + (rng() * 30 | 0), 50);
+                }
+            } else {
+                fillNoise(ctx, [100, 70, 40], 15, seed);
+                // Glowing panels
+                for (let y = 2; y < 14; y++) for (let x = 2; x < 14; x++) {
+                    if ((x === 2 || x === 13 || y === 2 || y === 13)) continue;
+                    px(ctx, x, y, 170 + (rng() * 50 | 0), 110 + (rng() * 30 | 0), 40);
+                }
+            }
+            return;
+        case BlockType.REDSTONE_WIRE:
+            fillNoise(ctx, [55, 55, 55], 8, seed);
+            // Red wire cross pattern
+            for (let i = 0; i < 16; i++) {
+                px(ctx, 7, i, 200, 0, 0); px(ctx, 8, i, 200, 0, 0);
+                px(ctx, i, 7, 200, 0, 0); px(ctx, i, 8, 200, 0, 0);
+            }
+            return;
+
+        // ─── Advanced Blocks ────────────────────────────
+        case BlockType.PISTON:
+            if (face === 'top') {
+                fillNoise(ctx, [153, 136, 119], 12, seed);
+                // Metal plate
+                for (let y = 2; y < 14; y++) for (let x = 2; x < 14; x++) {
+                    px(ctx, x, y, 140 + (rng() * 15 | 0), 125 + (rng() * 12 | 0), 100 + (rng() * 10 | 0));
+                }
+            } else {
+                fillNoise(ctx, [139, 115, 85], 15, seed);
+                // Side grooves
+                for (let y = 0; y < 16; y++) { px(ctx, 0, y, 110, 90, 65); px(ctx, 15, y, 110, 90, 65); }
+            }
+            return;
+        case BlockType.STICKY_PISTON:
+            if (face === 'top') {
+                fillNoise(ctx, [102, 170, 68], 15, seed);
+                // Slime center
+                for (let y = 3; y < 13; y++) for (let x = 3; x < 13; x++) {
+                    px(ctx, x, y, 85 + (rng() * 25 | 0), 160 + (rng() * 25 | 0), 50 + (rng() * 15 | 0));
+                }
+            } else {
+                fillNoise(ctx, [139, 115, 85], 15, seed);
+                for (let y = 0; y < 16; y++) { px(ctx, 0, y, 110, 90, 65); px(ctx, 15, y, 110, 90, 65); }
+            }
+            return;
+        case BlockType.JUKEBOX:
+            drawPlanks(ctx, [107, 66, 38], seed);
+            if (face === 'top') {
+                // Record slot
+                for (let y = 5; y < 11; y++) for (let x = 5; x < 11; x++) {
+                    const dist = Math.sqrt((x - 8) ** 2 + (y - 8) ** 2);
+                    if (dist < 3.5) px(ctx, x, y, 30, 30, 30);
+                }
+                px(ctx, 7, 7, 15, 15, 15); px(ctx, 8, 7, 15, 15, 15);
+            }
+            return;
+        case BlockType.SPONGE:
+            for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+                const v = rng() * 30 - 15;
+                const hole = rng() < 0.2;
+                if (hole) px(ctx, x, y, 160 + v, 155 + v, 60 + v);
+                else px(ctx, x, y, 194 + v, 183 + v, 78 + v);
+            }
+            return;
+        case BlockType.ENCHANTING_TABLE:
+            if (face === 'top') {
+                fillNoise(ctx, [43, 0, 0], 8, seed);
+                // Open book
+                for (let y = 3; y < 13; y++) for (let x = 2; x < 14; x++) {
+                    px(ctx, x, y, 180 + (rng() * 30 | 0), 160 + (rng() * 20 | 0), 120 + (rng() * 15 | 0));
+                }
+                // Glyphs
+                for (let i = 0; i < 8; i++) {
+                    const sx = (rng() * 10 + 3) | 0, sy = (rng() * 8 + 4) | 0;
+                    px(ctx, sx, sy, 40, 30, 80);
+                }
+            } else {
+                drawObsidian(ctx, seed);
+                // Diamond decorations
+                for (let x = 4; x < 12; x++) px(ctx, x, 7, 68, 238, 238);
+                for (let x = 4; x < 12; x++) px(ctx, x, 8, 58, 218, 218);
+            }
+            return;
+        case BlockType.ENDER_CHEST:
+            drawChest(ctx, face, seed + 5000);
+            // Replace colors with dark End theme
+            if (face === 'side') {
+                for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+                    const v = rng() * 12 - 6;
+                    px(ctx, x, y, 13 + v, 17 + v, 23 + v);
+                }
+                // Green latch
+                px(ctx, 7, 6, 20, 180, 120); px(ctx, 8, 6, 20, 180, 120);
+                px(ctx, 7, 7, 15, 160, 100); px(ctx, 8, 7, 15, 160, 100);
+                for (let x = 0; x < 16; x++) px(ctx, x, 8, 10, 14, 20);
+            } else {
+                fillNoise(ctx, [13, 17, 23], 8, seed);
+                for (let i = 0; i < 16; i++) {
+                    px(ctx, i, 0, 8, 11, 16); px(ctx, i, 15, 8, 11, 16);
+                    px(ctx, 0, i, 8, 11, 16); px(ctx, 15, i, 8, 11, 16);
+                }
+            }
+            return;
+        case BlockType.ANVIL:
+            if (face === 'top') {
+                fillNoise(ctx, [68, 68, 68], 10, seed);
+                // T-shape anvil top
+                for (let y = 2; y < 14; y++) for (let x = 4; x < 12; x++) {
+                    px(ctx, x, y, 85 + (rng() * 10 | 0), 85 + (rng() * 10 | 0), 85 + (rng() * 10 | 0));
+                }
+            } else {
+                fillNoise(ctx, [55, 55, 55], 12, seed);
+                // Anvil profile
+                for (let x = 2; x < 14; x++) {
+                    px(ctx, x, 0, 80, 80, 80); px(ctx, x, 1, 75, 75, 75);
+                }
+                for (let x = 5; x < 11; x++) for (let y = 2; y < 12; y++) {
+                    px(ctx, x, y, 60 + (rng() * 10 | 0), 60 + (rng() * 10 | 0), 60 + (rng() * 10 | 0));
+                }
+                for (let x = 1; x < 15; x++) {
+                    px(ctx, x, 13, 75, 75, 75); px(ctx, x, 14, 80, 80, 80); px(ctx, x, 15, 85, 85, 85);
+                }
+            }
+            return;
+        case BlockType.BEACON:
+            if (face === 'top') {
+                fillNoise(ctx, [122, 233, 233], 10, seed);
+                // Light beam center
+                for (let y = 4; y < 12; y++) for (let x = 4; x < 12; x++) {
+                    px(ctx, x, y, 200 + (rng() * 55 | 0), 240 + (rng() * 15 | 0), 255);
+                }
+            } else {
+                fillNoise(ctx, [70, 180, 180], 12, seed);
+                // Glass-like obsidian frame
+                for (let i = 0; i < 16; i++) {
+                    px(ctx, i, 0, 30, 15, 45); px(ctx, i, 15, 30, 15, 45);
+                    px(ctx, 0, i, 30, 15, 45); px(ctx, 15, i, 30, 15, 45);
+                }
+                // Inner glow
+                for (let y = 3; y < 13; y++) for (let x = 3; x < 13; x++) {
+                    px(ctx, x, y, 140 + (rng() * 60 | 0), 230 + (rng() * 25 | 0), 255);
+                }
+            }
+            return;
+        case BlockType.NOTEBLOCK:
+            drawPlanks(ctx, [107, 66, 38], seed);
+            if (face === 'top') {
+                // Note symbol
+                px(ctx, 8, 4, 50, 40, 30); px(ctx, 9, 4, 50, 40, 30);
+                for (let y = 5; y < 10; y++) px(ctx, 9, y, 50, 40, 30);
+                for (let y = 9; y < 12; y++) for (let x = 6; x < 10; x++) {
+                    const dist = Math.sqrt((x - 7.5) ** 2 + (y - 10.5) ** 2);
+                    if (dist < 2) px(ctx, x, y, 45, 35, 25);
+                }
+            }
+            return;
+    }
 
     // Generic fallback: use block color with noise
     let color = data.color;
@@ -706,16 +962,16 @@ export function getBlockMaterial(blockId: number, face: 'top' | 'bottom' | 'side
     const isGlass = blockId === BlockType.GLASS;
     const isWater = blockId === BlockType.WATER;
     const isLeaf = blockId === BlockType.LEAVES;
-    const isGlow = blockId === BlockType.GLOWSTONE || blockId === BlockType.TORCH;
-    const isLava = blockId === 62; // BlockType.LAVA if defined
+    const isLava = blockId === BlockType.LAVA;
+    const isEmissive = data?.emissive || blockId === BlockType.GLOWSTONE || blockId === BlockType.TORCH || isLava;
 
     const mat = new THREE.MeshLambertMaterial({
         map: tex,
         transparent: data?.transparent ?? false,
         opacity: isWater ? 0.55 : isGlass ? 0.7 : isLeaf ? 0.9 : 1,
         side: data?.transparent ? THREE.DoubleSide : THREE.FrontSide,
-        emissive: (isGlow || isLava) ? new THREE.Color(data?.color ?? '#eedd66') : undefined,
-        emissiveIntensity: isLava ? 0.8 : isGlow ? 0.5 : 0,
+        emissive: isEmissive ? new THREE.Color(data?.color ?? '#eedd66') : undefined,
+        emissiveIntensity: isLava ? 0.8 : isEmissive ? 0.5 : 0,
         alphaTest: isLeaf ? 0.15 : 0,
         vertexColors: true,
     });
@@ -735,10 +991,8 @@ export function preloadAllTextures(): void {
     }
 }
 
-// ─── 3D Isometric Block Icon Renderer ────────────────────
+// ─── 3D Textured Isometric Block Icon ────────────────────
 const iconCache = new Map<number, string>();
-
-function hexToRgb(h: string): RGB { return hex(h); }
 
 export function getBlockIcon(blockId: number): string {
     const cached = iconCache.get(blockId);
@@ -752,60 +1006,113 @@ export function getBlockIcon(blockId: number): string {
     canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d')!;
 
-    const topColor = data.top ?? data.color;
-    const sideColor = data.color;
-    const frontColor = data.bottom ?? data.color;
-
-    const cx = size / 2;
-    const cy = size / 2;
-    const s = size * 0.35;
-
     if (data.isItem) {
+        // Item rendering: sword/tool shape
         const rgb = hex(data.color);
-        ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-        ctx.fillRect(size * 0.4, size * 0.1, size * 0.2, size * 0.5);
+        const grd = ctx.createLinearGradient(size * 0.4, 0, size * 0.6, size);
+        grd.addColorStop(0, `rgb(${Math.min(255, rgb[0] + 50)},${Math.min(255, rgb[1] + 50)},${Math.min(255, rgb[2] + 50)})`);
+        grd.addColorStop(1, `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`);
+        ctx.fillStyle = grd;
+        // Blade
+        ctx.beginPath();
+        ctx.moveTo(size * 0.42, size * 0.05);
+        ctx.lineTo(size * 0.58, size * 0.05);
+        ctx.lineTo(size * 0.56, size * 0.5);
+        ctx.lineTo(size * 0.44, size * 0.5);
+        ctx.closePath(); ctx.fill();
+        // Guard
+        ctx.fillStyle = '#888';
+        ctx.fillRect(size * 0.35, size * 0.48, size * 0.3, size * 0.06);
+        // Handle
         ctx.fillStyle = '#8B6B3E';
-        ctx.fillRect(size * 0.45, size * 0.5, size * 0.1, size * 0.4);
-        ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1;
-        ctx.strokeRect(size * 0.4, size * 0.1, size * 0.2, size * 0.5);
-        ctx.strokeRect(size * 0.45, size * 0.5, size * 0.1, size * 0.4);
+        ctx.fillRect(size * 0.44, size * 0.54, size * 0.12, size * 0.35);
+        // Outline
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1;
+        ctx.strokeRect(size * 0.42, size * 0.05, size * 0.16, size * 0.45);
     } else {
-        // Top face
-        const topRgb = hex(topColor);
-        ctx.fillStyle = `rgb(${Math.min(255, topRgb[0] + 25)},${Math.min(255, topRgb[1] + 25)},${Math.min(255, topRgb[2] + 25)})`;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy - s * 0.6); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s * 0.6); ctx.lineTo(cx - s, cy);
-        ctx.closePath(); ctx.fill();
-        // Left face
-        const sideRgb = hex(sideColor);
-        ctx.fillStyle = `rgb(${(sideRgb[0] * 0.7) | 0},${(sideRgb[1] * 0.7) | 0},${(sideRgb[2] * 0.7) | 0})`;
-        ctx.beginPath();
-        ctx.moveTo(cx - s, cy); ctx.lineTo(cx, cy + s * 0.6); ctx.lineTo(cx, cy + s * 1.5); ctx.lineTo(cx - s, cy + s * 0.9);
-        ctx.closePath(); ctx.fill();
-        // Right face
-        const frontRgb = hex(frontColor);
-        ctx.fillStyle = `rgb(${(frontRgb[0] * 0.5) | 0},${(frontRgb[1] * 0.5) | 0},${(frontRgb[2] * 0.5) | 0})`;
-        ctx.beginPath();
-        ctx.moveTo(cx + s, cy); ctx.lineTo(cx, cy + s * 0.6); ctx.lineTo(cx, cy + s * 1.5); ctx.lineTo(cx + s, cy + s * 0.9);
-        ctx.closePath(); ctx.fill();
-        // Edges
-        ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy - s * 0.6); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s * 0.6); ctx.lineTo(cx - s, cy);
-        ctx.closePath(); ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(cx - s, cy); ctx.lineTo(cx - s, cy + s * 0.9); ctx.lineTo(cx, cy + s * 1.5); ctx.lineTo(cx, cy + s * 0.6);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(cx + s, cy); ctx.lineTo(cx + s, cy + s * 0.9); ctx.lineTo(cx, cy + s * 1.5); ctx.lineTo(cx, cy + s * 0.6);
-        ctx.stroke();
-        // Ore dots
-        if (data.ore) {
-            const oreRgb = hex(data.ore);
-            ctx.fillStyle = `rgba(${oreRgb[0]},${oreRgb[1]},${oreRgb[2]},0.65)`;
-            const irng = sRng(blockId * 777);
-            for (let i = 0; i < 3; i++) ctx.fillRect((irng() * (size - 10) + 5) | 0, (irng() * (size - 10) + 5) | 0, 3, 3);
+        // Create mini 16x16 textures for each face
+        const topTex = document.createElement('canvas');
+        topTex.width = TEX_SIZE; topTex.height = TEX_SIZE;
+        const topCtx = topTex.getContext('2d')!;
+        const topSeed = blockId * 1000 + 1;
+        drawBlockTexture(topCtx, blockId, 'top', topSeed);
+
+        const sideTex = document.createElement('canvas');
+        sideTex.width = TEX_SIZE; sideTex.height = TEX_SIZE;
+        const sideCtx = sideTex.getContext('2d')!;
+        const sideSeed = blockId * 1000 + 3;
+        drawBlockTexture(sideCtx, blockId, 'side', sideSeed);
+
+        const topImgData = topCtx.getImageData(0, 0, TEX_SIZE, TEX_SIZE);
+        const sideImgData = sideCtx.getImageData(0, 0, TEX_SIZE, TEX_SIZE);
+
+        const cX = size / 2;
+        const cY = size / 2 - 2;
+        const sc = size * 0.38;
+        const halfH = sc * 0.55;
+
+        // Draw top face (isometric projection with pixel sampling)
+        for (let ty = 0; ty < TEX_SIZE; ty++) {
+            for (let tx = 0; tx < TEX_SIZE; tx++) {
+                const idx = (ty * TEX_SIZE + tx) * 4;
+                const r = topImgData.data[idx], g = topImgData.data[idx + 1], b = topImgData.data[idx + 2];
+                // Brighten top face
+                const u = tx / TEX_SIZE, v = ty / TEX_SIZE;
+                const px2 = cX + (u - 0.5) * sc + (v - 0.5) * (-sc);
+                const py2 = cY + (u - 0.5) * halfH + (v - 0.5) * halfH - halfH;
+                ctx.fillStyle = `rgb(${Math.min(255, r + 30)},${Math.min(255, g + 30)},${Math.min(255, b + 30)})`;
+                ctx.fillRect(px2 | 0, py2 | 0, 2, 2);
+            }
         }
+
+        // Draw left face
+        for (let ty = 0; ty < TEX_SIZE; ty++) {
+            for (let tx = 0; tx < TEX_SIZE; tx++) {
+                const idx = (ty * TEX_SIZE + tx) * 4;
+                const r = sideImgData.data[idx], g = sideImgData.data[idx + 1], b = sideImgData.data[idx + 2];
+                const u = tx / TEX_SIZE, v = ty / TEX_SIZE;
+                const px2 = cX + (u - 1) * sc;
+                const py2 = cY + u * halfH + v * sc * 0.9 - halfH * 0.1;
+                ctx.fillStyle = `rgb(${(r * 0.7) | 0},${(g * 0.7) | 0},${(b * 0.7) | 0})`;
+                ctx.fillRect(px2 | 0, py2 | 0, 2, 2);
+            }
+        }
+
+        // Draw right face
+        for (let ty = 0; ty < TEX_SIZE; ty++) {
+            for (let tx = 0; tx < TEX_SIZE; tx++) {
+                const idx = (ty * TEX_SIZE + tx) * 4;
+                const r = sideImgData.data[idx], g = sideImgData.data[idx + 1], b = sideImgData.data[idx + 2];
+                const u = tx / TEX_SIZE, v = ty / TEX_SIZE;
+                const px2 = cX + u * sc;
+                const py2 = cY - u * halfH + halfH + v * sc * 0.9 - halfH * 0.1;
+                ctx.fillStyle = `rgb(${(r * 0.5) | 0},${(g * 0.5) | 0},${(b * 0.5) | 0})`;
+                ctx.fillRect(px2 | 0, py2 | 0, 2, 2);
+            }
+        }
+
+        // Emissive glow overlay
+        if (data.emissive) {
+            const rgb2 = hex(data.color);
+            ctx.globalCompositeOperation = 'screen';
+            const glow = ctx.createRadialGradient(cX, cY + 5, 0, cX, cY + 5, sc * 1.2);
+            glow.addColorStop(0, `rgba(${rgb2[0]},${rgb2[1]},${rgb2[2]},0.4)`);
+            glow.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = glow;
+            ctx.fillRect(0, 0, size, size);
+            ctx.globalCompositeOperation = 'source-over';
+        }
+
+        // Subtle edge highlight
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(cX, cY - halfH);
+        ctx.lineTo(cX + sc, cY);
+        ctx.lineTo(cX, cY + halfH);
+        ctx.lineTo(cX - sc, cY);
+        ctx.closePath();
+        ctx.stroke();
     }
 
     const url = canvas.toDataURL();

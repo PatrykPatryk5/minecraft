@@ -21,22 +21,22 @@ export type ClientPacket =
     | { type: 'ping'; payload: { ts: number } };
 
 export type ServerPacket =
-    | { type: 'welcome'; payload: { playerId: string; worldSeed: number; players: PlayerInfo[] } }
+    | { type: 'welcome'; payload: { playerId: string; worldSeed?: number; players: PlayerInfo[] } }
     | { type: 'player_join'; payload: PlayerInfo }
     | { type: 'player_leave'; payload: { id: string } }
-    | { type: 'player_move'; payload: { id: string; pos: [number, number, number]; rot: [number, number] } }
+    | { type: 'player_move'; payload: { id: string; pos: [number, number, number]; rot?: [number, number] } }
     | { type: 'block_update'; payload: { x: number; y: number; z: number; blockType: number } }
-    | { type: 'chat_broadcast'; payload: { sender: string; text: string; time: number } }
+    | { type: 'chat_broadcast'; payload: { sender: string; text: string; time?: number } }
     | { type: 'chunk_data'; payload: { cx: number; cz: number; data: Record<string, number> } }
-    | { type: 'pong'; payload: { ts: number; serverTime: number } };
+    | { type: 'pong'; payload: { ts: number; serverTime?: number } };
 
 export interface PlayerInfo {
     id: string;
     name: string;
     pos: [number, number, number];
-    rot: [number, number];
-    gameMode: 'survival' | 'creative' | 'spectator';
-    health: number;
+    rot?: [number, number];
+    gameMode?: 'survival' | 'creative' | 'spectator';
+    health?: number;
     skin?: string;
 }
 

@@ -15,7 +15,8 @@ import { BlockType } from '../core/blockTypes';
 import { playSound } from '../audio/sounds';
 
 // ─── Types ──────────────────────────────────────────────
-export type MobType = 'zombie' | 'skeleton' | 'creeper' | 'pig' | 'cow' | 'sheep';
+export type MobType = 'zombie' | 'skeleton' | 'creeper' | 'pig' | 'cow' | 'sheep'
+    | 'enderman' | 'spider' | 'blaze' | 'chicken' | 'wolf';
 
 export interface Mob {
     id: number;
@@ -33,17 +34,22 @@ export interface Mob {
     despawnTimer: number;
 }
 
-export const MOB_STATS: Record<MobType, { health: number; speed: number; damage: number; hostile: boolean; color: string }> = {
+export const MOB_STATS: Record<MobType, { health: number; speed: number; damage: number; hostile: boolean; color: string; dimension?: string }> = {
     zombie: { health: 20, speed: 1.8, damage: 3, hostile: true, color: '#4a7a3d' },
     skeleton: { health: 20, speed: 2.0, damage: 3, hostile: true, color: '#c8c8c8' },
     creeper: { health: 20, speed: 1.5, damage: 0, hostile: true, color: '#3eb049' },
+    spider: { health: 16, speed: 2.5, damage: 2, hostile: true, color: '#3d3020' },
+    enderman: { health: 40, speed: 3.0, damage: 7, hostile: false, color: '#1a1a2e', dimension: 'end' },
+    blaze: { health: 20, speed: 1.5, damage: 5, hostile: true, color: '#ff8800', dimension: 'nether' },
     pig: { health: 10, speed: 1.2, damage: 0, hostile: false, color: '#f0a0a0' },
     cow: { health: 10, speed: 1.0, damage: 0, hostile: false, color: '#6b3d1f' },
     sheep: { health: 8, speed: 1.3, damage: 0, hostile: false, color: '#e8e8e8' },
+    chicken: { health: 4, speed: 1.5, damage: 0, hostile: false, color: '#f5f5f0' },
+    wolf: { health: 8, speed: 2.2, damage: 4, hostile: false, color: '#d0d0d0' },
 };
 
 // ─── Constants ──────────────────────────────────────────
-const MAX_MOBS = 30;
+const MAX_MOBS = 50;
 const SPAWN_RADIUS_MIN = 24;
 const SPAWN_RADIUS_MAX = 80;
 const DESPAWN_DISTANCE = 128;

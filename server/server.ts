@@ -81,7 +81,7 @@ wss.on('connection', (ws: WebSocket) => {
         }
     });
 
-    ws.on('error', (err) => {
+    ws.on('error', (err: Error) => {
         console.warn(`[Server] WS error for ${playerId}:`, err.message);
     });
 
