@@ -22,7 +22,18 @@ const Inventory: React.FC = () => {
     const invCraftGrid = useGameStore((s) => s.inventoryCraftingGrid);
     const setInvCraftGrid = useGameStore((s) => s.setInventoryCraftingGrid);
 
-    const [held, setHeld] = useState<InventorySlot | null>(null);
+    const cursorItem = useGameStore((s) => s.cursorItem);
+    const setCursorItem = useGameStore((s) => s.setCursorItem);
+
+    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+    useEffect(() => {
+        const onMouseMove = (e: MouseEvent) => {
+            setMousePos({ x: e.clientX, y: e.clientY });
+        };
+        window.addEventListener('mousemove', onMouseMove);
+        return () => window.removeEventListener('mousemove', onMouseMove);
+    }, []);
 
     // E key toggle
     useEffect(() => {
@@ -56,14 +67,23 @@ const Inventory: React.FC = () => {
 
     const closeInv = () => {
         // Return 2x2 crafting items to player
-        if (useGameStore.getState().gameMode === 'survival') {
+        const s = useGameStore.getState();
+        if (s.gameMode === 'survival') {
             for (const id of invCraftGrid) {
-                if (id) useGameStore.getState().addItem(id, 1);
+                if (id) s.addItem(id, 1);
             }
+            // Return cursor item logic? For now, we keep it in store or drop it?
+            // MC Logic: Throw item. Here: just keep it in cursor?
+            // Usually cursor clears. Let's return it to inventory if possible.
+            if (s.cursorItem) {
+                s.addItem(s.cursorItem.id, s.cursorItem.count);
+                s.setCursorItem(null);
+            }
+        } else {
+            s.setCursorItem(null);
         }
         setInvCraftGrid(Array(4).fill(0));
         setOverlay('none');
-        setHeld(null);
         playSound('close');
         document.querySelector('canvas')?.requestPointerLock();
     };
@@ -75,17 +95,71 @@ const Inventory: React.FC = () => {
         if (!craftResult) return;
         playSound('craft');
         setInvCraftGrid(Array(4).fill(0));
-        useGameStore.getState().addItem(craftResult.result, craftResult.count);
+        // Result goes to cursor if empty, or inventory?
+        // Simple: Add to inventory.
+        // Better: Put in cursor if empty.
+        const s = useGameStore.getState();
+        if (!s.cursorItem) {
+            s.setCursorItem({ id: craftResult.result, count: craftResult.count });
+        } else if (s.cursorItem.id === craftResult.result && s.cursorItem.count + craftResult.count <= 64) {
+            s.setCursorItem({ ...s.cursorItem, count: s.cursorItem.count + craftResult.count });
+        } else {
+            s.addItem(craftResult.result, craftResult.count);
+        }
     };
 
-    const setCraftSlot = (index: number, blockId: number) => {
+    // Interaction with 2x2 grid (Place 1 / Take 1)
+    const handleCraftGridClick = (index: number) => {
+        playSound('click');
+        const newGrid = [...invCraftGrid];
+        const slotId = newGrid[index];
+        const s = useGameStore.getState();
+
+        if (cursorItem) {
+            // Place 1 item from cursor
+            if (slotId === 0) {
+                newGrid[index] = cursorItem.id;
+                setInvCraftGrid(newGrid);
+                if (gameMode === 'survival') {
+                    const newCursor = { ...cursorItem, count: cursorItem.count - 1 };
+                    setCursorItem(newCursor.count > 0 ? newCursor : null);
+                }
+            } else if (slotId === cursorItem.id) {
+                // Already filled with same? Do nothing (limit 1) or swap?
+                // Since it's number[], limit is 1.
+            } else {
+                // Swap 1 for 1? 
+                // Takes slot item to cursor (count 1)?
+                // Put 1 cursor item?
+                // Complex. Let's just allow placing if empty.
+            }
+        } else if (slotId !== 0) {
+            // Pick up
+            setCursorItem({ id: slotId, count: 1 });
+            newGrid[index] = 0;
+            setInvCraftGrid(newGrid);
+        }
+    };
+
+    // Helper for Palette (fill crafting slot from inventory/creative)
+    const setCraftSlotFromPalette = (index: number, blockId: number) => {
+        // ... implementation of old setCraftSlot logic shortened/simplified?
+        // This was used when clicking palette to AUTO-FILL simple 2x2?
+        // The user code separates Palette Click -> setHeld (lines 153-156).
+        // AND line 227: `setCraftSlot(emptyIdx, id)`.
+
+        // Reuse old logic partially or just simplify?
+        // Old logic consumed item from inventory.
         const newGrid = [...invCraftGrid];
         if (gameMode === 'survival' && blockId !== 0) {
             const s = useGameStore.getState();
-            let found = false;
+            // Consume 1 item from inventory
             const newHotbar = s.hotbar.map(sl => ({ ...sl }));
             const newInv = s.inventory.map(sl => ({ ...sl }));
-
+            let found = false;
+            // ... search and decrement ...
+            // (Simulated logic for brevity, reusing exact logic helps)
+            // I'll copy-paste the consumption logic from original file lines 93-116
             for (let i = 0; i < 9 && !found; i++) {
                 if (newHotbar[i].id === blockId && newHotbar[i].count > 0) {
                     newHotbar[i].count--;
@@ -104,6 +178,8 @@ const Inventory: React.FC = () => {
             s.setHotbar(newHotbar);
             s.setInventory(newInv);
         }
+
+        // If slot had item, return it
         if (gameMode === 'survival' && newGrid[index]) {
             useGameStore.getState().addItem(newGrid[index], 1);
         }
@@ -111,6 +187,7 @@ const Inventory: React.FC = () => {
         setInvCraftGrid(newGrid);
         playSound('click');
     };
+
 
     if (activeOverlay !== 'inventory') return null;
 
@@ -120,21 +197,21 @@ const Inventory: React.FC = () => {
         const setArr = source === 'hotbar' ? setHotbar : setInventory;
         const newArr = arr.map(s => ({ ...s }));
 
-        if (held) {
+        if (cursorItem) {
             const old = newArr[index];
-            if (old.id === held.id && old.count < 64) {
-                const add = Math.min(held.count, 64 - old.count);
+            if (old.id === cursorItem.id && old.count < 64) {
+                const add = Math.min(cursorItem.count, 64 - old.count);
                 newArr[index].count += add;
-                const remaining = held.count - add;
+                const remaining = cursorItem.count - add;
                 setArr(newArr);
-                setHeld(remaining > 0 ? { id: held.id, count: remaining } : null);
+                setCursorItem(remaining > 0 ? { id: cursorItem.id, count: remaining } : null);
             } else {
-                newArr[index] = held;
+                newArr[index] = cursorItem;
                 setArr(newArr);
-                setHeld(old.id ? old : null);
+                setCursorItem(old.id ? old : null);
             }
         } else if (arr[index].id) {
-            setHeld({ ...arr[index] });
+            setCursorItem({ ...arr[index] });
             newArr[index] = { id: 0, count: 0 };
             setArr(newArr);
         }
@@ -142,14 +219,14 @@ const Inventory: React.FC = () => {
 
     const handlePaletteClick = (blockId: number) => {
         playSound('click');
-        setHeld({ id: blockId, count: 64 });
+        setCursorItem({ id: blockId, count: 64 });
     };
 
     const renderSlot = (slot: InventorySlot, onClick: () => void, selected = false) => {
         const icon = slot.id ? getBlockIcon(slot.id) : null;
         const data = slot.id ? BLOCK_DATA[slot.id] : null;
         return (
-            <div className={`inv-slot${selected ? ' selected' : ''}${held ? ' droppable' : ''}`}
+            <div className={`inv-slot${selected ? ' selected' : ''}${cursorItem ? ' droppable' : ''}`}
                 onClick={onClick} title={data?.name ?? ''}>
                 {slot.id > 0 && icon && (
                     <>
@@ -168,15 +245,7 @@ const Inventory: React.FC = () => {
         closeInv();
     };
 
-    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
-    useEffect(() => {
-        const onMouseMove = (e: MouseEvent) => {
-            setMousePos({ x: e.clientX, y: e.clientY });
-        };
-        window.addEventListener('mousemove', onMouseMove);
-        return () => window.removeEventListener('mousemove', onMouseMove);
-    }, []);
 
     return (
         <div className="inventory-overlay" onClick={close}>
@@ -192,7 +261,7 @@ const Inventory: React.FC = () => {
                                 const icon = id ? getBlockIcon(id) : null;
                                 return (
                                     <div key={i} className={`craft-slot${id ? ' filled' : ''}`}
-                                        onClick={() => setCraftSlot(i, 0)}
+                                        onClick={() => handleCraftGridClick(i)}
                                         title={id ? BLOCK_DATA[id]?.name : ''}>
                                         {id > 0 && icon && <img src={icon} className="block-icon-3d" alt="" draggable={false} />}
                                     </div>
@@ -222,7 +291,7 @@ const Inventory: React.FC = () => {
                             return (
                                 <div key={id} className="palette-slot" onClick={() => {
                                     const emptyIdx = invCraftGrid.findIndex(v => v === 0);
-                                    if (emptyIdx >= 0) setCraftSlot(emptyIdx, id);
+                                    if (emptyIdx >= 0) setCraftSlotFromPalette(emptyIdx, id);
                                 }} title={data.name}>
                                     {icon && <img src={icon} className="block-icon-3d small" alt="" draggable={false} />}
                                 </div>
@@ -270,7 +339,7 @@ const Inventory: React.FC = () => {
             </div>
 
             {/* Floating Cursor Item */}
-            {held && (
+            {cursorItem && (
                 <div style={{
                     position: 'fixed',
                     left: mousePos.x,
@@ -282,14 +351,14 @@ const Inventory: React.FC = () => {
                     height: '48px',
                 }}>
                     <img
-                        src={getBlockIcon(held.id)}
+                        src={getBlockIcon(cursorItem.id)}
                         className="block-icon-3d"
                         alt=""
                         style={{ width: '100%', height: '100%', filter: 'drop-shadow(0 4px 4px rgba(0,0,0,0.5))' }}
                     />
-                    {held.count > 1 && (
+                    {cursorItem.count > 1 && (
                         <span className="item-count" style={{ fontSize: '1.2rem', textShadow: '2px 2px 0 #000' }}>
-                            {held.count}
+                            {cursorItem.count}
                         </span>
                     )}
                 </div>

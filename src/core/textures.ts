@@ -967,6 +967,56 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
                 }
             }
             return;
+        // ─── Farming ────────────────────────────────────
+        case BlockType.FARMLAND:
+            if (face === 'top') {
+                fillNoise(ctx, [55, 35, 20], 15, seed);
+                // Furrows
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                for (let i = 2; i < 16; i += 4) ctx.fillRect(0, i, 16, 2);
+            } else {
+                drawDirt(ctx, seed);
+            }
+            return;
+        case BlockType.SEEDS:
+            // Visualize as item (handled by icon usually, but if block?)
+            // Seeds are an item, but if placed? They become WHEAT_0 block.
+            // So SEEDS texture is only for Item Icon.
+            // Draw generic seed pile
+            fillNoise(ctx, [0, 0, 0], 0, seed); // transparent background?
+            // Items need special rendering if they are just icons.
+            // But icons use `drawBlockTexture` for Top/Side.
+            // Let's just draw noise.
+            fillNoise(ctx, [130, 160, 80], 40, seed);
+            return;
+        case BlockType.WHEAT_0:
+        case BlockType.WHEAT_1:
+        case BlockType.WHEAT_2:
+        case BlockType.WHEAT_3:
+        case BlockType.WHEAT_4:
+        case BlockType.WHEAT_5:
+        case BlockType.WHEAT_6:
+        case BlockType.WHEAT_7:
+            // Clear background
+            ctx.clearRect(0, 0, 16, 16); // Assuming context is clean or needs clearing?
+            // Usually we fill noise.
+            // If transparent, we need to handle it.
+            // `createTexture` creates canvas.
+            // `drawBlockTexture` expects to fill it.
+
+            const stage = blockId - BlockType.WHEAT_0;
+            const height = 4 + stage * 1.5;
+            const r = stage === 7 ? 220 : 50;
+            const g = stage === 7 ? 200 : 200;
+            const b = stage === 7 ? 60 : 50;
+
+            ctx.fillStyle = `rgba(${r},${g},${b}, 1)`;
+            for (let i = 0; i < 5 + stage; i++) {
+                const x = (rng() * 14) | 0;
+                const h = (rng() * height * 0.8 + 2) | 0;
+                ctx.fillRect(x, 16 - h, 2, h);
+            }
+            return;
     }
 
     // Generic fallback: use block color with noise
@@ -1036,7 +1086,7 @@ export function getBlockMaterial(blockId: number, face: 'top' | 'bottom' | 'side
         transparent: data?.transparent ?? false,
         opacity: isWater ? 0.55 : isGlass ? 0.7 : isLeaf ? 0.9 : 1,
         side: data?.transparent ? THREE.DoubleSide : THREE.FrontSide,
-        emissive: isEmissive ? new THREE.Color(data?.color ?? '#eedd66') : undefined,
+        emissive: isEmissive ? new THREE.Color(data?.color ?? '#eedd66') : new THREE.Color(0x000000),
         emissiveIntensity: isLava ? 0.8 : isEmissive ? 0.5 : 0,
         alphaTest: isLeaf ? 0.15 : 0,
         vertexColors: true,

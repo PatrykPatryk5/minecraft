@@ -11,7 +11,7 @@
 
 import React, { useMemo, useRef, useEffect } from 'react';
 import * as THREE from 'three';
-import { BLOCK_DATA } from '../core/blockTypes';
+import { BLOCK_DATA, BlockType } from '../core/blockTypes';
 import { getBlockMaterial } from '../core/textures';
 import useGameStore, { chunkKey } from '../store/gameStore';
 import { CHUNK_SIZE, blockIndex, type ChunkData, MAX_HEIGHT } from '../core/terrainGen';
@@ -46,7 +46,7 @@ function isTransparent(bt: number): boolean {
 
 // ─── Geometry Pool ───────────────────────────────────────
 const geoPool: THREE.BufferGeometry[] = [];
-const MAX_POOL = 64;
+const MAX_POOL = 512;
 
 function getPooledGeo(): THREE.BufferGeometry {
     return geoPool.pop() || new THREE.BufferGeometry();
@@ -171,10 +171,28 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                         const g = groups[mk];
                         const vo = g.positions.length / 3;
 
+                        // Water surface logic: lower height if AIR above
+                        let waterHeight = 1.0;
+                        if (bt === BlockType.WATER) {
+                            let up = 0;
+                            if (y < MAX_HEIGHT - 1) {
+                                up = chunkData[blockIndex(lx, y + 1, lz)];
+                            }
+                            if (up !== BlockType.WATER) {
+                                waterHeight = 0.88;
+                            }
+                        }
+
                         for (let i = 0; i < 4; i++) {
                             const cx0 = lx + face.corners[i][0];
-                            const cy0 = y + face.corners[i][1];
+                            let cy0 = y + face.corners[i][1];
                             const cz0 = lz + face.corners[i][2];
+
+                            // Lower top vertices for water
+                            if (face.corners[i][1] === 1 && waterHeight < 1.0) {
+                                cy0 = y + waterHeight;
+                            }
+
                             g.positions.push(cx0, cy0, cz0);
                             g.normals.push(face.dir[0], face.dir[1], face.dir[2]);
                             g.uvs.push(face.uv[i][0], face.uv[i][1]);

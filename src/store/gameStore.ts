@@ -162,6 +162,10 @@ export interface GameState {
     consumeHotbarItem: (slot: number) => void;
     getSelectedBlock: () => number;
 
+    // ── Global Cursor ─────────────────────────────────────
+    cursorItem: InventorySlot | null;
+    setCursorItem: (item: InventorySlot | null) => void;
+
     // ── Crafting ──────────────────────────────────────────
     craftingGrid: number[];           // 3x3 for table
     setCraftingGrid: (g: number[]) => void;
@@ -326,9 +330,21 @@ const useGameStore = create<GameState>((set, get) => ({
         set((s) => {
             const newGen = new Set(s.generatedChunks);
             newGen.add(key);
+
+            // Bump version for self and neighbors to force re-mesh (fixes culling seams)
+            const versions = { ...s.chunkVersions };
+            const bump = (k: string) => { versions[k] = (versions[k] ?? 0) + 1; };
+
+            bump(key);
+            bump(chunkKey(cx + 1, cz));
+            bump(chunkKey(cx - 1, cz));
+            bump(chunkKey(cx, cz + 1));
+            bump(chunkKey(cx, cz - 1));
+
             return {
                 chunks: { ...s.chunks, [key]: data },
                 generatedChunks: newGen,
+                chunkVersions: versions,
             };
         });
     },
@@ -500,6 +516,10 @@ const useGameStore = create<GameState>((set, get) => ({
         const s = get();
         return s.hotbar[s.hotbarSlot]?.id ?? 0;
     },
+
+    // ── Global Cursor ─────────────────────────────────────
+    cursorItem: null,
+    setCursorItem: (item) => set({ cursorItem: item }),
 
     // ── Crafting ──────────────────────────────────────────
     craftingGrid: Array(9).fill(0),

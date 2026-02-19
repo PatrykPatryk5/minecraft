@@ -17,6 +17,7 @@ import { generateChunk, CHUNK_SIZE, initSeed } from '../core/terrainGen';
 import { WorkerPool } from '../core/workerPool';
 import Chunk from './Chunk';
 import { checkChunkBorders } from '../core/waterSystem';
+import { tickWorld } from '../core/worldTick';
 
 const UNLOAD_BUFFER = 3;
 const BATCH_PER_FRAME = 4;
@@ -164,6 +165,13 @@ const World: React.FC = () => {
 
     // Per-frame: batch send requests + throttled re-render
     useFrame(() => {
+        // Random Ticks (Farming, Grass spread) - Async/Idle to reduce frame jank
+        if ('requestIdleCallback' in window) {
+            (window as any).requestIdleCallback(() => tickWorld(), { timeout: 50 });
+        } else {
+            setTimeout(tickWorld, 0);
+        }
+
         // Send pending requests to worker
         let sent = 0;
         while (

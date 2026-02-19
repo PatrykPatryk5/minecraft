@@ -69,7 +69,7 @@ export type SoundType =
     | 'open' | 'close' | 'levelup'
     | 'explode' | 'bow' | 'pop'
     | 'anvil' | 'xp' | 'fireball' | 'portal'
-    | 'piston_out' | 'piston_in';
+    | 'piston_out' | 'piston_in' | 'gravel';
 
 export function playSound(type: SoundType): void {
     try {
@@ -424,6 +424,20 @@ export function playSound(type: SoundType): void {
                 env.gain.linearRampToValueAtTime(0, now + 0.15);
                 osc.connect(env).connect(mg);
                 osc.start(now); osc.stop(now + 0.2);
+                break;
+            }
+            case 'gravel': {
+                // Gritty noise for farming/digging
+                const noise = createNoise(ctx, 0.15);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 400 + Math.random() * 200;
+                filter.Q.value = 1;
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.4, now);
+                env.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+                noise.connect(filter).connect(env).connect(mg);
+                noise.start(now); noise.stop(now + 0.15);
                 break;
             }
         }

@@ -18,9 +18,21 @@ const CraftingScreen: React.FC = () => {
     const screen = useGameStore((s) => s.screen);
     const gameMode = useGameStore((s) => s.gameMode);
 
-    const [activeTab, setActiveTab] = useState<'grid' | 'recipes'>('grid');
+    const cursorItem = useGameStore((s) => s.cursorItem);
+    const setCursorItem = useGameStore((s) => s.setCursorItem);
 
-    // C key closes crafting (if open) — opening is only via right-click on Crafting Table
+    const [activeTab, setActiveTab] = useState<'grid' | 'recipes'>('grid');
+    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+    useEffect(() => {
+        const onMouseMove = (e: MouseEvent) => {
+            setMousePos({ x: e.clientX, y: e.clientY });
+        };
+        window.addEventListener('mousemove', onMouseMove);
+        return () => window.removeEventListener('mousemove', onMouseMove);
+    }, []);
+
+    // C key closing
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.code !== 'KeyC' || screen !== 'playing') return;
@@ -52,6 +64,12 @@ const CraftingScreen: React.FC = () => {
             for (const id of craftingGrid) {
                 if (id) s.addItem(id, 1);
             }
+            if (s.cursorItem) {
+                s.addItem(s.cursorItem.id, s.cursorItem.count);
+                s.setCursorItem(null);
+            }
+        } else {
+            s.setCursorItem(null);
         }
         setCraftingGrid(Array(9).fill(0));
         setOverlay('none');
@@ -61,7 +79,7 @@ const CraftingScreen: React.FC = () => {
 
     const result = useMemo(() => matchRecipe(craftingGrid, 3), [craftingGrid]);
 
-    const setSlot = (index: number, blockId: number) => {
+    const setSlotFromPalette = (index: number, blockId: number) => {
         const newGrid = [...craftingGrid];
 
         if (gameMode === 'survival' && blockId !== 0) {
@@ -111,8 +129,42 @@ const CraftingScreen: React.FC = () => {
         if (!result) return;
         playSound('craft');
         setCraftingGrid(Array(9).fill(0));
-        useGameStore.getState().addItem(result.result, result.count);
+
+        const s = useGameStore.getState();
+        if (!s.cursorItem) {
+            s.setCursorItem({ id: result.result, count: result.count });
+        } else if (s.cursorItem.id === result.result && s.cursorItem.count + result.count <= 64) {
+            s.setCursorItem({ ...s.cursorItem, count: s.cursorItem.count + result.count });
+        } else {
+            s.addItem(result.result, result.count);
+        }
         playSound('xp');
+    };
+
+    const handleCraftGridClick = (index: number) => {
+        playSound('click');
+        const newGrid = [...craftingGrid];
+        const slotId = newGrid[index];
+        const s = useGameStore.getState();
+
+        if (cursorItem) {
+            if (slotId === 0) {
+                newGrid[index] = cursorItem.id;
+                setCraftingGrid(newGrid);
+                if (gameMode === 'survival') {
+                    const newCursor = { ...cursorItem, count: cursorItem.count - 1 };
+                    setCursorItem(newCursor.count > 0 ? newCursor : null);
+                }
+            } else if (slotId === cursorItem.id) {
+                // Slot filled
+            } else {
+                // Swap not implemented
+            }
+        } else if (slotId !== 0) {
+            setCursorItem({ id: slotId, count: 1 });
+            newGrid[index] = 0;
+            setCraftingGrid(newGrid);
+        }
     };
 
     const loadRecipe = (recipeIndex: number) => {
@@ -198,7 +250,7 @@ const CraftingScreen: React.FC = () => {
                                 {craftingGrid.map((id, i) => {
                                     const icon = id ? getBlockIcon(id) : null;
                                     return (
-                                        <div key={i} className={`craft-slot${id ? ' filled' : ''}`} onClick={() => setSlot(i, 0)} title={id ? BLOCK_DATA[id]?.name : ''}>
+                                        <div key={i} className={`craft-slot${id ? ' filled' : ''}`} onClick={() => handleCraftGridClick(i)} title={id ? BLOCK_DATA[id]?.name : ''}>
                                             {id > 0 && icon && <img src={icon} className="block-icon-3d" alt="" draggable={false} />}
                                         </div>
                                     );
@@ -231,7 +283,7 @@ const CraftingScreen: React.FC = () => {
                                 return (
                                     <div key={id} className="palette-slot" onClick={() => {
                                         const emptyIdx = craftingGrid.findIndex(v => v === 0);
-                                        if (emptyIdx >= 0) setSlot(emptyIdx, id);
+                                        if (emptyIdx >= 0) setSlotFromPalette(emptyIdx, id);
                                     }} title={data.name}>
                                         {icon && <img src={icon} className="block-icon-3d small" alt="" draggable={false} />}
                                     </div>
@@ -261,6 +313,32 @@ const CraftingScreen: React.FC = () => {
 
                 <div className="inv-hint" style={{ marginTop: 8 }}>ESC — zamknij • Kliknij slot aby usunąć • Kliknij wynik aby skraftować</div>
             </div>
+
+            {/* Floating Cursor Item */}
+            {cursorItem && (
+                <div style={{
+                    position: 'fixed',
+                    left: mousePos.x,
+                    top: mousePos.y,
+                    transform: 'translate(-50%, -50%)',
+                    pointerEvents: 'none',
+                    zIndex: 9999,
+                    width: '48px',
+                    height: '48px',
+                }}>
+                    <img
+                        src={getBlockIcon(cursorItem.id)}
+                        className="block-icon-3d"
+                        alt=""
+                        style={{ width: '100%', height: '100%', filter: 'drop-shadow(0 4px 4px rgba(0,0,0,0.5))' }}
+                    />
+                    {cursorItem.count > 1 && (
+                        <span className="item-count" style={{ fontSize: '1.2rem', textShadow: '2px 2px 0 #000' }}>
+                            {cursorItem.count}
+                        </span>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

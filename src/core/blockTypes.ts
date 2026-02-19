@@ -101,6 +101,17 @@ export enum BlockType {
     ANVIL = 88,
     BEACON = 89,
     NOTEBLOCK = 91,
+    // ─── Farming ────────────────────────────────────────
+    FARMLAND = 160,
+    WHEAT_0 = 161,
+    WHEAT_1 = 162,
+    WHEAT_2 = 163,
+    WHEAT_3 = 164,
+    WHEAT_4 = 165,
+    WHEAT_5 = 166,
+    WHEAT_6 = 167,
+    WHEAT_7 = 168,
+    SEEDS = 250,
     // ─── Tool Items ─────────────────────────────────────
     STICK = 100,
     // Wooden tools
@@ -389,6 +400,18 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.COOKIE]: { name: 'Ciasteczko', color: '#cc8833', transparent: false, solid: false, breakTime: 0, isItem: true, foodRestore: 2 },
     [BlockType.MELON_SLICE]: { name: 'Kawałek Arbuza', color: '#cc3333', transparent: false, solid: false, breakTime: 0, isItem: true, foodRestore: 2 },
     [BlockType.MUSHROOM_STEW]: { name: 'Zupa Grzybowa', color: '#bb6644', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, foodRestore: 6 },
+    // ─── Farming ────────────────────────────────────────
+    [BlockType.FARMLAND]: { name: 'Ziemia Uprawna', color: '#6b4226', top: '#4b3216', transparent: false, solid: true, breakTime: 0.6, tool: 'shovel' },
+    [BlockType.SEEDS]: { name: 'Nasiona', color: '#88cc44', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.BONE_MEAL]: { name: 'Mączka Kostna', color: '#ffffff', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.WHEAT_0]: { name: 'Pszenica (etap 0)', color: '#00cc00', transparent: true, solid: false, breakTime: 0 },
+    [BlockType.WHEAT_1]: { name: 'Pszenica (etap 1)', color: '#22cc00', transparent: true, solid: false, breakTime: 0 },
+    [BlockType.WHEAT_2]: { name: 'Pszenica (etap 2)', color: '#44cc00', transparent: true, solid: false, breakTime: 0 },
+    [BlockType.WHEAT_3]: { name: 'Pszenica (etap 3)', color: '#66cc00', transparent: true, solid: false, breakTime: 0 },
+    [BlockType.WHEAT_4]: { name: 'Pszenica (etap 4)', color: '#88cc00', transparent: true, solid: false, breakTime: 0 },
+    [BlockType.WHEAT_5]: { name: 'Pszenica (etap 5)', color: '#aacc00', transparent: true, solid: false, breakTime: 0 },
+    [BlockType.WHEAT_6]: { name: 'Pszenica (etap 6)', color: '#cccc00', transparent: true, solid: false, breakTime: 0 },
+    [BlockType.WHEAT_7]: { name: 'Pszenica (gotowa)', color: '#dccfa0', transparent: true, solid: false, breakTime: 0 },
     // ─── Armor ───────────────────────────────────────────
     [BlockType.LEATHER_HELMET]: { name: 'Skórzany Hełm', color: '#8B4513', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.LEATHER_CHESTPLATE]: { name: 'Skórzany Napierśnik', color: '#8B4513', transparent: false, solid: false, breakTime: 0, isItem: true },

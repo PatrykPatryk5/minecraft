@@ -31,6 +31,7 @@ import { attackMob } from '../mobs/MobSystem';
 import { spreadLava, tickLava, checkLavaFill } from '../core/lavaSystem';
 import { processGravity } from '../core/gravityBlocks';
 import { placePiston } from '../core/pistonSystem';
+import { tillBlock, plantSeed, applyBoneMeal } from '../core/farmingSystem';
 
 // ─── Constants ───────────────────────────────────────────
 const GRAVITY = -28;
@@ -269,6 +270,35 @@ const Player: React.FC = () => {
                 }
                 if (selected === BlockType.LAVA) {
                     spreadLava(px, py, pz);
+                }
+
+                // ─── Farming ─────────────────────────────────
+                if ([105, 115, 125, 135, 145].includes(selected)) {
+                    // Hoe Interaction
+                    // We clicked ON `hit.block` (bx2, by2, bz2).
+                    if (tillBlock(bx2, by2, bz2)) {
+                        playSound('gravel');
+                        bumpAround(bx2, bz2);
+                        return;
+                    }
+                }
+                if (selected === BlockType.SEEDS) {
+                    // Try planting on the air block above the clicked block (hit.place)
+                    // The `plantSeed` function checks if block below is Farmland.
+                    if (plantSeed(px, py, pz)) {
+                        s.consumeHotbarItem(s.hotbarSlot);
+                        playSound('place');
+                        bumpAround(px, pz);
+                        return;
+                    }
+                }
+                if (selected === BlockType.BONE_MEAL) {
+                    if (applyBoneMeal(bx2, by2, bz2)) {
+                        s.consumeHotbarItem(s.hotbarSlot);
+                        playSound('pop'); // Or magical sound?
+                        bumpAround(bx2, bz2); // Update visuals
+                        return;
+                    }
                 }
 
                 // ─── Piston Placement ────────────────────────
