@@ -173,6 +173,7 @@ export interface GameState {
     // ── Day/Night ─────────────────────────────────────────
     dayTime: number;
     setDayTime: (t: number) => void;
+    skipNight: () => void;
 
     // ── Mobs ──────────────────────────────────────────────
     mobs: any[];
@@ -519,6 +520,8 @@ const useGameStore = create<GameState>((set, get) => ({
     // ── Day/Night ─────────────────────────────────────────
     dayTime: 0.3,
     setDayTime: (t) => set({ dayTime: t }),
+    skipNight: () => set({ dayTime: 0.3 }),
+
 
     // ── Mobs ──────────────────────────────────────────────
     mobs: [],

@@ -68,7 +68,7 @@ export type SoundType =
     | 'fall' | 'swim' | 'splash' | 'land'
     | 'open' | 'close' | 'levelup'
     | 'explode' | 'bow' | 'pop'
-    | 'anvil' | 'xp';
+    | 'anvil' | 'xp' | 'fireball' | 'portal';
 
 export function playSound(type: SoundType): void {
     try {
@@ -366,6 +366,41 @@ export function playSound(type: SoundType): void {
                 osc2.connect(env);
                 osc1.start(now); osc1.stop(now + 0.4);
                 osc2.start(now); osc2.stop(now + 0.3);
+                break;
+            }
+            case 'fireball': {
+                // Whoosh + high pitch crackle
+                const noise = createNoise(ctx, 0.5);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'highpass'; filter.frequency.value = 400;
+                filter.frequency.linearRampToValueAtTime(100, now + 0.4);
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.3, now);
+                env.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                noise.connect(filter).connect(env).connect(mg);
+                noise.start(now); noise.stop(now + 0.5);
+                break;
+            }
+            case 'portal': {
+                // Mystical shimmering
+                const osc = createTone(ctx, 100 + Math.random() * 50, 1.5, 'sine');
+                const osc2 = createTone(ctx, 150 + Math.random() * 50, 1.5, 'sine');
+                const gain = ctx.createGain();
+                gain.gain.setValueAtTime(0, now);
+                gain.gain.linearRampToValueAtTime(0.1, now + 0.2);
+                gain.gain.linearRampToValueAtTime(0, now + 1.5);
+                // LFO for shimmer
+                const lfo = ctx.createOscillator();
+                lfo.frequency.value = 5;
+                const lfoGain = ctx.createGain();
+                lfoGain.gain.value = 50;
+                lfo.connect(lfoGain).connect(osc.frequency);
+                lfo.start(now); lfo.stop(now + 1.5);
+
+                osc.connect(gain).connect(mg);
+                osc2.connect(gain);
+                osc.start(now); osc.stop(now + 1.5);
+                osc2.start(now); osc2.stop(now + 1.5);
                 break;
             }
         }

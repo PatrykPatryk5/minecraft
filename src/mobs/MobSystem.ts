@@ -125,6 +125,10 @@ export function updateMobs(delta: number): void {
         // Update hurt timer
         if (mob.hurtTimer > 0) {
             mob.hurtTimer -= delta * 1000;
+            // Enderman teleport when hit
+            if (mob.type === 'enderman' && Math.random() < 0.1) {
+                teleportMob(mob);
+            }
         }
 
         // AI State Machine
@@ -143,7 +147,6 @@ export function updateMobs(delta: number): void {
                 mob.state = 'fuse';
                 mob.fuseTimer += delta * 1000;
                 if (mob.fuseTimer >= CREEPER_FUSE_TIME) {
-                    // Explode!
                     creeperExplode(mob);
                     mobs.splice(i, 1);
                     changed = true;
@@ -153,16 +156,33 @@ export function updateMobs(delta: number): void {
                 mob.fuseTimer = Math.max(0, mob.fuseTimer - delta * 500); // Defuse
             }
 
-            // Attack (zombie, skeleton)
-            if (mob.type !== 'creeper' && dist < ATTACK_RANGE && now - mob.lastAttackTime > ATTACK_COOLDOWN) {
+            // Blaze special behavior (ranged attack) - simplified for now
+            if (mob.type === 'blaze' && dist < 15 && now - mob.lastAttackTime > 2000) {
+                // Simulate ranged attack (direct damage if line of sight)
+                s.setHealth(s.health - stats.damage);
+                mob.lastAttackTime = now;
+                playSound('fireball');
+            }
+
+            // Attack (melee)
+            if (mob.type !== 'creeper' && mob.type !== 'blaze' && dist < ATTACK_RANGE && now - mob.lastAttackTime > ATTACK_COOLDOWN) {
                 mob.state = 'attack';
                 mob.lastAttackTime = now;
                 s.setHealth(s.health - stats.damage);
                 playSound('hurt');
             }
         } else {
-            // Passive AI — wander randomly
-            if (mob.state === 'idle' && Math.random() < 0.01) {
+            // Passive/Neutral AI
+            if (mob.type === 'wolf' && mob.hurtTimer > 0) {
+                // Wolf becomes hostile if hit
+                mob.target = [...playerPos];
+                mob.state = 'chase';
+                if (dist < ATTACK_RANGE && now - mob.lastAttackTime > ATTACK_COOLDOWN) {
+                    s.setHealth(s.health - stats.damage);
+                    mob.lastAttackTime = now;
+                    playSound('hurt');
+                }
+            } else if (mob.state === 'idle' && Math.random() < 0.01) {
                 mob.state = 'wander';
                 mob.target = [
                     mob.pos[0] + (Math.random() - 0.5) * 10,
@@ -171,8 +191,8 @@ export function updateMobs(delta: number): void {
                 ];
             }
 
-            // Flee when hurt
-            if (mob.hurtTimer > 0 && mob.state !== 'flee') {
+            // Flee when hurt (except wolf)
+            if (mob.hurtTimer > 0 && mob.type !== 'wolf' && mob.state !== 'flee') {
                 mob.state = 'flee';
                 mob.target = [
                     mob.pos[0] - dx * 2,
@@ -193,13 +213,30 @@ export function updateMobs(delta: number): void {
                 mob.pos[0] += (tdx / tDist) * speed;
                 mob.pos[2] += (tdz / tDist) * speed;
                 mob.rotation = Math.atan2(tdx, tdz);
+
+                // Jump up blocks? (Simplified auto-jump)
+                // const s = useGameStore.getState(); // already have s
+                const forwardBlock = getGroundLevel(mob.pos[0] + (tdx / tDist) * 0.5, mob.pos[2] + (tdz / tDist) * 0.5, s);
+                if (forwardBlock > mob.pos[1] && forwardBlock < mob.pos[1] + 1.2) {
+                    mob.vel[1] = 5; // Hop
+                }
             } else if (mob.state === 'wander') {
                 mob.state = 'idle';
                 mob.target = null;
             }
         }
 
-        // Simple gravity — fall to ground
+        // Spider wall climbing (simplified: no gravity if next to wall)
+        if (mob.type === 'spider' && mob.state === 'chase') {
+            // If hitting a wall, move up
+            const wallCheck = s.getBlock(Math.floor(mob.pos[0] + Math.sin(mob.rotation) * 0.6), Math.floor(mob.pos[1] + 0.5), Math.floor(mob.pos[2] + Math.cos(mob.rotation) * 0.6));
+            if (wallCheck) {
+                mob.vel[1] = 4 * delta; // Climb
+                mob.pos[1] += mob.vel[1];
+            }
+        }
+
+        // Gravity
         const groundY = getGroundLevel(mob.pos[0], mob.pos[2], s);
         if (mob.pos[1] > groundY + 1) {
             mob.vel[1] += GRAVITY * delta;
@@ -217,13 +254,15 @@ export function updateMobs(delta: number): void {
         if (mob.health <= 0) {
             mobs.splice(i, 1);
             changed = true;
-            // Drop items (simplified)
-            if (mob.type === 'cow' || mob.type === 'pig') {
-                s.addItem(BlockType.MELON, 1); // Temporary: drop food
-            }
-            if (mob.type === 'sheep') {
-                s.addItem(BlockType.WOOL_WHITE, 1);
-            }
+            // Drop items
+            if (mob.type === 'cow') s.addItem(BlockType.BEEF_RAW, 1); // Fixed: BEEF
+            if (mob.type === 'pig') s.addItem(BlockType.PORKCHOP_RAW, 1);
+            if (mob.type === 'sheep') s.addItem(BlockType.WOOL_WHITE, 1);
+            if (mob.type === 'chicken') s.addItem(BlockType.CHICKEN_RAW, 1); // Fixed
+            if (mob.type === 'zombie') s.addItem(BlockType.LEATHER, 1); // Rotten flesh placeholder
+            if (mob.type === 'skeleton') s.addItem(BlockType.BONE, 1);
+            if (mob.type === 'spider') s.addItem(BlockType.STRING, 1);
+
             playSound('pop');
             continue;
         }
@@ -287,23 +326,38 @@ function trySpawnMob(playerPos: [number, number, number], dayTime: number): Mob 
     const y = getGroundLevel(x, z, s);
     if (y < 1) return null;
 
-    // Choose mob type
+    // Choose mob type based on time/luck
     let type: MobType;
     if (isNight) {
         const r = Math.random();
-        if (r < 0.4) type = 'zombie';
-        else if (r < 0.7) type = 'skeleton';
-        else if (r < 0.85) type = 'creeper';
-        else type = Math.random() > 0.5 ? 'pig' : 'cow';
+        if (r < 0.3) type = 'zombie';
+        else if (r < 0.5) type = 'skeleton';
+        else if (r < 0.65) type = 'creeper';
+        else if (r < 0.8) type = 'spider'; // Added spider
+        else if (r < 0.9) type = 'wolf';   // Added wolf (can spawn at night too)
+        else type = 'enderman'; // Rare
     } else {
         const r = Math.random();
-        if (r < 0.35) type = 'pig';
-        else if (r < 0.65) type = 'cow';
-        else if (r < 0.9) type = 'sheep';
-        else type = 'zombie'; // rare daytime zombie
+        if (r < 0.25) type = 'pig';
+        else if (r < 0.50) type = 'cow';
+        else if (r < 0.70) type = 'sheep';
+        else if (r < 0.85) type = 'chicken'; // Added chicken
+        else if (r < 0.95) type = 'wolf';    // Added wolf
+        else type = 'zombie'; // Very rare day zombie
     }
 
     return spawnMob(type, x, y + 1, z);
+}
+
+function teleportMob(mob: Mob) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 8 + Math.random() * 8;
+    mob.pos[0] += Math.cos(angle) * dist;
+    mob.pos[2] += Math.sin(angle) * dist;
+    // Recalculate Y
+    const s = useGameStore.getState();
+    mob.pos[1] = getGroundLevel(mob.pos[0], mob.pos[2], s) + 1;
+    playSound('portal'); // Use portal sound for teleport
 }
 
 function getGroundLevel(x: number, z: number, s: ReturnType<typeof useGameStore.getState>): number {

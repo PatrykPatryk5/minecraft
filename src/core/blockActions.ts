@@ -139,8 +139,13 @@ export function useBed(x: number, y: number, z: number): void {
     s.setPlayerPos([x + 0.5, y + 1, z + 0.5]);
     playSound('click');
 
-    // TODO: Skip night if implemented
-    // For now just set spawn
+    // Skip night
+    if (s.dayTime > 0.75 || s.dayTime < 0.25) {
+        s.skipNight();
+        s.addChatMessage('System', 'You slept. Sweet dreams!');
+    } else {
+        s.addChatMessage('System', 'You can only sleep at night.');
+    }
 }
 
 // ─── Ladder Climbing ────────────────────────────────────
