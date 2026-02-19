@@ -194,7 +194,10 @@ export class ConnectionManager {
         }
         this.status = 'disconnected';
         this.role = 'none';
-        useGameStore.getState().setIsMultiplayer(false);
+
+        const state = useGameStore.getState();
+        state.setIsMultiplayer(false);
+        state.clearConnectedPlayers();
     }
 
     // ── HOST Logic: Broadcast and Relay ─────────────────────
@@ -276,8 +279,8 @@ export class ConnectionManager {
                 const bt = packet.type === 'block_place' ? packet.payload.blockType : 0;
 
                 // Apply locally
-                if (bt === 0) state.removeBlock(x, y, z);
-                else state.addBlock(x, y, z, bt);
+                if (bt === 0) state.removeBlock(x, y, z, true);
+                else state.addBlock(x, y, z, bt, true);
 
                 const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
                 state.bumpVersion(cx, cz);
@@ -401,8 +404,8 @@ export class ConnectionManager {
 
             case 'block_update': {
                 const { x, y, z, blockType } = packet.payload;
-                if (blockType === 0) store.removeBlock(x, y, z);
-                else store.addBlock(x, y, z, blockType);
+                if (blockType === 0) store.removeBlock(x, y, z, true);
+                else store.addBlock(x, y, z, blockType, true);
                 const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
                 store.bumpVersion(cx, cz);
                 break;

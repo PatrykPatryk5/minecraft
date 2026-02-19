@@ -39,18 +39,25 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
         // Smooth position interpolation
         const targetPos = new THREE.Vector3(tx, ty - 1.5, tz); // Adjusted height so feet at ground
 
-        if (!prevPos.current.equals(targetPos)) {
-            // Player is moving
-            const dist = prevPos.current.distanceTo(targetPos);
-            walkTime.current += dist * 10; // Animation speed based on moved distance
+        // How far are we from target?
+        const distToTarget = currentPos.current.distanceTo(targetPos);
 
-            // LERPing the position
-            currentPos.current.lerp(targetPos, 0.4);
-            prevPos.current.copy(targetPos);
+        // If we are extremely far (e.g. initial spawn teleport), snap immediately
+        if (distToTarget > 10) {
+            currentPos.current.copy(targetPos);
         } else {
-            // Idle decay
-            walkTime.current *= 0.9;
+            // LERPing the position continuously
+            currentPos.current.lerp(targetPos, 0.4);
         }
+
+        // Handle walk animation based on distance moved THIS frame
+        const moveDist = prevPos.current.distanceTo(currentPos.current);
+        if (moveDist > 0.01) {
+            walkTime.current += moveDist * 10; // Animation speed
+        } else {
+            walkTime.current *= 0.8; // Idle decay
+        }
+        prevPos.current.copy(currentPos.current);
 
         if (group.current) {
             group.current.position.copy(currentPos.current);

@@ -122,8 +122,8 @@ export interface GameState {
 
     setChunkData: (cx: number, cz: number, dimension: string, data: Uint16Array) => void;
     getBlock: (x: number, y: number, z: number) => number;
-    addBlock: (x: number, y: number, z: number, typeId: number) => void;
-    removeBlock: (x: number, y: number, z: number) => void;
+    addBlock: (x: number, y: number, z: number, typeId: number, fromNetwork?: boolean) => void;
+    removeBlock: (x: number, y: number, z: number, fromNetwork?: boolean) => void;
     bumpVersion: (cx: number, cz: number) => void;
     resetWorld: () => void;
     setWorldSeed: (seed: number) => void;
@@ -239,6 +239,7 @@ export interface GameState {
     connectedPlayers: Record<string, { name: string; pos: [number, number, number]; rot?: [number, number]; dimension?: string }>;
     addConnectedPlayer: (id: string, name: string, pos: [number, number, number], rot?: [number, number], dimension?: string) => void;
     removeConnectedPlayer: (id: string) => void;
+    clearConnectedPlayers: () => void;
     chatMessages: { sender: string; text: string; time: number; type?: 'info' | 'error' | 'success' | 'system' | 'player' }[];
     addChatMessage: (sender: string, text: string, type?: 'info' | 'error' | 'success' | 'system' | 'player') => void;
 
@@ -388,7 +389,7 @@ const useGameStore = create<GameState>((set, get) => ({
         return chunk[blockIndex(lx, y, lz)];
     },
 
-    addBlock: (x, y, z, typeId) => {
+    addBlock: (x, y, z, typeId, fromNetwork = false) => {
         if (y < 0 || y > 255) return;
         const cx = Math.floor(x / 16);
         const cz = Math.floor(z / 16);
@@ -405,9 +406,16 @@ const useGameStore = create<GameState>((set, get) => ({
 
         // Save to IndexedDB
         saveChunk(`${state.dimension}:${cx},${cz}`, chunk);
+
+        // Broadcast if local multiplayer
+        if (!fromNetwork && state.isMultiplayer) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                getConnection().sendBlockPlace(x, y, z, typeId);
+            });
+        }
     },
 
-    removeBlock: (x, y, z) => {
+    removeBlock: (x, y, z, fromNetwork = false) => {
         if (y < 0 || y > 255) return;
         const cx = Math.floor(x / 16);
         const cz = Math.floor(z / 16);
@@ -420,6 +428,13 @@ const useGameStore = create<GameState>((set, get) => ({
 
         // Save to IndexedDB
         saveChunk(`${get().dimension}:${cx},${cz}`, chunk);
+
+        // Broadcast if local multiplayer
+        if (!fromNetwork && get().isMultiplayer) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                getConnection().sendBlockBreak(x, y, z);
+            });
+        }
     },
 
     bumpVersion: (cx, cz) => {
@@ -770,6 +785,7 @@ const useGameStore = create<GameState>((set, get) => ({
         const { [id]: _, ...rest } = s.connectedPlayers;
         return { connectedPlayers: rest };
     }),
+    clearConnectedPlayers: () => set({ connectedPlayers: {} }),
     chatMessages: [{ sender: 'System', text: '§ Witaj w Minecraft R3F! Wpisz /help po listę komend.', time: Date.now(), type: 'system' }],
     addChatMessage: (sender, text, type = 'info') => set((s) => ({
         chatMessages: [...s.chatMessages.slice(-99), { sender, text, time: Date.now(), type }],
