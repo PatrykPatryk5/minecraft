@@ -145,7 +145,7 @@ const App: React.FC = () => {
             {isPlaying && <ChatBox />}
 
             {/* Underwater overlay */}
-            {isPlaying && playerPos[1] < 63.5 && (
+            {isPlaying && useGameStore.getState().getBlock(Math.floor(playerPos[0]), Math.floor(playerPos[1] + 1.62), Math.floor(playerPos[2])) === 9 && (
                 <div className="water-overlay" />
             )}
 

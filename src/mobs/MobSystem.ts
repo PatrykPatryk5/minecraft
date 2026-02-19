@@ -254,14 +254,21 @@ export function updateMobs(delta: number): void {
         if (mob.health <= 0) {
             mobs.splice(i, 1);
             changed = true;
+
             // Drop items
-            if (mob.type === 'cow') s.addItem(BlockType.BEEF_RAW, 1); // Fixed: BEEF
+            if (mob.type === 'cow') s.addItem(BlockType.BEEF_RAW, 1);
             if (mob.type === 'pig') s.addItem(BlockType.PORKCHOP_RAW, 1);
             if (mob.type === 'sheep') s.addItem(BlockType.WOOL_WHITE, 1);
-            if (mob.type === 'chicken') s.addItem(BlockType.CHICKEN_RAW, 1); // Fixed
-            if (mob.type === 'zombie') s.addItem(BlockType.LEATHER, 1); // Rotten flesh placeholder
+            if (mob.type === 'chicken') s.addItem(BlockType.CHICKEN_RAW, 1);
+            if (mob.type === 'zombie') s.addItem(BlockType.LEATHER, 1);
             if (mob.type === 'skeleton') s.addItem(BlockType.BONE, 1);
             if (mob.type === 'spider') s.addItem(BlockType.STRING, 1);
+
+            // Drop XP
+            const xp = (mob.type === 'blaze') ? 10 :
+                (stats.hostile) ? 5 :
+                    Math.floor(Math.random() * 3) + 1;
+            s.addXp(xp);
 
             playSound('pop');
             continue;

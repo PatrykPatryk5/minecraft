@@ -168,17 +168,20 @@ const Inventory: React.FC = () => {
         closeInv();
     };
 
+    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+    useEffect(() => {
+        const onMouseMove = (e: MouseEvent) => {
+            setMousePos({ x: e.clientX, y: e.clientY });
+        };
+        window.addEventListener('mousemove', onMouseMove);
+        return () => window.removeEventListener('mousemove', onMouseMove);
+    }, []);
+
     return (
         <div className="inventory-overlay" onClick={close}>
             <div className="inventory-window" onClick={(e) => e.stopPropagation()}>
                 <h3>📦 Ekwipunek</h3>
-
-                {held && (
-                    <div className="holding-info">
-                        Trzymasz: <strong>{BLOCK_DATA[held.id]?.name ?? '?'} ×{held.count}</strong>
-                        <button className="drop-btn" onClick={() => setHeld(null)}>Upuść</button>
-                    </div>
-                )}
 
                 {/* 2x2 Crafting Grid (top section) */}
                 <div className="inv-crafting-section">
@@ -265,6 +268,32 @@ const Inventory: React.FC = () => {
 
                 <div className="inv-hint">Kliknij slot aby przenieść • Stackuj takie same • E — zamknij</div>
             </div>
+
+            {/* Floating Cursor Item */}
+            {held && (
+                <div style={{
+                    position: 'fixed',
+                    left: mousePos.x,
+                    top: mousePos.y,
+                    transform: 'translate(-50%, -50%)',
+                    pointerEvents: 'none',
+                    zIndex: 9999,
+                    width: '48px',
+                    height: '48px',
+                }}>
+                    <img
+                        src={getBlockIcon(held.id)}
+                        className="block-icon-3d"
+                        alt=""
+                        style={{ width: '100%', height: '100%', filter: 'drop-shadow(0 4px 4px rgba(0,0,0,0.5))' }}
+                    />
+                    {held.count > 1 && (
+                        <span className="item-count" style={{ fontSize: '1.2rem', textShadow: '2px 2px 0 #000' }}>
+                            {held.count}
+                        </span>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

@@ -30,6 +30,7 @@ import { handleBlockAction, isOnLadder } from '../core/blockActions';
 import { attackMob } from '../mobs/MobSystem';
 import { spreadLava, tickLava, checkLavaFill } from '../core/lavaSystem';
 import { processGravity } from '../core/gravityBlocks';
+import { placePiston } from '../core/pistonSystem';
 
 // ─── Constants ───────────────────────────────────────────
 const GRAVITY = -28;
@@ -70,6 +71,8 @@ const Player: React.FC = () => {
     const lavaTimer = useRef(0);
     const miningHeld = useRef(false);
     const lavaTick = useRef(0);
+    const oxygenTimer = useRef(0);
+    const drowningTimer = useRef(0);
 
     const storeRef = useRef(useGameStore.getState());
     useEffect(() => {
@@ -267,6 +270,32 @@ const Player: React.FC = () => {
                 if (selected === BlockType.LAVA) {
                     spreadLava(px, py, pz);
                 }
+
+                // ─── Piston Placement ────────────────────────
+                if (selected === BlockType.PISTON || selected === BlockType.PISTON_STICKY) {
+                    const dir = new THREE.Vector3();
+                    camera.getWorldDirection(dir);
+                    dir.negate(); // Point towards player
+
+                    let pDir = 0;
+                    if (Math.abs(dir.y) > Math.abs(dir.x) && Math.abs(dir.y) > Math.abs(dir.z)) {
+                        pDir = dir.y > 0 ? 1 : 0; // 1=Up, 0=Down
+                    } else if (Math.abs(dir.x) > Math.abs(dir.z)) {
+                        pDir = dir.x > 0 ? 5 : 4; // 5=East, 4=West
+                    } else {
+                        pDir = dir.z > 0 ? 3 : 2; // 3=South, 2=North
+                    }
+
+                    placePiston(px, py, pz, pDir, selected === BlockType.PISTON_STICKY);
+                    s.consumeHotbarItem(s.hotbarSlot);
+                    bumpAround(px, pz);
+                    return;
+                }
+
+                s.addBlock(px, py, pz, selected);
+                s.consumeHotbarItem(s.hotbarSlot);
+                playSound('place');
+                bumpAround(px, pz);
             }
         };
 
@@ -570,6 +599,47 @@ const Player: React.FC = () => {
                 lavaTick.current = 0;
             }
 
+            // ─── Oxygen & Drowning ───────────────────────────
+            if (mode === 'survival') {
+                if (headInWater) {
+                    // Drain oxygen
+                    oxygenTimer.current += dt;
+                    if (oxygenTimer.current >= 1.0) { // 1 second interval
+                        const currentO2 = s.oxygen;
+                        if (currentO2 > 0) {
+                            s.setOxygen(currentO2 - 1);
+                            oxygenTimer.current = 0;
+                        } else {
+                            // Drowning damage
+                            drowningTimer.current += dt; // Accumulate separate timer for damage
+                            if (drowningTimer.current >= 1.0) {
+                                s.setHealth(s.health - 2);
+                                playSound('hurt');
+                                drowningTimer.current = 0;
+                            }
+                        }
+                    } else if (s.oxygen <= 0) {
+                        // Only accumulate damage timer if O2 is empty
+                        drowningTimer.current += dt;
+                        if (drowningTimer.current >= 1.0) {
+                            s.setHealth(s.health - 2);
+                            playSound('hurt');
+                            drowningTimer.current = 0;
+                        }
+                    }
+                } else {
+                    // Regenerate oxygen
+                    if (s.oxygen < s.maxOxygen) {
+                        oxygenTimer.current += dt;
+                        if (oxygenTimer.current >= 0.2) { // Fast regen
+                            s.setOxygen(s.oxygen + 5);
+                            oxygenTimer.current = 0;
+                        }
+                    }
+                    drowningTimer.current = 0;
+                }
+            }
+
             // ─── Hold-to-Mine Progress ───────────────────────
             if (miningHeld.current && miningTarget.current && mode === 'survival') {
                 const hitNow = raycastBlock();
@@ -623,6 +693,12 @@ const Player: React.FC = () => {
                                     s.addItem(drop, 1);
                                     playSound('pop');
                                 }
+
+                                // ─── XP Drops ───
+                                if (mType === BlockType.COAL_ORE) s.addXp(Math.floor(Math.random() * 2) + 1);
+                                else if (mType === BlockType.DIAMOND || mType === BlockType.EMERALD_ORE) s.addXp(Math.floor(Math.random() * 5) + 3);
+                                else if (mType === BlockType.LAPIS_ORE || mType === BlockType.REDSTONE_ORE) s.addXp(Math.floor(Math.random() * 4) + 2);
+
                                 miningTarget.current = null;
                                 miningProgress.current = 0;
                                 miningHeld.current = false;

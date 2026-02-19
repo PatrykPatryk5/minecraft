@@ -68,7 +68,8 @@ export type SoundType =
     | 'fall' | 'swim' | 'splash' | 'land'
     | 'open' | 'close' | 'levelup'
     | 'explode' | 'bow' | 'pop'
-    | 'anvil' | 'xp' | 'fireball' | 'portal';
+    | 'anvil' | 'xp' | 'fireball' | 'portal'
+    | 'piston_out' | 'piston_in';
 
 export function playSound(type: SoundType): void {
     try {
@@ -401,6 +402,28 @@ export function playSound(type: SoundType): void {
                 osc2.connect(gain);
                 osc.start(now); osc.stop(now + 1.5);
                 osc2.start(now); osc2.stop(now + 1.5);
+                break;
+            }
+            case 'piston_out': {
+                // Mechanical extend
+                const osc = createTone(ctx, 150, 0.15, 'sawtooth');
+                osc.frequency.linearRampToValueAtTime(250, now + 0.15);
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.3, now);
+                env.gain.linearRampToValueAtTime(0, now + 0.15);
+                osc.connect(env).connect(mg);
+                osc.start(now); osc.stop(now + 0.2);
+                break;
+            }
+            case 'piston_in': {
+                // Mechanical retract
+                const osc = createTone(ctx, 250, 0.15, 'sawtooth');
+                osc.frequency.linearRampToValueAtTime(150, now + 0.15);
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.3, now);
+                env.gain.linearRampToValueAtTime(0, now + 0.15);
+                osc.connect(env).connect(mg);
+                osc.start(now); osc.stop(now + 0.2);
                 break;
             }
         }

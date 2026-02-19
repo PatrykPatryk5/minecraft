@@ -16,6 +16,7 @@ import useGameStore, { chunkKey } from '../store/gameStore';
 import { generateChunk, CHUNK_SIZE, initSeed } from '../core/terrainGen';
 import { WorkerPool } from '../core/workerPool';
 import Chunk from './Chunk';
+import { checkChunkBorders } from '../core/waterSystem';
 
 const UNLOAD_BUFFER = 3;
 const BATCH_PER_FRAME = 4;
@@ -68,6 +69,8 @@ const World: React.FC = () => {
         return () => { pool.terminate(); };
     }, []);
 
+
+
     // ── Handle worker results — NO setState ─────────────
     const onChunkReady = useCallback((result: any) => {
         const { cx, cz, id } = result;
@@ -75,6 +78,7 @@ const World: React.FC = () => {
 
         useGameStore.getState().setChunkData(cx, cz, result.data);
         useGameStore.getState().bumpVersion(cx, cz);
+        checkChunkBorders(cx, cz);
         loadedKeysRef.current.add(key);
         pendingKeysRef.current.delete(key);
         chunkArrivedCountRef.current++;

@@ -13,6 +13,7 @@
 
 import useGameStore from '../store/gameStore';
 import { BlockType } from './blockTypes';
+import { updatePiston } from './pistonSystem';
 
 // ─── Types ──────────────────────────────────────────────
 interface RedstoneNode {
@@ -136,6 +137,9 @@ function propagateFrom(x: number, y: number, z: number): void {
                     node.power = newPower;
                     queue.push([nx, ny, nz]);
                 }
+            } else if (blockAtN === BlockType.PISTON || blockAtN === BlockType.PISTON_STICKY) {
+                const p = getMaxAdjacentPower(nx, ny, nz);
+                updatePiston(nx, ny, nz, p > 0);
             }
         }
     }

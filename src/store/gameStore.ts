@@ -88,6 +88,15 @@ export interface FurnaceState {
     cookTimeTotal: number;       // ticks needed (200 = 10s at 20tps)
 }
 
+export interface PistonData {
+    x: number;
+    y: number;
+    z: number;
+    direction: number; // 0-5
+    extended: boolean;
+    type: 'normal' | 'sticky';
+}
+
 export interface GameState {
     // ── Screen / Menu ─────────────────────────────────────
     screen: GameScreen;
@@ -226,6 +235,11 @@ export interface GameState {
     chests: Record<string, ChestData>;
     getChest: (key: string) => ChestData | null;
     setChest: (key: string, data: ChestData) => void;
+
+    // ── Pistons ────────────────────────────────────────────
+    pistons: Record<string, PistonData>;
+    getPiston: (key: string) => PistonData | null;
+    setPiston: (key: string, data: PistonData) => void;
 
     // ── Fall Damage ────────────────────────────────────────
     fallDistance: number;
@@ -599,6 +613,13 @@ const useGameStore = create<GameState>((set, get) => ({
     getChest: (key) => get().chests[key] || null,
     setChest: (key, data) => set((s) => ({
         chests: { ...s.chests, [key]: data },
+    })),
+
+    // ── Pistons ────────────────────────────────────────────
+    pistons: {},
+    getPiston: (key) => get().pistons[key] || null,
+    setPiston: (key, data) => set((s) => ({
+        pistons: { ...s.pistons, [key]: data },
     })),
 
     // ── Fall Damage ────────────────────────────────────────

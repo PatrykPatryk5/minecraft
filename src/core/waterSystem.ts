@@ -107,6 +107,36 @@ export function checkWaterFill(x: number, y: number, z: number): void {
     }
 }
 
+/**
+ * Called when a new chunk is generated/loaded.
+ * Checks the borders (x=0, x=15, z=0, z=15) to see if water should flow in from neighbors.
+ */
+export function checkChunkBorders(cx: number, cz: number): void {
+    const s = useGameStore.getState();
+    const worldX = cx * 16;
+    const worldZ = cz * 16;
+
+    // Check X edges (x=0 and x=15)
+    for (let y = 0; y < 256; y++) {
+        for (let z = 0; z < 16; z++) {
+            // West edge (local x=0) -> check neighbor at x-1
+            checkWaterFill(worldX, y, worldZ + z);
+            // East edge (local x=15) -> check neighbor at x+16 (which is this block)
+            checkWaterFill(worldX + 15, y, worldZ + z);
+        }
+    }
+
+    // Check Z edges (z=0 and z=15)
+    for (let y = 0; y < 256; y++) {
+        for (let x = 0; x < 16; x++) {
+            // North edge (local z=0)
+            checkWaterFill(worldX + x, y, worldZ);
+            // South edge (local z=15)
+            checkWaterFill(worldX + x, y, worldZ + 15);
+        }
+    }
+}
+
 function canWaterReplace(blockType: number): boolean {
     if (blockType === BlockType.AIR) return true;
     if (blockType === BlockType.WATER) return false; // Already water

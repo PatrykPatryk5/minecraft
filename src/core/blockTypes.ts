@@ -92,7 +92,8 @@ export enum BlockType {
     END_PORTAL_BLOCK = 78,
     // ─── Advanced Blocks ────────────────────────────────
     PISTON = 81,
-    STICKY_PISTON = 82,
+    PISTON_STICKY = 82,
+    PISTON_HEAD = 110,
     JUKEBOX = 84,
     SPONGE = 85,
     ENCHANTING_TABLE = 86,
@@ -423,7 +424,8 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.END_PORTAL_BLOCK]: { name: 'Portal Endu', color: '#001122', transparent: true, solid: false, breakTime: 999, emissive: true },
     // ─── Advanced Blocks ────────────────────────────────
     [BlockType.PISTON]: { name: 'Tłok', color: '#8b7355', top: '#998877', transparent: false, solid: true, breakTime: 0.5 },
-    [BlockType.STICKY_PISTON]: { name: 'Lepki Tłok', color: '#8b7355', top: '#66aa44', transparent: false, solid: true, breakTime: 0.5 },
+    [BlockType.PISTON_STICKY]: { name: 'Lepki Tłok', color: '#8b7355', top: '#66aa44', transparent: false, solid: true, breakTime: 0.5 },
+    [BlockType.PISTON_HEAD]: { name: 'Głowica Tłoka', color: '#998877', top: '#998877', transparent: false, solid: true, breakTime: 0.5 },
     [BlockType.JUKEBOX]: { name: 'Szafa Grająca', color: '#6b4226', top: '#8b6240', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
     [BlockType.SPONGE]: { name: 'Gąbka', color: '#c2b74e', transparent: false, solid: true, breakTime: 0.6 },
     [BlockType.ENCHANTING_TABLE]: { name: 'Stół Zaklęć', color: '#2b0000', top: '#cc0000', transparent: true, solid: true, breakTime: 5.0, tool: 'pickaxe' },

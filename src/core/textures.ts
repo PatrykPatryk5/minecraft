@@ -831,7 +831,7 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
                 for (let y = 0; y < 16; y++) { px(ctx, 0, y, 110, 90, 65); px(ctx, 15, y, 110, 90, 65); }
             }
             return;
-        case BlockType.STICKY_PISTON:
+        case BlockType.PISTON_STICKY:
             if (face === 'top') {
                 fillNoise(ctx, [102, 170, 68], 15, seed);
                 // Slime center
@@ -841,6 +841,19 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
             } else {
                 fillNoise(ctx, [139, 115, 85], 15, seed);
                 for (let y = 0; y < 16; y++) { px(ctx, 0, y, 110, 90, 65); px(ctx, 15, y, 110, 90, 65); }
+            }
+            return;
+        case BlockType.PISTON_HEAD:
+            if (face === 'top') {
+                fillNoise(ctx, [153, 136, 119], 12, seed);
+                // Metal plate
+                for (let y = 2; y < 14; y++) for (let x = 2; x < 14; x++) {
+                    px(ctx, x, y, 140 + (rng() * 15 | 0), 125 + (rng() * 12 | 0), 100 + (rng() * 10 | 0));
+                }
+            } else {
+                // Arm shaft
+                fillNoise(ctx, [100, 80, 60], 10, seed);
+                for (let y = 0; y < 16; y++) { px(ctx, 4, y, 80, 60, 40); px(ctx, 11, y, 80, 60, 40); }
             }
             return;
         case BlockType.JUKEBOX:
