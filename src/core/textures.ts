@@ -533,6 +533,55 @@ function drawPumpkin(ctx: CanvasRenderingContext2D, face: string, seed: number) 
     }
 }
 
+function drawBed(ctx: CanvasRenderingContext2D, face: string, seed: number) {
+    const rng = sRng(seed);
+    if (face === 'top') {
+        // Red blanket
+        fillNoise(ctx, [160, 30, 30], 10, seed);
+        // White pillow area (top 1/4)
+        for (let y = 0; y < 4; y++) for (let x = 0; x < 16; x++) {
+            px(ctx, x, y, 220 + (rng() * 30 | 0), 220 + (rng() * 30 | 0), 220 + (rng() * 30 | 0));
+        }
+    } else if (face === 'side') {
+        // Wood legs/frame at bottom
+        drawPlanks(ctx, [107, 84, 51], seed);
+        // Blanket on top
+        for (let y = 0; y < 12; y++) for (let x = 0; x < 16; x++) {
+            px(ctx, x, y, 160 + (rng() * 20 | 0), 30 + (rng() * 10 | 0), 30 + (rng() * 10 | 0));
+        }
+    } else {
+        drawPlanks(ctx, [107, 84, 51], seed);
+    }
+}
+
+function drawDoor(ctx: CanvasRenderingContext2D, face: string, seed: number) {
+    // Oak door style
+    const rng = sRng(seed);
+    const base: RGB = [107, 84, 51];
+    fillNoise(ctx, base, 15, seed);
+
+    if (face === 'side') {
+        // Frame
+        for (let y = 0; y < 16; y++) {
+            px(ctx, 0, y, 85, 65, 40); px(ctx, 15, y, 85, 65, 40);
+            px(ctx, 1, y, 90, 70, 45); px(ctx, 14, y, 90, 70, 45);
+        }
+        for (let x = 0; x < 16; x++) {
+            px(ctx, x, 0, 85, 65, 40); px(ctx, x, 15, 85, 65, 40);
+            px(ctx, x, 7, 85, 65, 40); // Middle rail
+        }
+        // Inner panels (darker)
+        for (let y = 2; y < 7; y++) for (let x = 3; x < 13; x++) px(ctx, x, y, 70, 50, 30); // Top panel
+        for (let y = 8; y < 14; y++) for (let x = 3; x < 13; x++) px(ctx, x, y, 70, 50, 30); // Bottom panel
+        // Knob
+        px(ctx, 12, 8, 50, 50, 50);
+    }
+}
+
+function drawFence(ctx: CanvasRenderingContext2D, seed: number) {
+    drawPlanks(ctx, [107, 84, 51], seed);
+}
+
 // ─── Main Texture Creation (MC-Accurate) ──────────────────
 
 function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 'top' | 'bottom' | 'side', seed: number): void {
@@ -542,6 +591,10 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
     const rng = sRng(seed);
 
     switch (blockId) {
+        case BlockType.BED: drawBed(ctx, face, seed); return;
+        case BlockType.DOOR_OAK: drawDoor(ctx, face, seed); return;
+        case BlockType.FENCE_OAK: drawFence(ctx, seed); return;
+
         case BlockType.STONE: drawStone(ctx, seed); return;
         case BlockType.COBBLE: drawCobble(ctx, seed); return;
         case BlockType.MOSSY_COBBLE: drawCobble(ctx, seed); // add moss
