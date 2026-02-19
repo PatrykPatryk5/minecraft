@@ -220,7 +220,7 @@ export class ConnectionManager {
 
                 // Add to local state (Host's view of the world)
                 state.addConnectedPlayer(peerId, name, startPos, [0, 0], dim);
-                state.addChatMessage('System', `${name} joined the game.`);
+                state.addChatMessage('System', `${name} joined the game.`, 'system');
 
                 // Tell the new client about existing players
                 // In P2P, the host IS a player, so send the host's info too!
@@ -291,7 +291,7 @@ export class ConnectionManager {
             }
 
             case 'chat': {
-                state.addChatMessage(state.connectedPlayers[peerId]?.name || 'Unknown', packet.payload.text);
+                state.addChatMessage(state.connectedPlayers[peerId]?.name || 'Unknown', packet.payload.text, 'player');
                 this.broadcast({
                     type: 'chat_broadcast',
                     payload: { sender: state.connectedPlayers[peerId]?.name || 'Unknown', text: packet.payload.text }
@@ -383,12 +383,12 @@ export class ConnectionManager {
                     packet.payload.rot,
                     packet.payload.dimension
                 );
-                store.addChatMessage('System', `${packet.payload.name} joined!`);
+                store.addChatMessage('System', `${packet.payload.name} joined!`, 'system');
                 break;
 
             case 'player_leave':
                 store.removeConnectedPlayer(packet.payload.id);
-                store.addChatMessage('System', `A player left.`);
+                store.addChatMessage('System', `A player left.`, 'system');
                 break;
 
             case 'player_move':
@@ -409,7 +409,7 @@ export class ConnectionManager {
             }
 
             case 'chat_broadcast':
-                store.addChatMessage(packet.payload.sender, packet.payload.text);
+                store.addChatMessage(packet.payload.sender, packet.payload.text, 'player');
                 break;
 
             case 'pong': {

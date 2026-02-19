@@ -36,9 +36,7 @@ const FADE_TIME = 10000; // messages fade after 10s
 const ChatBox: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [input, setInput] = useState('');
-    const [messages, setMessages] = useState<ChatMessage[]>([
-        { text: '§ Witaj w Minecraft R3F! Wpisz /help po listę komend.', type: 'system', time: Date.now() },
-    ]);
+    const messages = useGameStore((s) => s.chatMessages) as ChatMessage[];
     const [history, setHistory] = useState<string[]>([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -47,11 +45,8 @@ const ChatBox: React.FC = () => {
     const setChatOpen = useGameStore((s) => s.setChatOpen);
 
     const addMessage = useCallback((text: string, type: ChatMessage['type'] = 'info') => {
-        setMessages((prev) => {
-            const newMsgs = [...prev, { text, type, time: Date.now() }];
-            if (newMsgs.length > MAX_MESSAGES) newMsgs.shift();
-            return newMsgs;
-        });
+        const sender = type === 'player' ? useGameStore.getState().playerName : 'System';
+        useGameStore.getState().addChatMessage(sender, text, type);
     }, []);
 
     const processCommand = useCallback((cmd: string) => {
@@ -223,7 +218,13 @@ const ChatBox: React.FC = () => {
                     addMessage(`Nieznana komenda: ${command}. Wpisz /help`, 'error');
                 } else {
                     // Regular chat message
-                    addMessage(`<Gracz> ${cmd}`, 'player');
+                    const state = useGameStore.getState();
+                    if (state.isMultiplayer) {
+                        import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                            getConnection().sendChat(cmd);
+                        });
+                    }
+                    addMessage(`<${state.playerName}> ${cmd}`, 'player');
                 }
                 break;
         }

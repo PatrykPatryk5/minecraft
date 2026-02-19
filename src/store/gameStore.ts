@@ -239,8 +239,8 @@ export interface GameState {
     connectedPlayers: Record<string, { name: string; pos: [number, number, number]; rot?: [number, number]; dimension?: string }>;
     addConnectedPlayer: (id: string, name: string, pos: [number, number, number], rot?: [number, number], dimension?: string) => void;
     removeConnectedPlayer: (id: string) => void;
-    chatMessages: { sender: string; text: string; time: number }[];
-    addChatMessage: (sender: string, text: string) => void;
+    chatMessages: { sender: string; text: string; time: number; type?: 'info' | 'error' | 'success' | 'system' | 'player' }[];
+    addChatMessage: (sender: string, text: string, type?: 'info' | 'error' | 'success' | 'system' | 'player') => void;
 
     // ── Armor ──────────────────────────────────────────────
     armor: ArmorSlots;
@@ -770,9 +770,9 @@ const useGameStore = create<GameState>((set, get) => ({
         const { [id]: _, ...rest } = s.connectedPlayers;
         return { connectedPlayers: rest };
     }),
-    chatMessages: [],
-    addChatMessage: (sender, text) => set((s) => ({
-        chatMessages: [...s.chatMessages.slice(-99), { sender, text, time: Date.now() }],
+    chatMessages: [{ sender: 'System', text: '§ Witaj w Minecraft R3F! Wpisz /help po listę komend.', time: Date.now(), type: 'system' }],
+    addChatMessage: (sender, text, type = 'info') => set((s) => ({
+        chatMessages: [...s.chatMessages.slice(-99), { sender, text, time: Date.now(), type }],
     })),
 
     // ── Armor ──────────────────────────────────────────────
