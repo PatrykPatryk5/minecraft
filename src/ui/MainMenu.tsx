@@ -1,18 +1,18 @@
 /**
  * Main Menu — Minecraft-style with animated background, world creation, settings
- * Updated for InventorySlot-based hotbar initialization.
+ * Updated with difficulty, keybinds, multiplayer, GUI scale, particles, smooth lighting
  */
 
 import React, { useState, useEffect } from 'react';
 import useGameStore from '../store/gameStore';
-import type { GameMode } from '../store/gameStore';
+import type { GameMode, Difficulty } from '../store/gameStore';
 import { DEFAULT_HOTBAR, EMPTY_HOTBAR } from '../core/blockTypes';
 
 const SPLASHES = [
-    'Zbudowany w React!', 'Piksele!', 'Kopaj głęboko!', 'Craftuj mądze!',
+    'Zbudowany w React!', 'Piksele!', 'Kopaj głęboko!', 'Craftuj mądrze!',
     '60 FPS!', 'TypeScript 5.9!', '100% darmowe!', 'WebGPU ready!',
     'Polskie napisy!', 'Three.js inside!', 'Zustand powered!', 'Open Source!',
-    'Więcej bloków!', 'Survival mode!',
+    'Więcej bloków!', 'Survival mode!', 'Multiplayer!', '4 workery!',
 ];
 
 const MenuHome: React.FC = () => {
@@ -37,7 +37,9 @@ const MenuHome: React.FC = () => {
                 <button className="mc-btn primary" onClick={() => setScreen('worldCreate')}>
                     🎮 Graj Singleplayer
                 </button>
-                <button className="mc-btn" disabled>🌐 Multiplayer (wkrótce)</button>
+                <button className="mc-btn" onClick={() => setScreen('multiplayer')}>
+                    🌐 Multiplayer
+                </button>
                 <div className="menu-row">
                     <button className="mc-btn half" onClick={() => setScreen('settings')}>⚙ Ustawienia</button>
                     <button className="mc-btn half" disabled>🌍 Języki</button>
@@ -45,7 +47,7 @@ const MenuHome: React.FC = () => {
             </div>
 
             <div className="menu-footer">
-                <span>Minecraft R3F v2.0</span>
+                <span>Minecraft R3F v3.0</span>
                 <span>React 19 + Three.js + Zustand</span>
             </div>
         </div>
@@ -59,10 +61,13 @@ const WorldCreate: React.FC = () => {
     const setWorldSeed = useGameStore((s) => s.setWorldSeed);
     const gameMode = useGameStore((s) => s.gameMode);
     const setHotbar = useGameStore((s) => s.setHotbar);
+    const settings = useGameStore((s) => s.settings);
+    const updateSettings = useGameStore((s) => s.updateSettings);
 
     const [worldName, setWorldName] = useState('Nowy Świat');
     const [seed, setSeed] = useState('');
     const [mode, setMode] = useState<GameMode>(gameMode);
+    const [diff, setDiff] = useState<Difficulty>(settings.difficulty);
 
     const descriptions: Record<GameMode, string> = {
         survival: '⚔ Zbieraj zasoby, craftuj narzędzia, przetrwaj!',
@@ -70,35 +75,39 @@ const WorldCreate: React.FC = () => {
         spectator: '👁 Lataj przez bloki, obserwuj świat',
     };
 
-    /** Convert string to deterministic hash */
+    const diffDescriptions: Record<Difficulty, string> = {
+        peaceful: '🕊 Brak mobów wrogich, regeneracja zdrowia',
+        easy: '😊 Mniej obrażeń, łatwiejsze przetrwanie',
+        normal: '⚔ Standardowe obrażenia i moby',
+        hard: '💀 Więcej obrażeń, trudniejsze moby',
+    };
+
     const hashSeed = (s: string): number => {
         let h = 0;
         for (let i = 0; i < s.length; i++) {
             h = ((h << 5) - h) + s.charCodeAt(i);
-            h = h & h; // Convert to 32-bit int
+            h = h & h;
         }
         return Math.abs(h) || 1;
     };
 
     const startGame = () => {
-        // Compute seed: use hash of string, or random if empty
         const finalSeed = seed.trim()
             ? (/^\d+$/.test(seed.trim()) ? parseInt(seed.trim()) : hashSeed(seed.trim()))
             : Math.floor(Math.random() * 2147483647);
 
-        // Set seed BEFORE resetting world
         setWorldSeed(finalSeed);
         setGameMode(mode);
+        updateSettings({ difficulty: diff });
         resetWorld();
 
-        // Set hotbar based on mode
         if (mode === 'creative') {
             setHotbar(DEFAULT_HOTBAR.map(id => ({ id, count: 64 })));
         } else {
             setHotbar(EMPTY_HOTBAR.map(() => ({ id: 0, count: 0 })));
         }
 
-        console.log(`[MC] Starting world "${worldName}" with seed: ${finalSeed}`);
+        console.log(`[MC] Starting world "${worldName}" seed: ${finalSeed}, mode: ${mode}, diff: ${diff}`);
         setScreen('playing');
     };
 
@@ -128,6 +137,22 @@ const WorldCreate: React.FC = () => {
                     ))}
                 </div>
                 <div className="mode-desc">{descriptions[mode]}</div>
+            </div>
+
+            <div className="form-group">
+                <label>Trudność</label>
+                <div className="mode-selector">
+                    {(['peaceful', 'easy', 'normal', 'hard'] as Difficulty[]).map((d) => (
+                        <button key={d} className={`mode-btn${diff === d ? ' active' : ''}`} onClick={() => setDiff(d)}>
+                            {d === 'peaceful' && '🕊'}
+                            {d === 'easy' && '😊'}
+                            {d === 'normal' && '⚔'}
+                            {d === 'hard' && '💀'}
+                            {' '}{d.charAt(0).toUpperCase() + d.slice(1)}
+                        </button>
+                    ))}
+                </div>
+                <div className="mode-desc">{diffDescriptions[diff]}</div>
             </div>
 
             <div className="menu-buttons" style={{ marginTop: 20 }}>
@@ -165,6 +190,10 @@ const SettingsScreen: React.FC = () => {
                     <input type="range" min={0} max={100} value={settings.soundVolume * 100} onChange={(e) => updateSettings({ soundVolume: +e.target.value / 100 })} className="mc-slider" />
                 </div>
                 <div className="setting-item">
+                    <label>Głośność muzyki: <strong>{(settings.musicVolume * 100).toFixed(0)}%</strong></label>
+                    <input type="range" min={0} max={100} value={settings.musicVolume * 100} onChange={(e) => updateSettings({ musicVolume: +e.target.value / 100 })} className="mc-slider" />
+                </div>
+                <div className="setting-item">
                     <label>Grafika: <strong>{settings.graphics}</strong></label>
                     <div className="mode-selector">
                         {(['fast', 'fancy', 'fabulous'] as const).map((g) => (
@@ -175,6 +204,28 @@ const SettingsScreen: React.FC = () => {
                             </button>
                         ))}
                     </div>
+                </div>
+                <div className="setting-item">
+                    <label>Skala GUI: <strong>{settings.guiScale}x</strong></label>
+                    <input type="range" min={1} max={4} value={settings.guiScale} onChange={(e) => updateSettings({ guiScale: +e.target.value })} className="mc-slider" />
+                </div>
+                <div className="setting-item">
+                    <label>Cząsteczki: <strong>{settings.particles === 'all' ? 'Wszystkie' : settings.particles === 'decreased' ? 'Mniej' : 'Minimalne'}</strong></label>
+                    <div className="mode-selector">
+                        {(['all', 'decreased', 'minimal'] as const).map((p) => (
+                            <button key={p} className={`mode-btn${settings.particles === p ? ' active' : ''}`} onClick={() => updateSettings({ particles: p })}>
+                                {p === 'all' && '✨ Wszystkie'}
+                                {p === 'decreased' && '🔅 Mniej'}
+                                {p === 'minimal' && '⬜ Min'}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                <div className="setting-item">
+                    <label>
+                        <input type="checkbox" checked={settings.smoothLighting} onChange={(e) => updateSettings({ smoothLighting: e.target.checked })} />
+                        Gładkie oświetlenie (AO)
+                    </label>
                 </div>
                 <div className="setting-item">
                     <label>
@@ -190,7 +241,10 @@ const SettingsScreen: React.FC = () => {
                 </div>
             </div>
 
-            <button className="mc-btn" onClick={() => setScreen('mainMenu')}>← Wstecz</button>
+            <div className="menu-buttons" style={{ marginTop: 16, gap: 8, display: 'flex', flexDirection: 'column' }}>
+                <button className="mc-btn" onClick={() => setScreen('keybinds')}>🎮 Sterowanie</button>
+                <button className="mc-btn" onClick={() => setScreen('mainMenu')}>← Wstecz</button>
+            </div>
         </div>
     );
 };

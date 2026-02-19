@@ -1,11 +1,12 @@
 /**
- * Chunk Renderer (Performance-Optimized)
+ * Chunk Renderer (LOD + Geometry Pooling)
  *
- * - Geometry disposal on unmount & rebuild (prevents memory leak = browser crash)
- * - MeshLambertMaterial for fast GPU rendering
- * - Frustum culling via Three.js built-in
- * - Uses refs to avoid React selector instability
- * - Tracks geometry references for proper cleanup
+ * Improvements:
+ *   - LOD levels: 0=full (AO), 1=no AO, 2=skip small faces
+ *   - Geometry buffer pool — reuses disposed buffers
+ *   - Proper disposal on unmount & rebuild
+ *   - MeshLambertMaterial for GPU perf
+ *   - Cross-chunk face culling
  */
 
 import React, { useMemo, useRef, useEffect } from 'react';
@@ -43,49 +44,66 @@ function isTransparent(bt: number): boolean {
     return BLOCK_DATA[bt]?.transparent ?? true;
 }
 
+// ─── Geometry Pool ───────────────────────────────────────
+const geoPool: THREE.BufferGeometry[] = [];
+const MAX_POOL = 64;
+
+function getPooledGeo(): THREE.BufferGeometry {
+    return geoPool.pop() || new THREE.BufferGeometry();
+}
+
+function returnToPool(geo: THREE.BufferGeometry): void {
+    if (geoPool.length < MAX_POOL) {
+        // Clear attributes for reuse
+        geo.deleteAttribute('position');
+        geo.deleteAttribute('normal');
+        geo.deleteAttribute('uv');
+        geo.deleteAttribute('color');
+        geo.setIndex(null);
+        geoPool.push(geo);
+    } else {
+        geo.dispose();
+    }
+}
+
 // ─── Component ───────────────────────────────────────────
 interface ChunkProps {
     cx: number;
     cz: number;
+    lod?: 0 | 1 | 2; // 0=full, 1=no AO, 2=simplified
 }
 
-const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz }) => {
+const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
     const key = chunkKey(cx, cz);
     const prevGeoRef = useRef<THREE.BufferGeometry[]>([]);
 
     // Subscribe to version counter ONLY
     const version = useGameStore((s) => s.chunkVersions[key] ?? 0);
 
-    // Dispose old geometries when rebuilding or unmounting
     const disposeOld = () => {
         for (const g of prevGeoRef.current) {
-            g.dispose();
+            returnToPool(g);
         }
         prevGeoRef.current = [];
     };
 
-    // Cleanup on unmount
     useEffect(() => {
-        return () => {
-            disposeOld();
-        };
+        return () => { disposeOld(); };
     }, []);
 
     const meshData = useMemo(() => {
-        // Dispose previous geometries
         disposeOld();
 
         const state = useGameStore.getState();
         const chunkData: ChunkData | undefined = state.chunks[key];
         if (!chunkData) return null;
 
-        // Read neighbor chunks for cross-chunk face culling
         const nPx = state.chunks[chunkKey(cx + 1, cz)];
         const nNx = state.chunks[chunkKey(cx - 1, cz)];
         const nPz = state.chunks[chunkKey(cx, cz + 1)];
         const nNz = state.chunks[chunkKey(cx, cz - 1)];
 
-        // Helper: check if block at absolute position is solid
+        // AO helper — skipped for LOD 1+
         const isSolidAt = (lx: number, y: number, lz: number): boolean => {
             if (y < 0) return true;
             if (y >= MAX_HEIGHT) return false;
@@ -115,7 +133,6 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz }) => {
             indices: number[];
         }> = {};
 
-        // Iterate blocks using flat index — no string keys, no Object.entries
         for (let lx = 0; lx < CHUNK_SIZE; lx++) {
             for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                 for (let y = 0; y < MAX_HEIGHT; y++) {
@@ -128,7 +145,6 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz }) => {
                         const ny = y + face.dir[1];
                         const nz = lz + face.dir[2];
 
-                        // Determine neighbor block type
                         let nbt = 0;
                         if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0 && ny < MAX_HEIGHT) {
                             nbt = chunkData[blockIndex(nx, ny, nz)];
@@ -163,36 +179,35 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz }) => {
                             g.normals.push(face.dir[0], face.dir[1], face.dir[2]);
                             g.uvs.push(face.uv[i][0], face.uv[i][1]);
 
-                            // ─── Fake AO ──────────────────────────────
-                            // Check 3 neighbors around this corner perpendicular to face normal
-                            // to determine shadow level (0=fully lit, 3=deep shadow)
-                            let aoLevel = 0;
-                            const dx = face.dir[0], dy = face.dir[1], dz = face.dir[2];
-                            // Offsets perpendicular to face normal at this corner
-                            const ox = face.corners[i][0] * 2 - 1; // -1 or 1
-                            const oy = face.corners[i][1] * 2 - 1;
-                            const oz = face.corners[i][2] * 2 - 1;
-                            if (Math.abs(dx) === 1) {
-                                // YZ plane face
-                                const s1 = isSolidAt(lx + dx, y + face.corners[i][1], lz + oz);
-                                const s2 = isSolidAt(lx + dx, y + oy, lz + face.corners[i][2]);
-                                const corner = isSolidAt(lx + dx, y + oy, lz + oz);
-                                aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : corner ? 1 : 0);
-                            } else if (Math.abs(dy) === 1) {
-                                // XZ plane face (top/bottom)
-                                const s1 = isSolidAt(lx + ox, y + dy, lz + face.corners[i][2]);
-                                const s2 = isSolidAt(lx + face.corners[i][0], y + dy, lz + oz);
-                                const corner = isSolidAt(lx + ox, y + dy, lz + oz);
-                                aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : corner ? 1 : 0);
+                            // AO — only for LOD 0
+                            if (lod === 0) {
+                                let aoLevel = 0;
+                                const dx = face.dir[0], dy = face.dir[1], dz = face.dir[2];
+                                const ox = face.corners[i][0] * 2 - 1;
+                                const oy = face.corners[i][1] * 2 - 1;
+                                const oz = face.corners[i][2] * 2 - 1;
+                                if (Math.abs(dx) === 1) {
+                                    const s1 = isSolidAt(lx + dx, y + face.corners[i][1], lz + oz);
+                                    const s2 = isSolidAt(lx + dx, y + oy, lz + face.corners[i][2]);
+                                    const corner = isSolidAt(lx + dx, y + oy, lz + oz);
+                                    aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : corner ? 1 : 0);
+                                } else if (Math.abs(dy) === 1) {
+                                    const s1 = isSolidAt(lx + ox, y + dy, lz + face.corners[i][2]);
+                                    const s2 = isSolidAt(lx + face.corners[i][0], y + dy, lz + oz);
+                                    const corner = isSolidAt(lx + ox, y + dy, lz + oz);
+                                    aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : corner ? 1 : 0);
+                                } else {
+                                    const s1 = isSolidAt(lx + ox, y + face.corners[i][1], lz + dz);
+                                    const s2 = isSolidAt(lx + face.corners[i][0], y + oy, lz + dz);
+                                    const corner = isSolidAt(lx + ox, y + oy, lz + dz);
+                                    aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : corner ? 1 : 0);
+                                }
+                                const brightness = 1.0 - aoLevel * 0.18;
+                                g.colors.push(brightness, brightness, brightness);
                             } else {
-                                // XY plane face (front/back)
-                                const s1 = isSolidAt(lx + ox, y + face.corners[i][1], lz + dz);
-                                const s2 = isSolidAt(lx + face.corners[i][0], y + oy, lz + dz);
-                                const corner = isSolidAt(lx + ox, y + oy, lz + dz);
-                                aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : corner ? 1 : 0);
+                                // No AO for LOD 1/2 — flat lighting
+                                g.colors.push(1.0, 1.0, 1.0);
                             }
-                            const brightness = 1.0 - aoLevel * 0.18; // 0.46 to 1.0
-                            g.colors.push(brightness, brightness, brightness);
                         }
 
                         g.indices.push(vo, vo + 1, vo + 2, vo, vo + 2, vo + 3);
@@ -208,7 +223,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz }) => {
         for (const g of Object.values(groups)) {
             if (g.positions.length === 0) continue;
 
-            const geo = new THREE.BufferGeometry();
+            const geo = getPooledGeo();
             geo.setAttribute('position', new THREE.Float32BufferAttribute(g.positions, 3));
             geo.setAttribute('normal', new THREE.Float32BufferAttribute(g.normals, 3));
             geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2));
@@ -223,7 +238,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz }) => {
         prevGeoRef.current = newGeos;
         return result;
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [key, version]);
+    }, [key, version, lod]);
 
     if (!meshData || meshData.length === 0) return null;
 

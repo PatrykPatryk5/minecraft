@@ -1,100 +1,191 @@
 /**
- * Pause Menu — ESC toggle (only when no other overlay is open)
- * Includes game mode switcher, settings, back to menu.
+ * Pause Menu — ESC toggle, settings, game mode, LAN hosting, new options
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import useGameStore from '../store/gameStore';
-import type { GameMode } from '../store/gameStore';
+import type { GameMode, Difficulty } from '../store/gameStore';
+import { startLANServer, stopLANServer, getLANState } from '../multiplayer/LANServer';
 
 const PauseMenu: React.FC = () => {
+    const isPaused = useGameStore((s) => s.isPaused);
+    const setPaused = useGameStore((s) => s.setPaused);
     const activeOverlay = useGameStore((s) => s.activeOverlay);
-    const setOverlay = useGameStore((s) => s.setOverlay);
-    const isLocked = useGameStore((s) => s.isLocked);
-    const renderDistance = useGameStore((s) => s.renderDistance);
-    const setRenderDistance = useGameStore((s) => s.setRenderDistance);
-    const fov = useGameStore((s) => s.fov);
-    const setFov = useGameStore((s) => s.setFov);
-    const gameMode = useGameStore((s) => s.gameMode);
-    const setGameMode = useGameStore((s) => s.setGameMode);
+    const setScreen = useGameStore((s) => s.setScreen);
     const settings = useGameStore((s) => s.settings);
     const updateSettings = useGameStore((s) => s.updateSettings);
-    const setScreen = useGameStore((s) => s.setScreen);
+    const gameMode = useGameStore((s) => s.gameMode);
+    const setGameMode = useGameStore((s) => s.setGameMode);
+    const setLocked = useGameStore((s) => s.setLocked);
+    const screen = useGameStore((s) => s.screen);
+    const playerName = useGameStore((s) => s.playerName);
+
+    const [lanActive, setLanActive] = useState(false);
+    const [lanPort, setLanPort] = useState(0);
+    const [showLanPanel, setShowLanPanel] = useState(false);
+
+    const handleEscape = useCallback((e: KeyboardEvent) => {
+        if (e.code !== 'Escape' || screen !== 'playing') return;
+        if (activeOverlay !== 'none' && activeOverlay !== 'pause') return;
+
+        e.preventDefault();
+        const next = !isPaused;
+        setPaused(next);
+        setLocked(!next);
+
+        if (next) {
+            document.exitPointerLock?.();
+        }
+    }, [isPaused, setPaused, setLocked, activeOverlay, screen]);
 
     useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            if (e.code !== 'Escape') return;
-            const s = useGameStore.getState();
-            if (s.screen !== 'playing') return;
-            if (s.isChatOpen) return; // Don't interfere with chat
-            // Only handle ESC for pause if no other overlay is open
-            if (s.activeOverlay === 'none') {
-                s.setOverlay('pause');
-                document.exitPointerLock();
-            } else if (s.activeOverlay === 'pause') {
-                s.setOverlay('none');
-                document.querySelector('canvas')?.requestPointerLock();
-            }
-            // If inventory/crafting is open, their own ESC handler (capture phase) handles it
-        };
-        window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
-    }, [isLocked]);
+        window.addEventListener('keydown', handleEscape);
+        return () => window.removeEventListener('keydown', handleEscape);
+    }, [handleEscape]);
 
-    if (activeOverlay !== 'pause') return null;
+    if (!isPaused || activeOverlay !== 'pause') return null;
 
-    const resume = () => {
-        setOverlay('none');
-        document.querySelector('canvas')?.requestPointerLock();
+    const returnToMenu = () => {
+        if (lanActive) {
+            stopLANServer();
+            setLanActive(false);
+        }
+        setPaused(false);
+        setLocked(false);
+        setScreen('mainMenu');
     };
 
-    const toMainMenu = () => {
-        setOverlay('none');
-        setScreen('mainMenu');
+    const resume = () => {
+        setPaused(false);
+        setLocked(true);
+        document.body.requestPointerLock?.();
+    };
+
+    const toggleLAN = () => {
+        if (lanActive) {
+            stopLANServer();
+            setLanActive(false);
+            setLanPort(0);
+        } else {
+            const { port } = startLANServer(playerName);
+            setLanActive(true);
+            setLanPort(port);
+        }
     };
 
     return (
         <div className="pause-overlay">
-            <div className="pause-menu">
+            <div className="pause-panel">
                 <h2>⏸ Gra Wstrzymana</h2>
 
-                <button className="mc-button" onClick={resume}>Powrót do gry</button>
+                <button className="mc-btn primary" onClick={resume}>▶ Wznów Grę</button>
 
-                {/* Game mode switcher */}
-                <div className="settings-group">
-                    <label>Tryb gry</label>
-                    <div className="mode-selector">
+                {/* LAN / WAN Hosting */}
+                <div style={{ margin: '12px 0', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
+                    <button className={`mc-btn ${lanActive ? 'active' : ''}`} onClick={toggleLAN}>
+                        {lanActive ? '🔴 Zamknij LAN' : '🌐 Otwórz na LAN'}
+                    </button>
+
+                    {lanActive && (
+                        <div style={{ margin: '8px 0', padding: '8px 12px', background: 'rgba(0,200,0,0.15)', borderRadius: 4, fontSize: '0.85em' }}>
+                            <div>✅ <strong>Serwer LAN aktywny</strong></div>
+                            <div style={{ margin: '4px 0' }}>
+                                Port: <code>{lanPort}</code>
+                            </div>
+                            <div style={{ color: '#aaa', fontSize: '0.8em' }}>
+                                Inni gracze łączą się przez:<br />
+                                <code>ws://TWOJE_IP:{lanPort}</code><br />
+                                Sprawdź swoje IP: <code>ipconfig</code>
+                            </div>
+                        </div>
+                    )}
+
+                    <button className="mc-btn" onClick={() => setShowLanPanel(!showLanPanel)} style={{ marginTop: 4 }}>
+                        {showLanPanel ? '▲ Ukryj Hosting Zewnętrzny' : '🌍 Hosting Zewnętrzny (WAN)'}
+                    </button>
+
+                    {showLanPanel && (
+                        <div style={{ margin: '8px 0', padding: '8px 12px', background: 'rgba(0,100,200,0.15)', borderRadius: 4, fontSize: '0.8em', color: '#bbb' }}>
+                            <div><strong>Hosting poza LAN:</strong></div>
+                            <div style={{ marginTop: 4 }}>
+                                1. Otwórz folder <code>server/</code><br />
+                                2. <code>npm install</code><br />
+                                3. <code>npx ts-node server.ts</code><br />
+                                4. Przekieruj port 3001 na routerze<br />
+                                5. Podaj IP publiczne innym graczom
+                            </div>
+                            <div style={{ marginTop: 6, color: '#ff9' }}>
+                                ⚠ Hosting WAN wymaga port-forwardingu lub usługi typu ngrok
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div className="settings-compact">
+                    <div className="setting-row">
+                        <span>Zasięg: <strong>{settings.renderDistance}</strong></span>
+                        <input type="range" min={2} max={16} value={settings.renderDistance}
+                            onChange={(e) => updateSettings({ renderDistance: +e.target.value })} className="mc-slider" />
+                    </div>
+                    <div className="setting-row">
+                        <span>FOV: <strong>{settings.fov}°</strong></span>
+                        <input type="range" min={60} max={110} value={settings.fov}
+                            onChange={(e) => updateSettings({ fov: +e.target.value })} className="mc-slider" />
+                    </div>
+                    <div className="setting-row">
+                        <span>Czułość: <strong>{(settings.sensitivity * 100).toFixed(0)}%</strong></span>
+                        <input type="range" min={10} max={100} value={settings.sensitivity * 100}
+                            onChange={(e) => updateSettings({ sensitivity: +e.target.value / 100 })} className="mc-slider" />
+                    </div>
+                    <div className="setting-row">
+                        <span>Dźwięki: <strong>{(settings.soundVolume * 100).toFixed(0)}%</strong></span>
+                        <input type="range" min={0} max={100} value={settings.soundVolume * 100}
+                            onChange={(e) => updateSettings({ soundVolume: +e.target.value / 100 })} className="mc-slider" />
+                    </div>
+                    <div className="setting-row">
+                        <span>Trudność:</span>
+                        <div className="mode-selector compact">
+                            {(['peaceful', 'easy', 'normal', 'hard'] as Difficulty[]).map((d) => (
+                                <button key={d} className={`mode-btn sm${settings.difficulty === d ? ' active' : ''}`}
+                                    onClick={() => updateSettings({ difficulty: d })}>
+                                    {d === 'peaceful' ? '🕊' : d === 'easy' ? '😊' : d === 'normal' ? '⚔' : '💀'}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="setting-row">
+                        <span>Cząsteczki:</span>
+                        <div className="mode-selector compact">
+                            {(['all', 'decreased', 'minimal'] as const).map((p) => (
+                                <button key={p} className={`mode-btn sm${settings.particles === p ? ' active' : ''}`}
+                                    onClick={() => updateSettings({ particles: p })}>
+                                    {p === 'all' ? '✨' : p === 'decreased' ? '🔅' : '⬜'}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="setting-row">
+                        <label>
+                            <input type="checkbox" checked={settings.smoothLighting}
+                                onChange={(e) => updateSettings({ smoothLighting: e.target.checked })} />
+                            Gładkie oświetlenie
+                        </label>
+                    </div>
+                </div>
+
+                <div className="setting-row" style={{ marginTop: 12 }}>
+                    <span>Tryb gry:</span>
+                    <div className="mode-selector compact">
                         {(['survival', 'creative', 'spectator'] as GameMode[]).map((m) => (
-                            <button key={m} className={`mode-btn${gameMode === m ? ' active' : ''}`} onClick={() => setGameMode(m)}>
-                                {m === 'survival' && '⚔ Survival'}
-                                {m === 'creative' && '✨ Creative'}
-                                {m === 'spectator' && '👁 Spectator'}
+                            <button key={m} className={`mode-btn sm${gameMode === m ? ' active' : ''}`}
+                                onClick={() => setGameMode(m)}>
+                                {m === 'survival' ? '⚔' : m === 'creative' ? '✨' : '👁'}
                             </button>
                         ))}
                     </div>
                 </div>
 
-                <div className="settings-group">
-                    <label>Zasięg renderowania: <strong>{renderDistance}</strong> chunków</label>
-                    <input type="range" min={2} max={16} value={renderDistance} onChange={(e) => setRenderDistance(+e.target.value)} className="mc-slider" />
-                </div>
-
-                <div className="settings-group">
-                    <label>FOV: <strong>{fov}°</strong></label>
-                    <input type="range" min={60} max={110} value={fov} onChange={(e) => setFov(+e.target.value)} className="mc-slider" />
-                </div>
-
-                <div className="settings-group">
-                    <label>Czułość myszy: <strong>{(settings.sensitivity * 100).toFixed(0)}%</strong></label>
-                    <input type="range" min={10} max={100} value={settings.sensitivity * 100} onChange={(e) => updateSettings({ sensitivity: +e.target.value / 100 })} className="mc-slider" />
-                </div>
-
-                <div className="settings-group">
-                    <label>Dźwięki: <strong>{(settings.soundVolume * 100).toFixed(0)}%</strong></label>
-                    <input type="range" min={0} max={100} value={settings.soundVolume * 100} onChange={(e) => updateSettings({ soundVolume: +e.target.value / 100 })} className="mc-slider" />
-                </div>
-
-                <button className="mc-button secondary" onClick={toMainMenu}>Powrót do Menu Głównego</button>
+                <button className="mc-btn" onClick={returnToMenu}>🏠 Menu Główne</button>
             </div>
         </div>
     );

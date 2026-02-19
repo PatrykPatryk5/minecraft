@@ -182,6 +182,11 @@ export enum BlockType {
     BLAZE_POWDER = 502,
     EYE_OF_ENDER = 503,
     NETHER_STAR = 504,
+    // ─── Redstone Devices ────────────────────────────────
+    LEVER = 66,
+    REDSTONE_TORCH = 67,
+    REDSTONE_LAMP = 68,
+    REDSTONE_WIRE = 69,
 }
 
 // ─── Block Data Interface ────────────────────────────────
@@ -200,6 +205,7 @@ export interface BlockInfo {
     readonly stackSize?: number;   // max per stack (default 64)
     readonly light?: number;       // emits light 0-15
     readonly foodRestore?: number; // hunger points restored
+    readonly emissive?: boolean;   // emits light (visual glow)
 }
 
 // ─── Block Data Map ──────────────────────────────────────
@@ -382,6 +388,11 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.BLAZE_POWDER]: { name: 'Proszek Blaze', color: '#ffcc00', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.EYE_OF_ENDER]: { name: 'Oko Endera', color: '#00cc77', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.NETHER_STAR]: { name: 'Gwiazda Netheru', color: '#ffffff', transparent: false, solid: false, breakTime: 0, isItem: true },
+    // ─── Redstone Devices ────────────────────────────────
+    [BlockType.LEVER]: { name: 'Dźwignia', color: '#8b7355', top: '#666666', transparent: true, solid: false, breakTime: 0.3, tool: 'hand' },
+    [BlockType.REDSTONE_TORCH]: { name: 'Pochodnia Redstone', color: '#cc0000', transparent: true, solid: false, breakTime: 0, tool: 'hand', emissive: true },
+    [BlockType.REDSTONE_LAMP]: { name: 'Lampa Redstone', color: '#8b6914', top: '#aa8833', transparent: false, solid: true, breakTime: 0.3, tool: 'pickaxe' },
+    [BlockType.REDSTONE_WIRE]: { name: 'Redstone', color: '#cc0000', transparent: true, solid: false, breakTime: 0, tool: 'hand' },
 };
 
 /** Get block info safely */

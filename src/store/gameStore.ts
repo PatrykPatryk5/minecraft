@@ -22,14 +22,32 @@ export const blockKey = (lx: number, y: number, lz: number): string => `${lx},${
 
 // ─── Types ───────────────────────────────────────────────
 export type GameMode = 'survival' | 'creative' | 'spectator';
-export type GameScreen = 'mainMenu' | 'worldCreate' | 'settings' | 'playing' | 'paused';
+export type GameScreen = 'mainMenu' | 'worldCreate' | 'settings' | 'keybinds' | 'multiplayer' | 'playing' | 'paused' | 'credits';
+export type Dimension = 'overworld' | 'nether' | 'end';
 
 /** Which overlay is open (only one at a time) */
-export type ActiveOverlay = 'none' | 'pause' | 'inventory' | 'crafting' | 'furnace';
+export type ActiveOverlay = 'none' | 'pause' | 'inventory' | 'crafting' | 'furnace' | 'chest';
 
 export interface InventorySlot {
     id: number;   // block/item type
     count: number;
+}
+
+export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard';
+
+export interface Keybinds {
+    forward: string;
+    backward: string;
+    left: string;
+    right: string;
+    jump: string;
+    sprint: string;
+    sneak: string;
+    inventory: string;
+    drop: string;
+    chat: string;
+    command: string;
+    [key: string]: string;
 }
 
 export interface GameSettings {
@@ -41,6 +59,23 @@ export interface GameSettings {
     graphics: 'fast' | 'fancy' | 'fabulous';
     showFps: boolean;
     viewBobbing: boolean;
+    difficulty: Difficulty;
+    guiScale: number;
+    particles: 'all' | 'decreased' | 'minimal';
+    smoothLighting: boolean;
+    fullscreen: boolean;
+    keybinds: Keybinds;
+}
+
+export interface ArmorSlots {
+    helmet: InventorySlot;
+    chestplate: InventorySlot;
+    leggings: InventorySlot;
+    boots: InventorySlot;
+}
+
+export interface ChestData {
+    slots: InventorySlot[];
 }
 
 export interface FurnaceState {
@@ -180,7 +215,42 @@ export interface GameState {
     removeConnectedPlayer: (id: string) => void;
     chatMessages: { sender: string; text: string; time: number }[];
     addChatMessage: (sender: string, text: string) => void;
+
+    // ── Armor ──────────────────────────────────────────────
+    armor: ArmorSlots;
+    setArmor: (a: ArmorSlots) => void;
+    getArmorPoints: () => number;
+
+    // ── Chests ─────────────────────────────────────────────
+    chests: Record<string, ChestData>;
+    getChest: (key: string) => ChestData | null;
+    setChest: (key: string, data: ChestData) => void;
+
+    // ── Fall Damage ────────────────────────────────────────
+    fallDistance: number;
+    setFallDistance: (d: number) => void;
+
+    // ── Dimensions ────────────────────────────────────────
+    dimension: Dimension;
+    setDimension: (d: Dimension) => void;
+    dimensionChunks: Record<string, Record<string, any>>;  // per-dimension chunk storage
+    dragonDefeated: boolean;
+    setDragonDefeated: (v: boolean) => void;
 }
+
+const defaultKeybinds: Keybinds = {
+    forward: 'KeyW',
+    backward: 'KeyS',
+    left: 'KeyA',
+    right: 'KeyD',
+    jump: 'Space',
+    sprint: 'ShiftLeft',
+    sneak: 'ControlLeft',
+    inventory: 'KeyE',
+    drop: 'KeyQ',
+    chat: 'KeyT',
+    command: 'Slash',
+};
 
 const defaultSettings: GameSettings = {
     renderDistance: 6,
@@ -191,7 +261,20 @@ const defaultSettings: GameSettings = {
     graphics: 'fancy',
     showFps: false,
     viewBobbing: true,
+    difficulty: 'normal',
+    guiScale: 2,
+    particles: 'all',
+    smoothLighting: true,
+    fullscreen: false,
+    keybinds: { ...defaultKeybinds },
 };
+
+const emptyArmor = (): ArmorSlots => ({
+    helmet: { id: 0, count: 0 },
+    chestplate: { id: 0, count: 0 },
+    leggings: { id: 0, count: 0 },
+    boots: { id: 0, count: 0 },
+});
 
 const emptySlot = (): InventorySlot => ({ id: 0, count: 0 });
 const makeSlots = (n: number): InventorySlot[] => Array.from({ length: n }, emptySlot);
@@ -493,6 +576,38 @@ const useGameStore = create<GameState>((set, get) => ({
     addChatMessage: (sender, text) => set((s) => ({
         chatMessages: [...s.chatMessages.slice(-99), { sender, text, time: Date.now() }],
     })),
+
+    // ── Armor ──────────────────────────────────────────────
+    armor: emptyArmor(),
+    setArmor: (a) => set({ armor: a }),
+    getArmorPoints: () => {
+        const a = get().armor;
+        let pts = 0;
+        // Simple: each non-empty slot = +2 armor points
+        if (a.helmet.id) pts += 2;
+        if (a.chestplate.id) pts += 6;
+        if (a.leggings.id) pts += 5;
+        if (a.boots.id) pts += 2;
+        return pts;
+    },
+
+    // ── Chests ─────────────────────────────────────────────
+    chests: {},
+    getChest: (key) => get().chests[key] || null,
+    setChest: (key, data) => set((s) => ({
+        chests: { ...s.chests, [key]: data },
+    })),
+
+    // ── Fall Damage ────────────────────────────────────────
+    fallDistance: 0,
+    setFallDistance: (d) => set({ fallDistance: d }),
+
+    // ── Dimensions ────────────────────────────────────────
+    dimension: 'overworld' as Dimension,
+    setDimension: (d) => set({ dimension: d }),
+    dimensionChunks: { overworld: {}, nether: {}, end: {} },
+    dragonDefeated: false,
+    setDragonDefeated: (v) => set({ dragonDefeated: v }),
 }));
 
 export default useGameStore;

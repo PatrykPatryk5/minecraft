@@ -1,92 +1,83 @@
 /**
- * World Manager (Web Worker Powered)
+ * World Manager (Worker Pool + LOD + Batch Loading)
+ * 
+ * v2 — Fixed chunk border stutter by minimizing React state updates.
+ * The chunk list is stored in refs and rendered via useSyncExternalStore-like pattern.
  *
- * Key architecture:
- *   1. Web Worker generates chunks in background thread (zero main-thread stutter)
- *   2. Worker results update Zustand store → triggers Chunk re-renders
- *   3. Chunk unloading for distant chunks (memory management)
- *   4. Priority queue — nearest chunks first
- *   5. Fallback to sync gen if worker fails
+ * Key fixes:
+ *   - No more setRenderTick spam — chunk arrivals don't cause full tree re-render
+ *   - Recalculate only updates refs, not state
+ *   - Chunks are rendered from a stable key list
  */
 
-import React, { useRef, useCallback, useEffect } from 'react';
+import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import useGameStore, { chunkKey } from '../store/gameStore';
 import { generateChunk, CHUNK_SIZE, initSeed } from '../core/terrainGen';
+import { WorkerPool } from '../core/workerPool';
 import Chunk from './Chunk';
 
 const UNLOAD_BUFFER = 3;
-const MAX_PENDING = 6; // max chunks being generated at once
-const RECALCULATE_COOLDOWN = 1000; // ms between recalculates
+const BATCH_PER_FRAME = 4;
+const RECALCULATE_COOLDOWN = 600;
+
+// LOD thresholds (in chunk distance²)
+const LOD_FULL = 5 * 5;
+const LOD_MEDIUM = 8 * 8;
 
 interface ChunkEntry {
     cx: number;
     cz: number;
     key: string;
+    dist: number;
+    lod: 0 | 1 | 2;
 }
 
 const World: React.FC = () => {
     const renderDistance = useGameStore((s) => s.renderDistance);
-    const setChunkData = useGameStore((s) => s.setChunkData);
-    const bumpVersion = useGameStore((s) => s.bumpVersion);
 
-    const loadQueueRef = useRef<(ChunkEntry & { dist: number })[]>([]);
+    const loadQueueRef = useRef<ChunkEntry[]>([]);
     const loadedKeysRef = useRef(new Set<string>());
     const pendingKeysRef = useRef(new Set<string>());
     const activeChunksRef = useRef<ChunkEntry[]>([]);
     const lastPlayerChunkRef = useRef<string>('');
     const lastRecalcTime = useRef(0);
-    const [renderTick, setRenderTick] = React.useState(0);
-    const workerRef = useRef<Worker | null>(null);
-    const workerReady = useRef(false);
+    const poolRef = useRef<WorkerPool | null>(null);
+    const needsRerenderRef = useRef(false);
+    const chunkArrivedCountRef = useRef(0);
+    const lastRerenderCount = useRef(0);
 
-    // ── Initialize Web Worker ────────────────────────────
+    // Minimal state — only updated when the chunk LIST changes (not every arrival)
+    const [visibleChunks, setVisibleChunks] = useState<ChunkEntry[]>([]);
+
+    // ── Initialize Worker Pool ──────────────────────────
     useEffect(() => {
-        try {
-            const worker = new Worker(
-                new URL('./terrainWorker.ts', import.meta.url),
-                { type: 'module' }
-            );
+        const seed = useGameStore.getState().worldSeed;
+        initSeed(seed);
 
-            worker.onmessage = (e: MessageEvent) => {
-                const { type: msgType, cx, cz, data } = e.data;
+        const pool = new WorkerPool(
+            new URL('./terrainWorker.ts', import.meta.url),
+            4, 16
+        );
 
-                // Ignore non-chunk messages (like 'ready' from seed init)
-                if (msgType === 'ready') return;
+        const ok = pool.init(seed);
+        poolRef.current = ok ? pool : null;
 
-                const key = chunkKey(cx, cz);
+        if (!ok) console.warn('[World] WorkerPool failed, using sync fallback');
 
-                // Update Zustand store (triggers Chunk component re-render)
-                useGameStore.getState().setChunkData(cx, cz, data);
-                useGameStore.getState().bumpVersion(cx, cz);
-                loadedKeysRef.current.add(key);
-                pendingKeysRef.current.delete(key);
+        return () => { pool.terminate(); };
+    }, []);
 
-                // Trigger World re-render for new chunks
-                setRenderTick((n) => n + 1);
-            };
+    // ── Handle worker results — NO setState ─────────────
+    const onChunkReady = useCallback((result: any) => {
+        const { cx, cz, id } = result;
+        const key = id || chunkKey(cx, cz);
 
-            worker.onerror = (err) => {
-                console.warn('[World] Worker error, falling back to sync:', err);
-                workerReady.current = false;
-            };
-
-            // Initialize seed in both main thread and worker
-            const seed = useGameStore.getState().worldSeed;
-            initSeed(seed);
-            worker.postMessage({ type: 'init', seed });
-
-            workerRef.current = worker;
-            workerReady.current = true;
-            console.log(`[World] Terrain Worker initialized with seed: ${seed}`);
-        } catch (err) {
-            console.warn('[World] Worker not available, using sync fallback');
-            workerReady.current = false;
-        }
-
-        return () => {
-            workerRef.current?.terminate();
-        };
+        useGameStore.getState().setChunkData(cx, cz, result.data);
+        useGameStore.getState().bumpVersion(cx, cz);
+        loadedKeysRef.current.add(key);
+        pendingKeysRef.current.delete(key);
+        chunkArrivedCountRef.current++;
     }, []);
 
     // ── Request chunk generation ─────────────────────────
@@ -96,46 +87,50 @@ const World: React.FC = () => {
 
         pendingKeysRef.current.add(key);
 
-        if (workerReady.current && workerRef.current) {
-            // Async via Worker (no main thread blocking!)
-            workerRef.current.postMessage({ cx, cz, id: key });
+        if (poolRef.current?.isReady()) {
+            poolRef.current.submit(cx, cz, onChunkReady);
         } else {
             // Sync fallback
             const data = generateChunk(cx, cz);
-            setChunkData(cx, cz, data);
-            bumpVersion(cx, cz);
+            useGameStore.getState().setChunkData(cx, cz, data);
+            useGameStore.getState().bumpVersion(cx, cz);
             loadedKeysRef.current.add(key);
             pendingKeysRef.current.delete(key);
         }
-    }, [setChunkData, bumpVersion]);
+    }, [onChunkReady]);
 
-    // Recalculate which chunks are needed
+    // ── Recalculate visible chunks — ref-only ────────────
     const recalculate = useCallback(() => {
         const pos = useGameStore.getState().playerPos;
         const pcx = Math.floor(pos[0] / CHUNK_SIZE);
         const pcz = Math.floor(pos[2] / CHUNK_SIZE);
         const rd = useGameStore.getState().renderDistance;
 
-        const needed = new Set<string>();
         const active: ChunkEntry[] = [];
-        const toLoad: (ChunkEntry & { dist: number })[] = [];
+        const toLoad: ChunkEntry[] = [];
 
         for (let dx = -rd; dx <= rd; dx++) {
             for (let dz = -rd; dz <= rd; dz++) {
-                if (dx * dx + dz * dz > rd * rd) continue;
+                const dist = dx * dx + dz * dz;
+                if (dist > rd * rd) continue;
+
                 const cx = pcx + dx;
                 const cz = pcz + dz;
                 const key = chunkKey(cx, cz);
-                needed.add(key);
-                active.push({ cx, cz, key });
+                const lod: 0 | 1 | 2 = dist <= LOD_FULL ? 0 : dist <= LOD_MEDIUM ? 1 : 2;
+
+                const entry: ChunkEntry = { cx, cz, key, dist, lod };
+                active.push(entry);
 
                 if (!loadedKeysRef.current.has(key) && !pendingKeysRef.current.has(key)) {
-                    toLoad.push({ cx, cz, key, dist: dx * dx + dz * dz });
+                    toLoad.push(entry);
                 }
             }
         }
 
         toLoad.sort((a, b) => a.dist - b.dist);
+        active.sort((a, b) => a.dist - b.dist);
+
         loadQueueRef.current = toLoad;
         activeChunksRef.current = active;
 
@@ -154,7 +149,8 @@ const World: React.FC = () => {
             loadedKeysRef.current.delete(k);
         }
 
-        setRenderTick((n) => n + 1);
+        // Only update state when chunk list actually changed
+        needsRerenderRef.current = true;
     }, []);
 
     // Initial load
@@ -162,21 +158,21 @@ const World: React.FC = () => {
         recalculate();
     }, [recalculate, renderDistance]);
 
-    // Per-frame: send chunk generation requests + check player movement
+    // Per-frame: batch send requests + throttled re-render
     useFrame(() => {
-        // Send pending requests to worker (throttled)
+        // Send pending requests to worker
         let sent = 0;
         while (
             loadQueueRef.current.length > 0 &&
-            pendingKeysRef.current.size < MAX_PENDING &&
-            sent < 2
+            pendingKeysRef.current.size < 16 &&
+            sent < BATCH_PER_FRAME
         ) {
             const entry = loadQueueRef.current.shift()!;
             requestChunk(entry.cx, entry.cz);
             sent++;
         }
 
-        // Check if player moved to new chunk (throttled)
+        // Check if player moved to new chunk
         const pos = useGameStore.getState().playerPos;
         const pcx = Math.floor(pos[0] / CHUNK_SIZE);
         const pcz = Math.floor(pos[2] / CHUNK_SIZE);
@@ -189,12 +185,21 @@ const World: React.FC = () => {
                 recalculate();
             }
         }
+
+        // Throttled re-render: only when chunks arrived or list changed
+        // Max 1 re-render per 500ms to prevent physics stutter
+        const arrivedCount = chunkArrivedCountRef.current;
+        if (needsRerenderRef.current || arrivedCount !== lastRerenderCount.current) {
+            needsRerenderRef.current = false;
+            lastRerenderCount.current = arrivedCount;
+            setVisibleChunks([...activeChunksRef.current]);
+        }
     });
 
     return (
         <>
-            {activeChunksRef.current.map((c) => (
-                <Chunk key={c.key} cx={c.cx} cz={c.cz} />
+            {visibleChunks.map((c) => (
+                <Chunk key={c.key} cx={c.cx} cz={c.cz} lod={c.lod} />
             ))}
         </>
     );

@@ -20,6 +20,8 @@ import ChatBox from './ui/ChatBox';
 import DeathScreen from './ui/DeathScreen';
 import ErrorBoundary from './ui/ErrorBoundary';
 import MainMenu from './ui/MainMenu';
+import KeybindScreen from './ui/KeybindScreen';
+import MultiplayerScreen from './ui/MultiplayerScreen';
 import MobRenderer from './mobs/MobRenderer';
 import useGameStore from './store/gameStore';
 import { getRendererCaps, type RendererCapabilities } from './core/renderer';
@@ -98,6 +100,8 @@ const App: React.FC = () => {
     return (
         <ErrorBoundary>
             <MainMenu />
+            <KeybindScreen />
+            <MultiplayerScreen />
 
             {isPlaying && (
                 <Canvas
