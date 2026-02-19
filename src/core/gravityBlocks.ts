@@ -43,6 +43,30 @@ export function checkGravityAbove(x: number, y: number, z: number): void {
     }
 }
 
+/** Called whenever a specific gravity block might need to fall (e.g. just placed) */
+export function checkGravityBlock(x: number, y: number, z: number): void {
+    const s = useGameStore.getState();
+    const block = s.getBlock(x, y, z);
+
+    if (!block || !GRAVITY_BLOCKS.has(block)) return;
+
+    let landY = y;
+    for (let fy = y - 1; fy >= 0; fy--) {
+        const below = s.getBlock(x, fy, z);
+        if (below && BLOCK_DATA[below]?.solid) {
+            landY = fy + 1;
+            break;
+        }
+        if (fy === 0) landY = 0;
+    }
+
+    if (landY !== y) {
+        s.removeBlock(x, y, z);
+        s.addBlock(x, landY, z, block);
+        bumpChunks(x, z);
+    }
+}
+
 /** Called when any block is removed — check gravity for neighbors too */
 export function processGravity(x: number, y: number, z: number): void {
     // Check directly above

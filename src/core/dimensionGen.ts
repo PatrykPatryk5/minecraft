@@ -31,8 +31,8 @@ function seededRandom(x: number, z: number): number {
  * - Soul sand on floor, glowstone on ceiling
  * - Nether fortress fragments (nether bricks)
  */
-export function generateNetherChunk(cx: number, cz: number): Uint8Array {
-    const data = new Uint8Array(CHUNK_SIZE * MAX_HEIGHT * CHUNK_SIZE);
+export function generateNetherChunk(cx: number, cz: number): Uint16Array {
+    const data = new Uint16Array(CHUNK_SIZE * MAX_HEIGHT * CHUNK_SIZE);
     const noise2d = createNoise2D(() => seededRandom(cx * 100, cz * 100));
     const noise3d = createNoise3D(() => seededRandom(cx * 200 + 1, cz * 200 + 1));
 
@@ -106,8 +106,8 @@ export function generateNetherChunk(cx: number, cz: number): Uint8Array {
  * - Obsidian pillars on main island
  * - End stone base material
  */
-export function generateEndChunk(cx: number, cz: number): Uint8Array {
-    const data = new Uint8Array(CHUNK_SIZE * MAX_HEIGHT * CHUNK_SIZE);
+export function generateEndChunk(cx: number, cz: number): Uint16Array {
+    const data = new Uint16Array(CHUNK_SIZE * MAX_HEIGHT * CHUNK_SIZE);
     const noise2d = createNoise2D(() => seededRandom(cx * 300, cz * 300));
 
     const END_Y = 64;

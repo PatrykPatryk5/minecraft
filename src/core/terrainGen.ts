@@ -131,16 +131,7 @@ export function bkey(lx: number, y: number, lz: number): string {
     return `${lx},${y},${lz}`;
 }
 
-// ─── Main Generator ─────────────────────────────────────
-// ─── Main Generator ─────────────────────────────────────
-export function generateChunk(cx: number, cz: number, dimension: string = 'overworld'): ChunkData {
-    if (dimension === 'end') {
-        return generateEndChunk(cx, cz);
-    }
-    return generateOverworldChunk(cx, cz);
-}
-
-export function generateOverworldChunk(cx: number, cz: number): ChunkData {
+export function generateChunk(cx: number, cz: number): ChunkData {
     const blocks = new Uint16Array(CHUNK_VOLUME);
     const wx0 = cx * CHUNK_SIZE;
     const wz0 = cz * CHUNK_SIZE;
@@ -246,6 +237,46 @@ export function generateOverworldChunk(cx: number, cz: number): ChunkData {
         });
     }
 
+    // Dungeons
+    // ~5% chance per chunk
+    const dn = n2(cx * 1.5, cz * 1.5);
+    if (dn > 0.8) {
+        // pseudo-random position inside chunk
+        const px = Math.floor(Math.abs(n2(cx, cz)) * 8) + 4; // 4 to 11
+        const pz = Math.floor(Math.abs(n2(cz, cx)) * 8) + 4; // 4 to 11
+        const py = Math.floor(Math.abs(n3(cx, cz, 0)) * 30) + 10; // Y 10 to 40
+
+        // Build 7x7x5 room
+        for (let dy = 0; dy < 5; dy++) {
+            for (let dx = -3; dx <= 3; dx++) {
+                for (let dz = -3; dz <= 3; dz++) {
+                    const nx = px + dx;
+                    const nz = pz + dz;
+                    // Keep entirely within this chunk to avoid tricky cross-chunk gen
+                    if (nx < 0 || nx > 15 || nz < 0 || nz > 15) continue;
+
+                    const ny = py + dy;
+                    const idx = blockIndex(nx, ny, nz);
+
+                    if (dy === 0 || dy === 4 || dx === -3 || dx === 3 || dz === -3 || dz === 3) {
+                        // Shell
+                        if (blocks[idx] !== BlockType.BEDROCK) {
+                            // Deterministicish choice between mossy and normal cobble
+                            const isMossy = n3(cx * 10 + nx, ny, cz * 10 + nz) > 0;
+                            blocks[idx] = isMossy ? BlockType.MOSSY_COBBLE : BlockType.COBBLE;
+                        }
+                    } else {
+                        // Interior empty
+                        blocks[idx] = BlockType.AIR;
+                    }
+                }
+            }
+        }
+
+        // Place chest
+        blocks[blockIndex(px, py + 1, pz)] = BlockType.CHEST;
+    }
+
     return blocks;
 }
 
@@ -312,90 +343,4 @@ export function getSpawnHeight(x: number, z: number): number {
 }
 
 // ─── End Dimension Generator ─────────────────────────────
-export function generateEndChunk(cx: number, cz: number): ChunkData {
-    const blocks = new Uint16Array(CHUNK_VOLUME);
-    const wx0 = cx * CHUNK_SIZE;
-    const wz0 = cz * CHUNK_SIZE;
-
-    // Center of the main island
-    const centerX = 0;
-    const centerZ = 0;
-
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-            const wx = wx0 + lx;
-            const wz = wz0 + lz;
-
-            // Distance from center
-            const dx = wx - centerX;
-            const dz = wz - centerZ;
-            const dist = Math.sqrt(dx * dx + dz * dz);
-
-            // Base height noise
-            // const n = octave2D(wx, wz, 3, 0.5, 0.01);
-
-            // Island shape factor: 1.0 at center, drops off
-            const islandRadius = 120;
-            if (dist > islandRadius) continue; // optimize checking
-
-            // Simple island shape:
-            // height = base + noise - (dist/radius)^2 * falloff
-            let h = 60 + octave2D(wx, wz, 3, 0.5, 0.02) * 20;
-
-            // Taper edges
-            const taper = Math.max(0, 1 - Math.pow(dist / islandRadius, 2));
-            h = (h - 20) * taper + 20; // Ensure bottom doesn't dip too low at center
-
-            if (h < 10 && dist > 50) h = 0; // Cutoff for floating effect
-
-            const surfaceH = Math.floor(h);
-
-            if (surfaceH > 0) {
-                for (let y = 0; y <= surfaceH; y++) {
-                    const idx = blockIndex(lx, y, lz);
-                    // Core is end stone
-                    blocks[idx] = BlockType.END_STONE;
-                }
-            }
-        }
-    }
-
-    // Obsidian Pillars
-    const pillars = [
-        { x: 35, z: 0, r: 3, h: 40 },
-        { x: -35, z: 0, r: 3, h: 40 },
-        { x: 0, z: 35, r: 3, h: 40 },
-        { x: 0, z: -35, r: 3, h: 40 },
-        { x: 25, z: 25, r: 2, h: 25 },
-        { x: -25, z: 25, r: 2, h: 25 },
-        { x: 25, z: -25, r: 2, h: 25 },
-        { x: -25, z: -25, r: 2, h: 25 },
-    ];
-
-    for (const p of pillars) {
-        // Simple bounding box check
-        if (wx0 + CHUNK_SIZE < p.x - p.r || wx0 > p.x + p.r ||
-            wz0 + CHUNK_SIZE < p.z - p.r || wz0 > p.z + p.r) {
-            continue;
-        }
-
-        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-            for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-                const wx = wx0 + lx;
-                const wz = wz0 + lz;
-                const dx = wx - p.x;
-                const dz = wz - p.z;
-
-                if (dx * dx + dz * dz <= p.r * p.r) {
-                    const groundY = 30; // approx where island surface is
-                    for (let y = groundY; y < groundY + p.h; y++) {
-                        blocks[blockIndex(lx, y, lz)] = BlockType.OBSIDIAN;
-                    }
-                    // Fire/Crystal on top?
-                }
-            }
-        }
-    }
-
-    return blocks;
-}
+// (Moved to dimensionGen.ts for cleanliness)

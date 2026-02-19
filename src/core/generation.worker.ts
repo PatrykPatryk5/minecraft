@@ -1,5 +1,5 @@
-
-import { generateChunk, generateEndChunk, initSeed } from './terrainGen';
+import { generateChunk, initSeed } from './terrainGen';
+import { generateEndChunk, generateNetherChunk } from './dimensionGen';
 
 // Helper to handle messages
 const ctx: Worker = self as any;
@@ -20,6 +20,8 @@ ctx.onmessage = (e: MessageEvent) => {
         let data;
         if (dimension === 'end') {
             data = generateEndChunk(cx, cz);
+        } else if (dimension === 'nether') {
+            data = generateNetherChunk(cx, cz);
         } else {
             // Default overworld
             data = generateChunk(cx, cz);

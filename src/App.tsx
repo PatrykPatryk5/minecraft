@@ -7,12 +7,14 @@ import { Canvas } from '@react-three/fiber';
 import World from './world/World';
 import Player from './player/Player';
 import DayNightCycle from './environment/DayNightCycle';
-// import WaterSurface from './environment/WaterSurface';
 import Clouds from './environment/Clouds';
+import TorchLights from './environment/TorchLights';
 import BlockParticles from './effects/BlockParticles';
 import HUD from './ui/HUD';
 import DebugScreen from './ui/DebugScreen';
 import PauseMenu from './ui/PauseMenu';
+import { EffectComposer, SMAA, SSAO } from '@react-three/postprocessing';
+import { BlendFunction } from 'postprocessing';
 import Inventory from './ui/Inventory';
 import CraftingScreen from './ui/CraftingScreen';
 import FurnaceScreen from './ui/FurnaceScreen';
@@ -24,6 +26,7 @@ import CreditsScreen from './ui/CreditsScreen';
 import KeybindScreen from './ui/KeybindScreen';
 import MultiplayerScreen from './ui/MultiplayerScreen';
 import MobRenderer from './mobs/MobRenderer';
+import { MultiplayerRenderer } from './multiplayer/MultiplayerRenderer';
 import useGameStore from './store/gameStore';
 import { getRendererCaps, type RendererCapabilities } from './core/renderer';
 import { preloadAllTextures } from './core/textures';
@@ -37,18 +40,36 @@ const LoadingScreen: React.FC<{ caps: RendererCapabilities | null; progress: str
     </div>
 );
 
-const SceneContent: React.FC = () => (
-    <>
-        <fog attach="fog" args={['#87ceeb', 60, 220]} />
-        <DayNightCycle />
-        <World />
-        <Player />
-        {/* WaterSurface removed for performance/stability; handled in Chunk.tsx */}
-        <Clouds />
-        <BlockParticles />
-        <MobRenderer />
-    </>
-);
+const SceneContent: React.FC = () => {
+    const graphics = useGameStore((s) => s.settings.graphics);
+    const usePostProcessing = graphics === 'fabulous';
+
+    return (
+        <>
+            <fog attach="fog" args={['#87ceeb', 60, 220]} />
+            <DayNightCycle />
+            <World />
+            <Player />
+            <Clouds />
+            <TorchLights />
+            <BlockParticles />
+            <MobRenderer />
+            <MultiplayerRenderer />
+
+            {usePostProcessing && (
+                <EffectComposer multisampling={0}>
+                    <SSAO
+                        samples={16}
+                        radius={0.2}
+                        intensity={15}
+                        luminanceInfluence={0.6}
+                    />
+                    <SMAA />
+                </EffectComposer>
+            )}
+        </>
+    );
+};
 
 const App: React.FC = () => {
     const fov = useGameStore((s) => s.fov);

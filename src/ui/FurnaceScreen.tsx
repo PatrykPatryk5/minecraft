@@ -1,26 +1,40 @@
 /**
  * Furnace Screen — Opens via right-click on Furnace block
  * Smelting with fuel, progress bar, input/fuel/output slots
+ * Fully supports inventory drag-and-drop
  */
 
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import useGameStore from '../store/gameStore';
 import { BLOCK_DATA } from '../core/blockTypes';
 import { getBlockIcon } from '../core/textures';
-import { findSmeltingRecipe, getFuelValue } from '../core/crafting';
-import type { FurnaceState, InventorySlot } from '../store/gameStore';
+import type { InventorySlot } from '../store/gameStore';
 import { playSound } from '../audio/sounds';
-
-const emptySlot = (): InventorySlot => ({ id: 0, count: 0 });
 
 const FurnaceScreen: React.FC = () => {
     const activeOverlay = useGameStore((s) => s.activeOverlay);
     const setOverlay = useGameStore((s) => s.setOverlay);
     const furnace = useGameStore((s) => s.furnace);
     const setFurnace = useGameStore((s) => s.setFurnace);
-    const screen = useGameStore((s) => s.screen);
     const gameMode = useGameStore((s) => s.gameMode);
-    const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    const inventory = useGameStore((s) => s.inventory);
+    const setInventory = useGameStore((s) => s.setInventory);
+    const hotbar = useGameStore((s) => s.hotbar);
+    const setHotbar = useGameStore((s) => s.setHotbar);
+
+    const cursorItem = useGameStore((s) => s.cursorItem);
+    const setCursorItem = useGameStore((s) => s.setCursorItem);
+
+    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+    // Track mouse for cursor item
+    useEffect(() => {
+        if (activeOverlay !== 'furnace') return;
+        const onMouseMove = (e: MouseEvent) => setMousePos({ x: e.clientX, y: e.clientY });
+        window.addEventListener('mousemove', onMouseMove);
+        return () => window.removeEventListener('mousemove', onMouseMove);
+    }, [activeOverlay]);
 
     // ESC to close
     useEffect(() => {
@@ -34,164 +48,127 @@ const FurnaceScreen: React.FC = () => {
         return () => window.removeEventListener('keydown', onKey, true);
     }, []);
 
-    // Smelting tick (runs at 20 TPS when open)
-    useEffect(() => {
-        if (activeOverlay !== 'furnace') return;
-
-        tickRef.current = setInterval(() => {
-            const s = useGameStore.getState();
-            const f = { ...s.furnace };
-            const input = { ...f.inputSlot };
-            const fuel = { ...f.fuelSlot };
-            const output = { ...f.outputSlot };
-            let changed = false;
-
-            // Try to start burning new fuel
-            if (f.burnTimeRemaining <= 0 && input.id > 0) {
-                const recipe = findSmeltingRecipe(input.id);
-                if (recipe && fuel.id > 0) {
-                    const fuelVal = getFuelValue(fuel.id);
-                    if (fuelVal > 0) {
-                        // Check output compatibility
-                        if (output.id === 0 || (output.id === recipe.output && output.count < 64)) {
-                            f.burnTimeRemaining = Math.floor(fuelVal * 200);
-                            f.burnTimeTotal = f.burnTimeRemaining;
-                            fuel.count--;
-                            if (fuel.count <= 0) { fuel.id = 0; fuel.count = 0; }
-                            changed = true;
-                        }
-                    }
-                }
-            }
-
-            // Cook progress
-            if (f.burnTimeRemaining > 0) {
-                f.burnTimeRemaining--;
-                changed = true;
-
-                const recipe = findSmeltingRecipe(input.id);
-                if (recipe && (output.id === 0 || (output.id === recipe.output && output.count < 64))) {
-                    f.cookProgress++;
-                    if (f.cookProgress >= recipe.duration) {
-                        // Complete smelt!
-                        f.cookProgress = 0;
-                        input.count--;
-                        if (input.count <= 0) { input.id = 0; input.count = 0; }
-                        if (output.id === 0) {
-                            output.id = recipe.output;
-                            output.count = recipe.count;
-                        } else {
-                            output.count += recipe.count;
-                        }
-                        playSound('xp');
-                    }
-                } else {
-                    // No valid recipe, reset cook progress
-                    if (f.cookProgress > 0) {
-                        f.cookProgress = 0;
-                        changed = true;
-                    }
-                }
-            } else {
-                if (f.cookProgress > 0) {
-                    f.cookProgress = 0;
-                    changed = true;
-                }
-            }
-
-            if (changed) {
-                f.inputSlot = input;
-                f.fuelSlot = fuel;
-                f.outputSlot = output;
-                s.setFurnace(f);
-            }
-        }, 50); // 20 TPS
-
-        return () => {
-            if (tickRef.current) clearInterval(tickRef.current);
-        };
-    }, [activeOverlay]);
-
     const closeFurnace = () => {
         setOverlay('none');
         playSound('close');
+
+        // Return cursor item to inventory
+        const s = useGameStore.getState();
+        if (s.cursorItem) {
+            if (s.gameMode === 'survival') {
+                s.addItem(s.cursorItem.id, s.cursorItem.count, s.cursorItem.durability);
+            }
+            s.setCursorItem(null);
+        }
         document.querySelector('canvas')?.requestPointerLock();
     };
 
-    const handleInputClick = () => {
-        const s = useGameStore.getState();
-        const f = { ...s.furnace };
-        if (f.inputSlot.id > 0) {
-            s.addItem(f.inputSlot.id, f.inputSlot.count);
-            f.inputSlot = emptySlot();
-            s.setFurnace(f);
-            playSound('click');
-        }
-    };
-
-    const handleFuelClick = () => {
-        const s = useGameStore.getState();
-        const f = { ...s.furnace };
-        if (f.fuelSlot.id > 0) {
-            s.addItem(f.fuelSlot.id, f.fuelSlot.count);
-            f.fuelSlot = emptySlot();
-            s.setFurnace(f);
-            playSound('click');
-        }
-    };
-
-    const handleOutputClick = () => {
-        const s = useGameStore.getState();
-        const f = { ...s.furnace };
-        if (f.outputSlot.id > 0) {
-            s.addItem(f.outputSlot.id, f.outputSlot.count);
-            f.outputSlot = emptySlot();
-            s.setFurnace(f);
-            playSound('click');
-        }
-    };
-
-    const addToSlot = (slotKey: 'inputSlot' | 'fuelSlot', itemId: number) => {
-        const s = useGameStore.getState();
-        const f = { ...s.furnace };
-        const slot = { ...f[slotKey] };
-
-        if (gameMode === 'survival') {
-            // Remove from player inventory
-            let found = false;
-            const hb = s.hotbar.map(sl => ({ ...sl }));
-            const inv = s.inventory.map(sl => ({ ...sl }));
-            for (let i = 0; i < 9 && !found; i++) {
-                if (hb[i].id === itemId && hb[i].count > 0) {
-                    hb[i].count--;
-                    if (hb[i].count <= 0) hb[i] = { id: 0, count: 0 };
-                    found = true;
-                }
-            }
-            for (let i = 0; i < 27 && !found; i++) {
-                if (inv[i].id === itemId && inv[i].count > 0) {
-                    inv[i].count--;
-                    if (inv[i].count <= 0) inv[i] = { id: 0, count: 0 };
-                    found = true;
-                }
-            }
-            if (!found) return;
-            s.setHotbar(hb);
-            s.setInventory(inv);
-        }
-
-        if (slot.id === 0) {
-            slot.id = itemId;
-            slot.count = 1;
-        } else if (slot.id === itemId && slot.count < 64) {
-            slot.count++;
-        } else {
-            return; // Can't add different item
-        }
-
-        f[slotKey] = slot;
-        s.setFurnace(f);
+    const handleFurnaceSlotClick = (slotType: 'input' | 'fuel' | 'output') => {
         playSound('click');
+        const s = useGameStore.getState();
+        const f = { ...s.furnace };
+
+        // Define references for readability
+        let slotVal = slotType === 'input' ? f.inputSlot : slotType === 'fuel' ? f.fuelSlot : f.outputSlot;
+
+        if (cursorItem) {
+            // Cannot place items into output!
+            if (slotType === 'output') return;
+
+            if (slotVal.id === 0) {
+                // Place cursor fully
+                slotVal = { ...cursorItem };
+                setCursorItem(null);
+            } else if (slotVal.id === cursorItem.id && slotVal.count < 64) {
+                // Stack
+                const space = 64 - slotVal.count;
+                const toAdd = Math.min(space, cursorItem.count);
+                slotVal.count += toAdd;
+                const remain = cursorItem.count - toAdd;
+                if (remain > 0) {
+                    setCursorItem({ ...cursorItem, count: remain });
+                } else {
+                    setCursorItem(null);
+                }
+            } else {
+                // Swap
+                const temp = { ...slotVal };
+                slotVal = { ...cursorItem };
+                setCursorItem(temp);
+            }
+        } else if (slotVal.id !== 0) {
+            // Pick up
+            setCursorItem({ ...slotVal });
+            slotVal = { id: 0, count: 0 };
+        }
+
+        // Apply back
+        if (slotType === 'input') f.inputSlot = slotVal;
+        else if (slotType === 'fuel') f.fuelSlot = slotVal;
+        else f.outputSlot = slotVal;
+
+        s.setFurnace(f);
+    };
+
+    const handleInvClick = (type: 'inv' | 'hotbar', index: number) => {
+        playSound('click');
+        const isInv = type === 'inv';
+        const arr = isInv ? [...inventory] : [...hotbar];
+        const slot = arr[index];
+
+        if (cursorItem) {
+            if (slot.id === 0) {
+                // Place fully
+                arr[index] = { ...cursorItem };
+                setCursorItem(null);
+            } else if (slot.id === cursorItem.id && slot.count < 64) {
+                const space = 64 - slot.count;
+                const toAdd = Math.min(space, cursorItem.count);
+                arr[index] = { ...slot, count: slot.count + toAdd };
+                const remain = cursorItem.count - toAdd;
+                if (remain > 0) setCursorItem({ ...cursorItem, count: remain });
+                else setCursorItem(null);
+            } else {
+                const temp = { ...slot };
+                arr[index] = { ...cursorItem };
+                setCursorItem(temp);
+            }
+        } else if (slot.id !== 0) {
+            setCursorItem({ ...slot });
+            arr[index] = { id: 0, count: 0 };
+        }
+
+        if (isInv) setInventory(arr);
+        else setHotbar(arr);
+    };
+
+    const renderSlot = (slot: InventorySlot, onClick: () => void, isOutput = false) => {
+        const data = BLOCK_DATA[slot.id];
+        const icon = slot.id ? getBlockIcon(slot.id) : null;
+        return (
+            <div className={`inv-slot furnace-slot${isOutput ? ' output' : ''}${slot.id ? ' filled' : ''}`}
+                onClick={onClick}
+                title={data ? data.name : 'Puste'}>
+                {slot.id > 0 && icon && (
+                    <>
+                        <img src={icon} className="block-icon-3d" alt="" draggable={false} />
+                        {slot.count > 1 && <span className="item-count">{slot.count}</span>}
+                        {slot.durability !== undefined && data?.maxDurability && (
+                            <div className="durability-bar" style={{
+                                position: 'absolute', bottom: '2px', left: '2px', right: '2px',
+                                height: '3px', backgroundColor: '#000', borderRadius: '1px'
+                            }}>
+                                <div style={{
+                                    width: `${(slot.durability / data.maxDurability) * 100}%`,
+                                    height: '100%',
+                                    backgroundColor: `hsl(${((slot.durability / data.maxDurability) * 120).toString(10)}, 100%, 50%)`,
+                                }} />
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+        );
     };
 
     if (activeOverlay !== 'furnace') return null;
@@ -199,116 +176,80 @@ const FurnaceScreen: React.FC = () => {
     const burnPct = furnace.burnTimeTotal > 0 ? (furnace.burnTimeRemaining / furnace.burnTimeTotal) * 100 : 0;
     const cookPct = furnace.cookTimeTotal > 0 ? (furnace.cookProgress / furnace.cookTimeTotal) * 100 : 0;
 
-    const playerItems = gameMode === 'creative'
-        ? Object.keys(BLOCK_DATA).map(Number).filter(id => id > 0)
-        : getPlayerItems();
-
-    // Filter items that can be smelted or used as fuel
-    const smeltableItems = playerItems.filter(id => findSmeltingRecipe(id) !== null);
-    const fuelItems = playerItems.filter(id => getFuelValue(id) > 0);
-
     return (
-        <div className="crafting-overlay" onClick={closeFurnace}>
-            <div className="crafting-window furnace-window" onClick={(e) => e.stopPropagation()}>
-                <h3>🔥 Piec</h3>
+        <div className="crafting-overlay" onClick={closeFurnace} style={{ cursor: cursorItem ? 'none' : 'default' }}>
+            <div className="crafting-window furnace-window" onClick={(e) => e.stopPropagation()} style={{ cursor: cursorItem ? 'none' : 'default' }}>
+                <h3 style={{ marginBottom: 12 }}>🔥 Piec</h3>
 
-                <div className="furnace-layout">
-                    {/* Input slot */}
+                {/* Furnace Top Section */}
+                <div className="furnace-layout" style={{ marginBottom: 20 }}>
                     <div className="furnace-column">
                         <div className="inv-section-label">Surowiec</div>
-                        <div className={`inv-slot furnace-slot${furnace.inputSlot.id ? ' filled' : ''}`}
-                            onClick={handleInputClick}
-                            title={furnace.inputSlot.id ? BLOCK_DATA[furnace.inputSlot.id]?.name : 'Puste'}>
-                            {furnace.inputSlot.id > 0 && (
-                                <>
-                                    <img src={getBlockIcon(furnace.inputSlot.id)} className="block-icon-3d" alt="" draggable={false} />
-                                    {furnace.inputSlot.count > 1 && <span className="item-count">{furnace.inputSlot.count}</span>}
-                                </>
-                            )}
-                        </div>
-
-                        {/* Fuel slot */}
+                        {renderSlot(furnace.inputSlot, () => handleFurnaceSlotClick('input'))}
                         <div className="inv-section-label" style={{ marginTop: 8 }}>Opał</div>
-                        <div className={`inv-slot furnace-slot${furnace.fuelSlot.id ? ' filled' : ''}`}
-                            onClick={handleFuelClick}
-                            title={furnace.fuelSlot.id ? BLOCK_DATA[furnace.fuelSlot.id]?.name : 'Puste'}>
-                            {furnace.fuelSlot.id > 0 && (
-                                <>
-                                    <img src={getBlockIcon(furnace.fuelSlot.id)} className="block-icon-3d" alt="" draggable={false} />
-                                    {furnace.fuelSlot.count > 1 && <span className="item-count">{furnace.fuelSlot.count}</span>}
-                                </>
-                            )}
-                        </div>
+                        {renderSlot(furnace.fuelSlot, () => handleFurnaceSlotClick('fuel'))}
                     </div>
 
-                    {/* Progress */}
                     <div className="furnace-progress">
-                        <div className="furnace-fire" style={{ opacity: burnPct > 0 ? 1 : 0.3 }}>🔥</div>
+                        <div className="furnace-fire" style={{ opacity: burnPct > 0 ? 1 : 0.2 }}>🔥</div>
                         <div className="furnace-bar-container">
                             <div className="furnace-bar" style={{ width: `${cookPct}%` }} />
                         </div>
                         <div className="craft-arrow">→</div>
                     </div>
 
-                    {/* Output slot */}
-                    <div className="furnace-column">
+                    <div className="furnace-column" style={{ alignSelf: 'center' }}>
                         <div className="inv-section-label">Wynik</div>
-                        <div className={`inv-slot furnace-slot output${furnace.outputSlot.id ? ' filled has-result' : ''}`}
-                            onClick={handleOutputClick}
-                            title={furnace.outputSlot.id ? BLOCK_DATA[furnace.outputSlot.id]?.name : 'Puste'}>
-                            {furnace.outputSlot.id > 0 && (
-                                <>
-                                    <img src={getBlockIcon(furnace.outputSlot.id)} className="block-icon-3d" alt="" draggable={false} />
-                                    {furnace.outputSlot.count > 1 && <span className="item-count">{furnace.outputSlot.count}</span>}
-                                </>
-                            )}
-                        </div>
+                        {renderSlot(furnace.outputSlot, () => handleFurnaceSlotClick('output'), true)}
                     </div>
                 </div>
 
-                {/* Smeltable items */}
-                <div className="inv-section-label" style={{ marginTop: 12 }}>Surowce (kliknij aby dodać)</div>
-                <div className="craft-palette mini">
-                    {smeltableItems.map(id => {
-                        const data = BLOCK_DATA[id];
-                        if (!data) return null;
-                        const icon = getBlockIcon(id);
-                        return (
-                            <div key={id} className="palette-slot" onClick={() => addToSlot('inputSlot', id)} title={data.name}>
-                                {icon && <img src={icon} className="block-icon-3d small" alt="" draggable={false} />}
-                            </div>
-                        );
-                    })}
+                {/* Inventory Bottom Section */}
+                <div className="inv-section-label">Plecak</div>
+                <div className="inv-grid">
+                    {inventory.map((slot, i) => (
+                        <React.Fragment key={i}>{renderSlot(slot, () => handleInvClick('inv', i))}</React.Fragment>
+                    ))}
                 </div>
 
-                {/* Fuel items */}
-                <div className="inv-section-label" style={{ marginTop: 8 }}>Opał (kliknij aby dodać)</div>
-                <div className="craft-palette mini">
-                    {fuelItems.map(id => {
-                        const data = BLOCK_DATA[id];
-                        if (!data) return null;
-                        const icon = getBlockIcon(id);
-                        return (
-                            <div key={id} className="palette-slot" onClick={() => addToSlot('fuelSlot', id)} title={data.name}>
-                                {icon && <img src={icon} className="block-icon-3d small" alt="" draggable={false} />}
-                            </div>
-                        );
-                    })}
+                <div className="inv-section-label" style={{ marginTop: 12 }}>Pasek szybkiego dostępu</div>
+                <div className="inv-hotbar">
+                    {hotbar.map((slot, i) => (
+                        <React.Fragment key={i}>{renderSlot(slot, () => handleInvClick('hotbar', i))}</React.Fragment>
+                    ))}
                 </div>
 
-                <div className="inv-hint" style={{ marginTop: 8 }}>ESC — zamknij • Kliknij slot aby zabrać • Dodaj surowiec i opał</div>
             </div>
+
+            {/* Floating Cursor Item */}
+            {cursorItem && cursorItem.id > 0 && (
+                <div style={{
+                    position: 'fixed',
+                    left: mousePos.x,
+                    top: mousePos.y,
+                    pointerEvents: 'none',
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: 9999,
+                    width: '36px', height: '36px'
+                }}>
+                    <img src={getBlockIcon(cursorItem.id)!} className="block-icon-3d" alt="" style={{ width: '100%', height: '100%' }} />
+                    {cursorItem.count > 1 && <span className="item-count">{cursorItem.count}</span>}
+                    {cursorItem.durability !== undefined && BLOCK_DATA[cursorItem.id]?.maxDurability && (
+                        <div className="durability-bar" style={{
+                            position: 'absolute', bottom: '-4px', left: '0px', right: '0px',
+                            height: '4px', backgroundColor: '#000', borderRadius: '1px'
+                        }}>
+                            <div style={{
+                                width: `${(cursorItem.durability / BLOCK_DATA[cursorItem.id]!.maxDurability!) * 100}%`,
+                                height: '100%',
+                                backgroundColor: `hsl(${((cursorItem.durability / BLOCK_DATA[cursorItem.id]!.maxDurability!) * 120).toString(10)}, 100%, 50%)`,
+                            }} />
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
-
-function getPlayerItems(): number[] {
-    const s = useGameStore.getState();
-    const ids = new Set<number>();
-    for (const sl of [...s.hotbar, ...s.inventory]) {
-        if (sl.id) ids.add(sl.id);
-    }
-    return Array.from(ids);
-}
 
 export default FurnaceScreen;

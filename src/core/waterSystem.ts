@@ -84,10 +84,10 @@ export function spreadWater(sx: number, sy: number, sz: number): void {
 export function checkWaterFill(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
 
-    // Check all 6 neighbors for water
+    // Check neighbors that can flow into this empty block (sides and above)
     const neighbors = [
         [x + 1, y, z], [x - 1, y, z],
-        [x, y + 1, z], [x, y - 1, z],
+        [x, y + 1, z],
         [x, y, z + 1], [x, y, z - 1],
     ];
 

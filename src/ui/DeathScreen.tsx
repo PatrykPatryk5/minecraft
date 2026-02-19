@@ -45,6 +45,7 @@ const DeathScreen: React.FC = () => {
 
     const toMenu = () => {
         const s = useGameStore.getState();
+        s.saveGame();
         s.setDead(false);
         s.setHealth(20);
         s.setHunger(20);

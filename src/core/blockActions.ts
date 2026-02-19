@@ -6,9 +6,10 @@
  */
 
 import useGameStore from '../store/gameStore';
+import { attemptNetherPortalIgnite } from './portalSystem';
 import { BlockType, BLOCK_DATA } from './blockTypes';
 import { playSound } from '../audio/sounds';
-import { emitBlockBreak } from '../effects/BlockParticles';
+import { emitBlockBreak, emitExplosion } from '../effects/BlockParticles';
 
 // ─── TNT Explosion ──────────────────────────────────────
 const EXPLOSION_RADIUS = 4;
@@ -19,7 +20,7 @@ export function igniteTNT(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
     // Remove the TNT block immediately
     s.removeBlock(x, y, z);
-    playSound('click');
+    playSound('fuse');
 
     // Schedule explosion after 4 seconds (80 ticks)
     setTimeout(() => {
@@ -31,6 +32,10 @@ export function igniteTNT(x: number, y: number, z: number): void {
 function explodeAt(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
     const destroyed: [number, number, number][] = [];
+
+    // Visuals
+    emitExplosion(x, y, z);
+    playSound('explode');
 
     // Destroy blocks in sphere
     for (let dx = -EXPLOSION_RADIUS; dx <= EXPLOSION_RADIUS; dx++) {
@@ -46,11 +51,11 @@ function explodeAt(x: number, y: number, z: number): void {
                 if (by < 1 || by > 255) continue; // Don't destroy bedrock layer
 
                 const type = s.getBlock(bx, by, bz);
-                if (!type || type === BlockType.BEDROCK || type === BlockType.WATER) continue;
+                if (!type || type === BlockType.BEDROCK || type === BlockType.WATER || type === BlockType.OBSIDIAN) continue;
 
                 // Chain TNT!
                 if (type === BlockType.TNT) {
-                    setTimeout(() => igniteTNT(bx, by, bz), Math.random() * 500);
+                    setTimeout(() => igniteTNT(bx, by, bz), Math.random() * 500 + 200);
                     continue;
                 }
 
@@ -86,19 +91,12 @@ function explodeAt(x: number, y: number, z: number): void {
     if (playerDist < EXPLOSION_RADIUS * 2) {
         const dmg = Math.max(0, EXPLOSION_DAMAGE * (1 - playerDist / (EXPLOSION_RADIUS * 2)));
         s.setHealth(s.health - Math.round(dmg));
-    }
-
-    playSound('explode');
-    // Play hurt if player was damaged
-    if (playerDist < EXPLOSION_RADIUS * 2) {
         playSound('hurt');
     }
 }
 
 // ─── Door Toggle ────────────────────────────────────────
 // We use metadata approach: doors are just blocks that we track open/closed state
-// For simplicity: when "open", we remove the door block, when "closed" we re-add it
-// Real MC uses block states, but this is simpler for our system
 const doorStates = new Map<string, number>(); // key -> original blockType
 
 export function toggleDoor(x: number, y: number, z: number): boolean {
@@ -106,8 +104,8 @@ export function toggleDoor(x: number, y: number, z: number): boolean {
     const s = useGameStore.getState();
     const type = s.getBlock(x, y, z);
 
-    if (type === BlockType.TRAPDOOR) {
-        // Trapdoor is present = closed, remove to open
+    if (type === BlockType.TRAPDOOR || type === BlockType.DOOR_OAK) {
+        // Door is present = closed, remove to open
         doorStates.set(key, type);
         s.removeBlock(x, y, z);
         const cx = Math.floor(x / 16);
@@ -167,13 +165,23 @@ export function isOnLadder(px: number, py: number, pz: number): boolean {
 /** Returns true if the block was interacted with (don't place) */
 export function handleBlockAction(
     blockX: number, blockY: number, blockZ: number,
-    blockType: number
+    blockType: number,
+    heldItem?: number
 ): boolean {
     switch (blockType) {
         case BlockType.TNT:
-            igniteTNT(blockX, blockY, blockZ);
-            return true;
+            if (heldItem === BlockType.FLINT_AND_STEEL) {
+                igniteTNT(blockX, blockY, blockZ);
+                return true;
+            }
+            return false;
+        case BlockType.OBSIDIAN:
+            if (heldItem === BlockType.FLINT_AND_STEEL) {
+                return attemptNetherPortalIgnite(blockX, blockY, blockZ);
+            }
+            return false;
         case BlockType.TRAPDOOR:
+        case BlockType.DOOR_OAK:
             toggleDoor(blockX, blockY, blockZ);
             return true;
         case BlockType.CHEST:

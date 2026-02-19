@@ -23,6 +23,7 @@ const HUD: React.FC = () => {
     const maxOxygen = useGameStore((s) => s.maxOxygen);
     const isChatOpen = useGameStore((s) => s.isChatOpen);
     const miningProg = useGameStore((s) => s.miningProgressValue);
+    const isUnderwater = useGameStore((s) => s.isUnderwater);
 
     // Number keys 1-9
     useEffect(() => {
@@ -61,6 +62,9 @@ const HUD: React.FC = () => {
                 <div className="crosshair-h" />
                 <div className="crosshair-v" />
             </div>
+
+            {/* Underwater Overlay */}
+            {isUnderwater && <div className="water-overlay" />}
 
             {/* Mining Progress */}
             {miningProg > 0 && miningProg < 1 && (
@@ -114,6 +118,18 @@ const HUD: React.FC = () => {
                                 <>
                                     <img src={icon} className="block-icon-3d" alt={data?.name ?? ''} draggable={false} />
                                     {slot.count > 1 && <span className="item-count">{slot.count}</span>}
+                                    {slot.durability !== undefined && data?.maxDurability && (
+                                        <div className="durability-bar" style={{
+                                            position: 'absolute', bottom: '2px', left: '2px', right: '2px',
+                                            height: '3px', backgroundColor: '#000', borderRadius: '1px'
+                                        }}>
+                                            <div style={{
+                                                width: `${(slot.durability / data.maxDurability) * 100}%`,
+                                                height: '100%',
+                                                backgroundColor: `hsl(${((slot.durability / data.maxDurability) * 120).toString(10)}, 100%, 50%)`,
+                                            }} />
+                                        </div>
+                                    )}
                                 </>
                             )}
                             <span className="slot-number">{i + 1}</span>

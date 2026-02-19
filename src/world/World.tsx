@@ -14,6 +14,7 @@ import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import useGameStore, { chunkKey } from '../store/gameStore';
 import { generateChunk, CHUNK_SIZE, initSeed } from '../core/terrainGen';
+import { generateEndChunk, generateNetherChunk } from '../core/dimensionGen';
 import { EnderDragon } from '../entities/EnderDragon';
 import { WorkerPool } from '../core/workerPool';
 import Chunk from './Chunk';
@@ -57,24 +58,26 @@ const World: React.FC = () => {
     // Track dimension to trigger resets
     const dimension = useGameStore(s => s.dimension);
     const lastDimensionRef = useRef(dimension);
+    const isUnderwater = useGameStore(s => s.isUnderwater);
 
     // ── Initialize Worker Pool ──────────────────────────
+    const worldSeed = useGameStore(s => s.worldSeed);
+
     useEffect(() => {
-        const seed = useGameStore.getState().worldSeed;
-        initSeed(seed);
+        initSeed(worldSeed);
 
         const pool = new WorkerPool(
             new URL('../core/generation.worker.ts', import.meta.url),
             4, 16
         );
 
-        const ok = pool.init(seed);
+        const ok = pool.init(worldSeed);
         poolRef.current = ok ? pool : null;
 
         if (!ok) console.warn('[World] WorkerPool failed, using sync fallback');
 
         return () => { pool.terminate(); };
-    }, []);
+    }, [worldSeed]);
 
     // Reset refs if dimension changes
     if (lastDimensionRef.current !== dimension) {
@@ -119,7 +122,11 @@ const World: React.FC = () => {
             // checking workerPool.ts...
         } else {
             // Sync fallback
-            const data = generateChunk(cx, cz, dim); // THIS NEEDS TO SUPPORT DIMENSION
+            let data;
+            if (dim === 'end') data = generateEndChunk(cx, cz);
+            else if (dim === 'nether') data = generateNetherChunk(cx, cz);
+            else data = generateChunk(cx, cz);
+
             useGameStore.getState().setChunkData(cx, cz, dim, data);
             loadedKeysRef.current.add(key);
             pendingKeysRef.current.delete(key);
@@ -194,6 +201,8 @@ const World: React.FC = () => {
             setTimeout(tickWorld, 0);
         }
 
+        useGameStore.getState().tickFurnace();
+
         // Send pending requests to worker
         let sent = 0;
         while (
@@ -244,9 +253,9 @@ const World: React.FC = () => {
             ))}
             {dimension === 'end' && !useGameStore.getState().dragonDefeated && <EnderDragon />}
             <fog attach="fog" args={[
-                dimension === 'nether' ? '#400' : dimension === 'end' ? '#000' : '#87CEEB',
-                dimension === 'end' ? 20 : 10,
-                dimension === 'end' ? 80 : renderDistance * CHUNK_SIZE - 20
+                dimension === 'nether' ? '#400' : dimension === 'end' ? '#000' : isUnderwater ? '#0a2860' : '#87CEEB',
+                isUnderwater ? 1 : dimension === 'end' ? 20 : Math.max(10, renderDistance * CHUNK_SIZE - 64),
+                isUnderwater ? 25 : dimension === 'end' ? 80 : renderDistance * CHUNK_SIZE - 16
             ]} />
         </>
     );

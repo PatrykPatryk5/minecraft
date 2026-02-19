@@ -1325,8 +1325,8 @@ export function getBlockIcon(blockId: number): string {
 
 // ─── Texture Atlas System ────────────────────────────────
 
-const ATLAS_SIZE = 512; // 32x32 slots of 16px
-const SLOT_SIZE = 16;
+const ATLAS_SIZE = 2048; // 32x32 slots of 64px
+const SLOT_SIZE = 64;
 const SLOTS_PER_ROW = ATLAS_SIZE / SLOT_SIZE;
 
 interface AtlasUV {
@@ -1347,6 +1347,9 @@ export function getAtlasTexture(): THREE.CanvasTexture {
     canvas.width = ATLAS_SIZE;
     canvas.height = ATLAS_SIZE;
     const ctx = canvas.getContext('2d')!;
+
+    // Disable smoothing for sharp upscaled pixels
+    ctx.imageSmoothingEnabled = false;
 
     // Fill with magenta for debug
     ctx.fillStyle = '#ff00ff';
@@ -1369,7 +1372,22 @@ export function getAtlasTexture(): THREE.CanvasTexture {
         ctx.rect(0, 0, SLOT_SIZE, SLOT_SIZE);
         ctx.clip();
 
+        // Scale by 4 for high-res look (16 * 4 = 64)
+        ctx.scale(4, 4);
+
         drawFn(ctx);
+
+        // Return to 1:1 scale to add HD noise overlay
+        ctx.scale(0.25, 0.25);
+
+        // Add subtle high-res procedural noise overlay to everything
+        for (let i = 0; i < 400; i++) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+            ctx.fillRect((Math.random() * 64) | 0, (Math.random() * 64) | 0, 1, 1);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.04)';
+            ctx.fillRect((Math.random() * 64) | 0, (Math.random() * 64) | 0, 1, 1);
+        }
+
         ctx.restore();
 
         // Calculate UVs (bottom-left origin for Three.js, but canvas is top-left)

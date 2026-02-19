@@ -67,9 +67,10 @@ export type SoundType =
     | 'hurt' | 'eat' | 'burp' | 'craft'
     | 'fall' | 'swim' | 'splash' | 'land'
     | 'open' | 'close' | 'levelup'
-    | 'explode' | 'bow' | 'pop'
+    | 'explode' | 'bow' | 'pop' | 'fuse'
     | 'anvil' | 'xp' | 'fireball' | 'portal'
-    | 'piston_out' | 'piston_in' | 'gravel' | 'roar';
+    | 'piston_out' | 'piston_in' | 'gravel' | 'roar'
+    | 'grass_step' | 'stone_step' | 'wood_step' | 'sand_step';
 
 // ─── 3D Audio Listener ───────────────────────────────────
 export function updateListener(x: number, y: number, z: number, fx: number, fy: number, fz: number): void {
@@ -164,17 +165,58 @@ export function playSound(type: SoundType, pos?: [number, number, number]): void
                 noise.start(now); noise.stop(now + 0.12);
                 break;
             }
-            case 'step': {
-                // Soft footstep with pitch variation
+            case 'step':
+            case 'grass_step': {
+                // Soft grass footstep
                 const noise = createNoise(ctx, 0.1);
                 const filter = ctx.createBiquadFilter();
-                filter.type = 'lowpass';
-                filter.frequency.value = 400 + Math.random() * 300;
+                filter.type = 'lowpass'; filter.frequency.value = 400 + Math.random() * 300;
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0.15 + Math.random() * 0.1, now);
                 env.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
                 noise.connect(filter).connect(env).connect(output);
                 noise.start(now); noise.stop(now + 0.1);
+                break;
+            }
+            case 'stone_step': {
+                // Hard crisp tap
+                const osc = createTone(ctx, 300 + Math.random() * 100, 0.05, 'triangle');
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.2, now);
+                env.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+
+                const noise = createNoise(ctx, 0.05);
+                const lp = ctx.createBiquadFilter();
+                lp.type = 'highpass'; lp.frequency.value = 800;
+                noise.connect(lp).connect(env).connect(output);
+
+                osc.connect(env).connect(output);
+                osc.start(now); osc.stop(now + 0.05);
+                noise.start(now); noise.stop(now + 0.05);
+                break;
+            }
+            case 'wood_step': {
+                // Hollow thud
+                const osc = createTone(ctx, 150 + Math.random() * 50, 0.1, 'square');
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.15, now);
+                env.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass'; filter.frequency.value = 400;
+                osc.connect(filter).connect(env).connect(output);
+                osc.start(now); osc.stop(now + 0.1);
+                break;
+            }
+            case 'sand_step': {
+                // Soft scratch
+                const noise = createNoise(ctx, 0.12);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass'; filter.frequency.value = 600 + Math.random() * 200;
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.2, now);
+                env.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+                noise.connect(filter).connect(env).connect(output);
+                noise.start(now); noise.stop(now + 0.12);
                 break;
             }
             case 'click': {
@@ -484,6 +526,19 @@ export function playSound(type: SoundType, pos?: [number, number, number]): void
                 noise.connect(filter).connect(env).connect(output);
                 osc.start(now); osc.stop(now + 2.0);
                 noise.start(now); noise.stop(now + 2.0);
+                break;
+            }
+            case 'fuse': {
+                // TNT Fuse — hissing noise
+                const noise = createNoise(ctx, 4.0);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass'; filter.frequency.value = 1000; filter.Q.value = 1;
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.2, now);
+                env.gain.linearRampToValueAtTime(0.4, now + 3.5); // Rising intensity
+                env.gain.linearRampToValueAtTime(0, now + 4.0);
+                noise.connect(filter).connect(env).connect(output);
+                noise.start(now); noise.stop(now + 4.0);
                 break;
             }
         }

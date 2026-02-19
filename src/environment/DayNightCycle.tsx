@@ -75,14 +75,15 @@ const DayNightCycle: React.FC = () => {
             } else if (isDawn) {
                 const p = (t - 0.2) / 0.15;
                 color = lerpColor(sunColors.night, sunColors.dawn, p);
-                intensity = lerp(0.15, 0.6, p);
+                intensity = lerp(0.15, 0.4, p);
             } else if (isDusk) {
                 const p = (t - 0.65) / 0.15;
                 color = lerpColor(sunColors.dusk, sunColors.night, p);
-                intensity = lerp(0.6, 0.15, p);
+                intensity = lerp(0.4, 0.15, p);
             } else {
                 color = sunColors.day;
-                intensity = 0.7 + sunFactor * 0.5;
+                // Much softer base sunlight to prevent blowing out colors
+                intensity = 0.4 + sunFactor * 0.3;
             }
 
             dirLightRef.current.color.copy(color);
@@ -109,14 +110,21 @@ const DayNightCycle: React.FC = () => {
         }
 
         // ─── Fog Color Sync ──────────────────────────────
+        const isUnderwater = useGameStore.getState().isUnderwater;
         if (scene.fog && scene.fog instanceof THREE.Fog) {
-            const fogColor = isNight ? skyColors.night :
-                isDawn ? lerpColor(skyColors.night, skyColors.dawn, ((t - 0.2) / 0.15)) :
-                    isDusk ? lerpColor(skyColors.day, skyColors.night, ((t - 0.65) / 0.15)) :
-                        skyColors.day;
-            scene.fog.color.copy(fogColor);
-            scene.fog.near = isNight ? 30 : 60;
-            scene.fog.far = isNight ? 140 : 280;
+            if (isUnderwater) {
+                scene.fog.color.set('#0a2860');
+                scene.fog.near = 1;
+                scene.fog.far = 25;
+            } else {
+                const fogColor = isNight ? skyColors.night :
+                    isDawn ? lerpColor(skyColors.night, skyColors.dawn, ((t - 0.2) / 0.15)) :
+                        isDusk ? lerpColor(skyColors.day, skyColors.night, ((t - 0.65) / 0.15)) :
+                            skyColors.day;
+                scene.fog.color.copy(fogColor);
+                scene.fog.near = isNight ? 30 : 60;
+                scene.fog.far = isNight ? 140 : 280;
+            }
         }
     });
 

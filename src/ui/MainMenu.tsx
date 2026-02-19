@@ -3,10 +3,11 @@
  * Updated with difficulty, keybinds, multiplayer, GUI scale, particles, smooth lighting
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useGameStore from '../store/gameStore';
 import type { GameMode, Difficulty } from '../store/gameStore';
 import { DEFAULT_HOTBAR, EMPTY_HOTBAR } from '../core/blockTypes';
+import { exportWorldToFile, importWorldFromFile } from '../core/storage';
 
 const SPLASHES = [
     'Zbudowany w React!', 'Piksele!', 'Kopaj głęboko!', 'Craftuj mądrze!',
@@ -17,7 +18,46 @@ const SPLASHES = [
 
 const MenuHome: React.FC = () => {
     const setScreen = useGameStore((s) => s.setScreen);
+    const loadWorldFromStorage = useGameStore((s) => s.loadWorldFromStorage);
     const [splash] = useState(() => SPLASHES[Math.floor(Math.random() * SPLASHES.length)]);
+    const [hasSave, setHasSave] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Initial check for a saved world
+    useEffect(() => {
+        // Check if there's a saved game
+        const stored = localStorage.getItem('mcraft_player_state');
+        setHasSave(!!stored);
+    }, []);
+
+    const handleContinue = async () => {
+        const success = await loadWorldFromStorage();
+        if (success) {
+            setScreen('playing');
+        } else {
+            alert("Brak zapisu lub plik uszkodzony!");
+        }
+    };
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+            const text = ev.target?.result as string;
+            if (text) {
+                const success = await importWorldFromFile(text);
+                if (success) {
+                    alert("Świat pomyślnie załadowany z pliku!");
+                    setHasSave(true);
+                } else {
+                    alert("Błąd podczas wgrywania zapisu! Niewłaściwy format.");
+                }
+            }
+        };
+        reader.readAsText(file);
+    };
 
     return (
         <div className="menu-content">
@@ -34,15 +74,34 @@ const MenuHome: React.FC = () => {
             </div>
 
             <div className="menu-buttons">
-                <button className="mc-btn primary" onClick={() => setScreen('worldCreate')}>
-                    🎮 Graj Singleplayer
-                </button>
-                <button className="mc-btn" onClick={() => setScreen('multiplayer')}>
-                    🌐 Multiplayer
+                {hasSave ? (
+                    <button className="mc-btn primary" onClick={handleContinue}>
+                        🟢 Kontynuuj Grę
+                    </button>
+                ) : null}
+
+                <button className={hasSave ? "mc-btn" : "mc-btn primary"} onClick={() => setScreen('worldCreate')}>
+                    🌍 Nowy Świat
                 </button>
                 <div className="menu-row">
-                    <button className="mc-btn half" onClick={() => setScreen('settings')}>⚙ Ustawienia</button>
-                    <button className="mc-btn half" disabled>🌍 Języki</button>
+                    <button className="mc-btn half" onClick={() => setScreen('multiplayer')}>
+                        🌐 W sieci
+                    </button>
+                    <button className="mc-btn half" onClick={() => fileInputRef.current?.click()}>
+                        📥 Wczytaj
+                    </button>
+                    {/* Hidden file input */}
+                    <input
+                        type="file"
+                        accept=".json,.mcraft"
+                        ref={fileInputRef}
+                        style={{ display: 'none' }}
+                        onChange={handleFileUpload}
+                    />
+                </div>
+                <div className="menu-row">
+                    <button className="mc-btn half" onClick={() => setScreen('settings')}>⚙ Opcje</button>
+                    <button className="mc-btn half" disabled>🗣 Języki</button>
                 </div>
             </div>
 

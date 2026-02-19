@@ -131,12 +131,41 @@ export function updateMobs(delta: number): void {
             }
         }
 
+        // Sunlight burning (Zombie, Skeleton)
+        if ((mob.type === 'zombie' || mob.type === 'skeleton') && s.dayTime > 0.25 && s.dayTime < 0.75) {
+            const bx = Math.floor(mob.pos[0]);
+            const bz = Math.floor(mob.pos[2]);
+            const by = Math.floor(mob.pos[1]);
+            if (by >= getGroundLevel(bx, bz, s)) {
+                mob.health -= delta * 2; // Take damage over time
+                if (mob.hurtTimer <= 0) {
+                    mob.hurtTimer = 500;
+                    playSound('hurt'); // Only occasionally play hurt sound (when hurt timer is 0)
+                }
+            }
+        }
+
         // AI State Machine
         if (stats.hostile) {
             // Hostile AI
             if (dist < HOSTILE_DETECT_RANGE) {
                 mob.target = [...playerPos];
                 mob.state = 'chase';
+
+                // Skeleton ranged behavior
+                if (mob.type === 'skeleton') {
+                    if (dist < 12 && dist > 2 && now - mob.lastAttackTime > 2000) {
+                        // Simplified "shoot" arrow implementation
+                        s.setHealth(s.health - stats.damage);
+                        mob.lastAttackTime = now;
+                        playSound('hurt');
+                    }
+                    if (dist < 8) {
+                        // Try to keep distance
+                        mob.state = 'flee';
+                        mob.target = [mob.pos[0] - dx, mob.pos[1], mob.pos[2] - dz];
+                    }
+                }
             } else {
                 mob.target = null;
                 mob.state = mob.state === 'chase' ? 'wander' : mob.state;
@@ -330,12 +359,20 @@ function trySpawnMob(playerPos: [number, number, number], dayTime: number): Mob 
     const z = playerPos[2] + Math.sin(angle) * dist;
 
     const s = useGameStore.getState();
+    const isNether = s.dimension === 'nether';
+    const isEnd = s.dimension === 'end';
+
     const y = getGroundLevel(x, z, s);
     if (y < 1) return null;
 
     // Choose mob type based on time/luck
     let type: MobType;
-    if (isNight) {
+
+    if (isEnd) {
+        type = 'enderman';
+    } else if (isNether) {
+        type = 'blaze';
+    } else if (isNight) {
         const r = Math.random();
         if (r < 0.3) type = 'zombie';
         else if (r < 0.5) type = 'skeleton';

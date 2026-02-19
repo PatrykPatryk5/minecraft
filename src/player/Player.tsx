@@ -29,9 +29,10 @@ import { checkWaterFill, spreadWater } from '../core/waterSystem';
 import { handleBlockAction, isOnLadder } from '../core/blockActions';
 import { attackMob } from '../mobs/MobSystem';
 import { spreadLava, tickLava, checkLavaFill } from '../core/lavaSystem';
-import { processGravity } from '../core/gravityBlocks';
+import { processGravity, checkGravityBlock } from '../core/gravityBlocks';
 import { placePiston } from '../core/pistonSystem';
 import { tillBlock, plantSeed, applyBoneMeal } from '../core/farmingSystem';
+import { buildNetherPortalSafe } from '../core/portalSystem';
 
 // ─── Constants ───────────────────────────────────────────
 const GRAVITY = -28;
@@ -74,6 +75,7 @@ const Player: React.FC = () => {
     const lavaTick = useRef(0);
     const oxygenTimer = useRef(0);
     const drowningTimer = useRef(0);
+    const portalCooldown = useRef(0);
 
     const storeRef = useRef(useGameStore.getState());
     useEffect(() => {
@@ -176,12 +178,37 @@ const Player: React.FC = () => {
 
             if (e.button === 0) {
                 // ── Break Block or Attack Mob ──
+                const dir = camera.getWorldDirection(new THREE.Vector3());
+                let damage = 2; // Base fist damage
+                const selected = s.getSelectedBlock();
+                if (selected) {
+                    const toolName = BLOCK_DATA[selected]?.name?.toLowerCase() || '';
+                    if (toolName.includes('miecz')) {
+                        if (toolName.includes('diament')) damage = 7;
+                        else if (toolName.includes('żelaz')) damage = 6;
+                        else if (toolName.includes('kamien')) damage = 5;
+                        else damage = 4;
+                    } else if (toolName.includes('siekier')) {
+                        if (toolName.includes('diament')) damage = 6;
+                        else if (toolName.includes('żelaz')) damage = 5;
+                        else damage = 3;
+                    }
+                }
+
+                const hitMob = attackMob(
+                    pos.current.x, pos.current.y, pos.current.z,
+                    [dir.x, dir.y, dir.z], damage
+                );
+
+                if (hitMob) {
+                    // Apply tool durability damage
+                    if (selected && BLOCK_DATA[selected]?.isItem && BLOCK_DATA[selected]?.maxDurability) {
+                        s.damageTool(s.hotbarSlot);
+                    }
+                    return;
+                }
+
                 if (!hit) {
-                    const dir = camera.getWorldDirection(new THREE.Vector3());
-                    attackMob(
-                        pos.current.x, pos.current.y, pos.current.z,
-                        [dir.x, dir.y, dir.z], 4
-                    );
                     return;
                 }
                 const [bx, by, bz] = hit.block;
@@ -250,14 +277,15 @@ const Player: React.FC = () => {
                 }
 
                 // Check block actions (TNT, trapdoor, chest, etc.)
-                if (handleBlockAction(bx2, by2, bz2, clickedType)) {
+                const selected = s.getSelectedBlock();
+                if (handleBlockAction(bx2, by2, bz2, clickedType, selected)) {
                     return;
                 }
 
                 const [px, py, pz] = hit.place;
                 if (py < 0 || py > MAX_HEIGHT - 1) return;
 
-                const selected = s.getSelectedBlock();
+                // (Already defined above: const selected = s.getSelectedBlock();)
                 if (!selected) return;
 
                 // If holding food, try eating instead of placing
@@ -287,6 +315,9 @@ const Player: React.FC = () => {
                 if (selected === BlockType.LAVA) {
                     spreadLava(px, py, pz);
                 }
+
+                // Trigger gravity for falling blocks
+                checkGravityBlock(px, py, pz);
 
                 // ─── Farming ─────────────────────────────────
                 if ([105, 115, 125, 135, 145].includes(selected)) {
@@ -342,6 +373,21 @@ const Player: React.FC = () => {
                 s.consumeHotbarItem(s.hotbarSlot);
                 playSound('place');
                 bumpAround(px, pz);
+                checkGravityBlock(px, py, pz);
+            } else if (e.button === 2) {
+                // Secondary action: use item / eat food
+                const s = storeRef.current;
+                const slot = s.hotbar[s.hotbarSlot];
+
+                // If holding food, try to eat first
+                if (slot && slot.id) {
+                    const info = BLOCK_DATA[slot.id];
+                    if (info && info.foodRestore && s.hunger < s.maxHunger) {
+                        s.eatFood();
+                        playSound('pop');
+                        return;
+                    }
+                }
             }
         };
 
@@ -646,6 +692,9 @@ const Player: React.FC = () => {
             }
 
             // ─── Oxygen & Drowning ───────────────────────────
+            if (s.isUnderwater !== headInWater) {
+                s.setUnderwater(headInWater);
+            }
             if (mode === 'survival') {
                 if (headInWater) {
                     // Drain oxygen
@@ -740,6 +789,11 @@ const Player: React.FC = () => {
                                     playSound('pop');
                                 }
 
+                                // Apply tool durability damage
+                                if (selectedItem && BLOCK_DATA[selectedItem]?.isItem && BLOCK_DATA[selectedItem]?.maxDurability) {
+                                    s.damageTool(s.hotbarSlot);
+                                }
+
                                 // ─── XP Drops ───
                                 if (mType === BlockType.COAL_ORE) s.addXp(Math.floor(Math.random() * 2) + 1);
                                 else if (mType === BlockType.DIAMOND || mType === BlockType.EMERALD_ORE) s.addXp(Math.floor(Math.random() * 5) + 3);
@@ -779,20 +833,20 @@ const Player: React.FC = () => {
                 vel.y = 0;
             }
 
-            // ─── Portal Check ────────────────────────────────
+            // ─── Portal Checks ───────────────────────────────
             const curBlock = s.getBlock(Math.floor(p.x), Math.floor(p.y + 0.1), Math.floor(p.z));
             const legBlock = s.getBlock(Math.floor(p.x), Math.floor(p.y - 0.5), Math.floor(p.z));
 
-            if (curBlock === BlockType.END_PORTAL_BLOCK || legBlock === BlockType.END_PORTAL_BLOCK) {
-                if (s.dimension === 'overworld') {
+            if (portalCooldown.current > 0) {
+                portalCooldown.current -= dt;
+            } else if (curBlock === BlockType.END_PORTAL_BLOCK || legBlock === BlockType.END_PORTAL_BLOCK) {
+                if (s.dimension === 'overworld' || s.dimension === 'nether') {
                     s.setDimension('end');
-                    // Spawn on obsidian platform or safe spot
                     p.set(0, 65, 0);
                     vel.set(0, 0, 0);
                     fallStart.current = 65;
-                    playSound('portal'); // assume texture/sound exists or just silent
+                    playSound('portal');
                 } else if (s.dimension === 'end') {
-                    // Return to overworld
                     s.setDimension('overworld');
                     const h = getSpawnHeight(8, 8);
                     p.set(8, h + 2, 8);
@@ -802,6 +856,27 @@ const Player: React.FC = () => {
                         s.setScreen('credits');
                     }
                 }
+            } else if (curBlock === BlockType.NETHER_PORTAL_BLOCK || legBlock === BlockType.NETHER_PORTAL_BLOCK) {
+                portalCooldown.current = 4.0; // 4 seconds cooldown
+                if (s.dimension === 'overworld') {
+                    s.setDimension('nether');
+                    const nx = Math.floor(p.x / 8);
+                    const nz = Math.floor(p.z / 8);
+                    p.set(nx + 1, 50, nz + 1);
+                    vel.set(0, 0, 0);
+                    buildNetherPortalSafe(nx, 50, nz);
+                    playSound('portal');
+                } else if (s.dimension === 'nether') {
+                    s.setDimension('overworld');
+                    const ox = Math.floor(p.x * 8);
+                    const oz = Math.floor(p.z * 8);
+                    const oy = getSpawnHeight(ox, oz);
+                    // y + 2 for safe spawn, and the portal will clear the area above it
+                    p.set(ox + 1, oy + 2, oz + 1);
+                    vel.set(0, 0, 0);
+                    buildNetherPortalSafe(ox, Math.floor(oy + 2), oz);
+                    playSound('portal');
+                }
             }
 
             // ─── Step Sounds ─────────────────────────────────
@@ -809,15 +884,24 @@ const Player: React.FC = () => {
                 stepTimer.current += dt;
                 const interval = isSprinting ? 0.32 : 0.45;
                 if (stepTimer.current > interval) {
-                    playSound('step');
+                    const blockBelow = s.getBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
+                    let stepSound: any = 'step';
+                    if (blockBelow && BLOCK_DATA[blockBelow]) {
+                        const name = BLOCK_DATA[blockBelow].name.toLowerCase();
+                        if (name.includes('kamie') || name.includes('bruk') || name.includes('ruda') || name.includes('obsydian') || name.includes('piec')) stepSound = 'stone_step';
+                        else if (name.includes('drewno') || name.includes('desk') || name.includes('skrzynka') || name.includes('stół')) stepSound = 'wood_step';
+                        else if (name.includes('piasek') || name.includes('żwir')) stepSound = 'sand_step';
+                        else if (name.includes('trawa') || name.includes('ziemia') || name.includes('liście')) stepSound = 'grass_step';
+                    }
+                    playSound(stepSound);
                     stepTimer.current = 0;
                 }
             } else { stepTimer.current = 0.3; }
 
             // ─── View Bobbing ────────────────────────────────
             if (s.settings.viewBobbing && onGround.current && move.lengthSq() > 0) {
-                bobPhase.current += dt * speed * 14;
-                bobY = Math.sin(bobPhase.current) * 0.1;
+                bobPhase.current += dt * speed * 2.5;
+                bobY = Math.sin(bobPhase.current) * 0.08;
             }
         } // End physics loop
 
@@ -825,6 +909,7 @@ const Player: React.FC = () => {
         camera.position.copy(pos.current);
         camera.position.y += bobY;
         s.setPlayerPos([pos.current.x, pos.current.y, pos.current.z]);
+        s.setPlayerRot([camera.rotation.y, camera.rotation.x]);
 
         // ─── Block Highlight ─────────────────────────────────
         const hit = raycastBlock();

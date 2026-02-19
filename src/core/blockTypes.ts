@@ -242,6 +242,7 @@ export interface BlockInfo {
     readonly light?: number;       // emits light 0-15
     readonly foodRestore?: number; // hunger points restored
     readonly emissive?: boolean;   // emits light (visual glow)
+    readonly maxDurability?: number; // amount of uses before tool breaks
 }
 
 // ─── Block Data Map ──────────────────────────────────────
@@ -296,11 +297,11 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.CHEST]: { name: 'Skrzynia', color: '#a08050', top: '#907040', transparent: false, solid: true, breakTime: 2.5, tool: 'axe' },
     [BlockType.TNT]: { name: 'TNT', color: '#cc3333', top: '#ddaa44', transparent: false, solid: true, breakTime: 0.0 },
     [BlockType.BOOKSHELF]: { name: 'Biblioteczka', color: '#b8945f', transparent: false, solid: true, breakTime: 1.5, tool: 'axe' },
-    [BlockType.TRAPDOOR]: { name: 'Klapa', color: '#806030', transparent: true, solid: false, breakTime: 3.0, tool: 'axe' },
+    [BlockType.TRAPDOOR]: { name: 'Klapa', color: '#806030', transparent: true, solid: true, breakTime: 3.0, tool: 'axe' },
     [BlockType.LAVA]: { name: 'Lawa', color: '#cc6622', transparent: true, solid: false, breakTime: 999, light: 15 },
     [BlockType.BED]: { name: 'Łóżko', color: '#cc2222', top: '#cc2222', transparent: true, solid: true, breakTime: 0.2 },
     [BlockType.FENCE_OAK]: { name: 'Płot Dębowy', color: '#b8945f', transparent: true, solid: true, breakTime: 2.0, tool: 'axe' },
-    [BlockType.DOOR_OAK]: { name: 'Drzwi Dębowe', color: '#b8945f', transparent: true, solid: false, breakTime: 3.0, tool: 'axe' },
+    [BlockType.DOOR_OAK]: { name: 'Drzwi Dębowe', color: '#b8945f', transparent: true, solid: true, breakTime: 3.0, tool: 'axe' },
     // ─── Decorative Blocks ──────────────────────────────
     [BlockType.TORCH]: { name: 'Pochodnia', color: '#ffcc00', transparent: true, solid: false, breakTime: 0.0, light: 14 },
     [BlockType.LADDER]: { name: 'Drabina', color: '#a08050', transparent: true, solid: false, breakTime: 0.4, tool: 'axe' },
@@ -321,35 +322,35 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.HAY_BALE]: { name: 'Bela Siana', color: '#c8a830', top: '#b89820', transparent: false, solid: true, breakTime: 0.5 },
     // ─── Wooden Tools ───────────────────────────────────
     [BlockType.STICK]: { name: 'Patyk', color: '#a08050', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 64 },
-    [BlockType.WOODEN_PICKAXE]: { name: 'Drewniany Kilof', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.WOODEN_AXE]: { name: 'Drewniana Siekiera', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.WOODEN_SHOVEL]: { name: 'Drewniana Łopata', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.WOODEN_SWORD]: { name: 'Drewniany Miecz', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.WOODEN_HOE]: { name: 'Drewniana Motyka', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
+    [BlockType.WOODEN_PICKAXE]: { name: 'Drewniany Kilof', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 59 },
+    [BlockType.WOODEN_AXE]: { name: 'Drewniana Siekiera', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 59 },
+    [BlockType.WOODEN_SHOVEL]: { name: 'Drewniana Łopata', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 59 },
+    [BlockType.WOODEN_SWORD]: { name: 'Drewniany Miecz', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 59 },
+    [BlockType.WOODEN_HOE]: { name: 'Drewniana Motyka', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 59 },
     // ─── Stone Tools ────────────────────────────────────
-    [BlockType.STONE_PICKAXE]: { name: 'Kamienny Kilof', color: '#888888', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.STONE_AXE]: { name: 'Kamienna Siekiera', color: '#888888', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.STONE_SHOVEL]: { name: 'Kamienna Łopata', color: '#888888', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.STONE_SWORD]: { name: 'Kamienny Miecz', color: '#888888', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.STONE_HOE]: { name: 'Kamienna Motyka', color: '#888888', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
+    [BlockType.STONE_PICKAXE]: { name: 'Kamienny Kilof', color: '#888888', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 131 },
+    [BlockType.STONE_AXE]: { name: 'Kamienna Siekiera', color: '#888888', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 131 },
+    [BlockType.STONE_SHOVEL]: { name: 'Kamienna Łopata', color: '#888888', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 131 },
+    [BlockType.STONE_SWORD]: { name: 'Kamienny Miecz', color: '#888888', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 131 },
+    [BlockType.STONE_HOE]: { name: 'Kamienna Motyka', color: '#888888', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 131 },
     // ─── Iron Tools ─────────────────────────────────────
-    [BlockType.IRON_PICKAXE]: { name: 'Żelazny Kilof', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.IRON_AXE]: { name: 'Żelazna Siekiera', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.IRON_SHOVEL]: { name: 'Żelazna Łopata', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.IRON_SWORD]: { name: 'Żelazny Miecz', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.IRON_HOE]: { name: 'Żelazna Motyka', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
+    [BlockType.IRON_PICKAXE]: { name: 'Żelazny Kilof', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 250 },
+    [BlockType.IRON_AXE]: { name: 'Żelazna Siekiera', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 250 },
+    [BlockType.IRON_SHOVEL]: { name: 'Żelazna Łopata', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 250 },
+    [BlockType.IRON_SWORD]: { name: 'Żelazny Miecz', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 250 },
+    [BlockType.IRON_HOE]: { name: 'Żelazna Motyka', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 250 },
     // ─── Gold Tools ─────────────────────────────────────
-    [BlockType.GOLD_PICKAXE]: { name: 'Złoty Kilof', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.GOLD_AXE]: { name: 'Złota Siekiera', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.GOLD_SHOVEL]: { name: 'Złota Łopata', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.GOLD_SWORD]: { name: 'Złoty Miecz', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.GOLD_HOE]: { name: 'Złota Motyka', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
+    [BlockType.GOLD_PICKAXE]: { name: 'Złoty Kilof', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 32 },
+    [BlockType.GOLD_AXE]: { name: 'Złota Siekiera', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 32 },
+    [BlockType.GOLD_SHOVEL]: { name: 'Złota Łopata', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 32 },
+    [BlockType.GOLD_SWORD]: { name: 'Złoty Miecz', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 32 },
+    [BlockType.GOLD_HOE]: { name: 'Złota Motyka', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 32 },
     // ─── Diamond Tools ──────────────────────────────────
-    [BlockType.DIAMOND_PICKAXE]: { name: 'Diamentowy Kilof', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.DIAMOND_AXE]: { name: 'Diamentowa Siekiera', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.DIAMOND_SHOVEL]: { name: 'Diamentowa Łopata', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.DIAMOND_SWORD]: { name: 'Diamentowy Miecz', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.DIAMOND_HOE]: { name: 'Diamentowa Motyka', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
+    [BlockType.DIAMOND_PICKAXE]: { name: 'Diamentowy Kilof', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 1561 },
+    [BlockType.DIAMOND_AXE]: { name: 'Diamentowa Siekiera', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 1561 },
+    [BlockType.DIAMOND_SHOVEL]: { name: 'Diamentowa Łopata', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 1561 },
+    [BlockType.DIAMOND_SWORD]: { name: 'Diamentowy Miecz', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 1561 },
+    [BlockType.DIAMOND_HOE]: { name: 'Diamentowa Motyka', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 1561 },
     // ─── Materials ───────────────────────────────────────
     [BlockType.COAL]: { name: 'Węgiel', color: '#222222', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.IRON_INGOT]: { name: 'Sztabka Żelaza', color: '#d8d8d8', transparent: false, solid: false, breakTime: 0, isItem: true },

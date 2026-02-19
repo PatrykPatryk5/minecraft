@@ -7,7 +7,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import useGameStore from '../store/gameStore';
 import { BLOCK_DATA, PLACEABLE_BLOCKS, ITEM_BLOCKS } from '../core/blockTypes';
 import { getBlockIcon } from '../core/textures';
-import { RECIPES, matchRecipe } from '../core/crafting';
+import { matchRecipe } from '../core/crafting';
+import type { InventorySlot } from '../store/gameStore';
 import { playSound } from '../audio/sounds';
 
 const CraftingScreen: React.FC = () => {
@@ -15,13 +16,16 @@ const CraftingScreen: React.FC = () => {
     const setOverlay = useGameStore((s) => s.setOverlay);
     const craftingGrid = useGameStore((s) => s.craftingGrid);
     const setCraftingGrid = useGameStore((s) => s.setCraftingGrid);
-    const screen = useGameStore((s) => s.screen);
+    const hotbar = useGameStore((s) => s.hotbar);
+    const setHotbar = useGameStore((s) => s.setHotbar);
+    const inventory = useGameStore((s) => s.inventory);
+    const setInventory = useGameStore((s) => s.setInventory);
     const gameMode = useGameStore((s) => s.gameMode);
+    const screen = useGameStore((s) => s.screen);
 
     const cursorItem = useGameStore((s) => s.cursorItem);
     const setCursorItem = useGameStore((s) => s.setCursorItem);
 
-    const [activeTab, setActiveTab] = useState<'grid' | 'recipes'>('grid');
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
     useEffect(() => {
@@ -46,7 +50,7 @@ const CraftingScreen: React.FC = () => {
         return () => window.removeEventListener('keydown', onKey);
     }, [screen]);
 
-    // ESC to close (capture phase!)
+    // ESC to close
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.code === 'Escape' && useGameStore.getState().activeOverlay === 'crafting') {
@@ -61,257 +65,243 @@ const CraftingScreen: React.FC = () => {
     const closeCrafting = () => {
         const s = useGameStore.getState();
         if (s.gameMode === 'survival') {
-            for (const id of craftingGrid) {
-                if (id) s.addItem(id, 1);
+            for (const slot of craftingGrid) {
+                if (slot.id > 0) s.addItem(slot.id, slot.count, slot.durability);
             }
             if (s.cursorItem) {
-                s.addItem(s.cursorItem.id, s.cursorItem.count);
+                s.addItem(s.cursorItem.id, s.cursorItem.count, s.cursorItem.durability);
                 s.setCursorItem(null);
             }
         } else {
             s.setCursorItem(null);
         }
-        setCraftingGrid(Array(9).fill(0));
+        setCraftingGrid(Array(9).fill({ id: 0, count: 0 }));
         setOverlay('none');
         playSound('close');
         document.querySelector('canvas')?.requestPointerLock();
     };
 
-    const result = useMemo(() => matchRecipe(craftingGrid, 3), [craftingGrid]);
-
-    const setSlotFromPalette = (index: number, blockId: number) => {
-        const newGrid = [...craftingGrid];
-
-        if (gameMode === 'survival' && blockId !== 0) {
-            const s = useGameStore.getState();
-            let found = false;
-            const newHotbar = s.hotbar.map(sl => ({ ...sl }));
-            const newInv = s.inventory.map(sl => ({ ...sl }));
-
-            for (let i = 0; i < 9 && !found; i++) {
-                if (newHotbar[i].id === blockId && newHotbar[i].count > 0) {
-                    newHotbar[i].count--;
-                    if (newHotbar[i].count <= 0) newHotbar[i] = { id: 0, count: 0 };
-                    found = true;
-                }
-            }
-            for (let i = 0; i < 27 && !found; i++) {
-                if (newInv[i].id === blockId && newInv[i].count > 0) {
-                    newInv[i].count--;
-                    if (newInv[i].count <= 0) newInv[i] = { id: 0, count: 0 };
-                    found = true;
-                }
-            }
-            if (!found) return;
-            s.setHotbar(newHotbar);
-            s.setInventory(newInv);
-        }
-
-        if (gameMode === 'survival' && newGrid[index]) {
-            useGameStore.getState().addItem(newGrid[index], 1);
-        }
-
-        newGrid[index] = blockId;
-        setCraftingGrid(newGrid);
-        playSound('click');
-    };
-
-    const clearGrid = () => {
-        if (gameMode === 'survival') {
-            for (const id of craftingGrid) {
-                if (id) useGameStore.getState().addItem(id, 1);
-            }
-        }
-        setCraftingGrid(Array(9).fill(0));
-    };
+    const craftResult = useMemo(() => matchRecipe(craftingGrid.map(s => s.id), 3), [craftingGrid]);
 
     const craftItem = () => {
-        if (!result) return;
+        if (!craftResult) return;
         playSound('craft');
-        setCraftingGrid(Array(9).fill(0));
+
+        // Consume ingredients
+        const newGrid = [...craftingGrid];
+        for (let i = 0; i < newGrid.length; i++) {
+            if (newGrid[i].id > 0) {
+                newGrid[i] = { ...newGrid[i], count: newGrid[i].count - 1 };
+                if (newGrid[i].count <= 0) {
+                    newGrid[i] = { id: 0, count: 0 };
+                }
+            }
+        }
+        setCraftingGrid(newGrid);
 
         const s = useGameStore.getState();
         if (!s.cursorItem) {
-            s.setCursorItem({ id: result.result, count: result.count });
-        } else if (s.cursorItem.id === result.result && s.cursorItem.count + result.count <= 64) {
-            s.setCursorItem({ ...s.cursorItem, count: s.cursorItem.count + result.count });
+            s.setCursorItem({ id: craftResult.result, count: craftResult.count });
+        } else if (s.cursorItem.id === craftResult.result && s.cursorItem.count + craftResult.count <= 64) {
+            s.setCursorItem({ ...s.cursorItem, count: s.cursorItem.count + craftResult.count });
         } else {
-            s.addItem(result.result, result.count);
+            s.addItem(craftResult.result, craftResult.count);
         }
-        playSound('xp');
     };
 
     const handleCraftGridClick = (index: number) => {
         playSound('click');
         const newGrid = [...craftingGrid];
-        const slotId = newGrid[index];
-        const s = useGameStore.getState();
+        const slot = newGrid[index];
 
         if (cursorItem) {
-            if (slotId === 0) {
-                newGrid[index] = cursorItem.id;
+            if (slot.id === 0) {
+                // Place 1 from cursor
+                newGrid[index] = { id: cursorItem.id, count: 1, durability: cursorItem.durability };
                 setCraftingGrid(newGrid);
                 if (gameMode === 'survival') {
                     const newCursor = { ...cursorItem, count: cursorItem.count - 1 };
                     setCursorItem(newCursor.count > 0 ? newCursor : null);
                 }
-            } else if (slotId === cursorItem.id) {
-                // Slot filled
+            } else if (slot.id === cursorItem.id && slot.count < 64) {
+                // Add 1 to stack
+                newGrid[index] = { ...slot, count: slot.count + 1 };
+                setCraftingGrid(newGrid);
+                if (gameMode === 'survival') {
+                    const newCursor = { ...cursorItem, count: cursorItem.count - 1 };
+                    setCursorItem(newCursor.count > 0 ? newCursor : null);
+                }
             } else {
-                // Swap not implemented
+                // Swap cursor and slot
+                const temp = { ...slot };
+                newGrid[index] = cursorItem;
+                setCraftingGrid(newGrid);
+                setCursorItem(temp);
             }
-        } else if (slotId !== 0) {
-            setCursorItem({ id: slotId, count: 1 });
-            newGrid[index] = 0;
+        } else if (slot.id !== 0) {
+            // Pick up half stack if right clicked? For now just pick up all.
+            // Oh, we just pick all.
+            setCursorItem({ ...slot });
+            newGrid[index] = { id: 0, count: 0 };
             setCraftingGrid(newGrid);
         }
     };
 
-    const loadRecipe = (recipeIndex: number) => {
-        const recipe = RECIPES[recipeIndex];
-        if (!recipe || recipe.type !== 'shaped') return;
-        const pattern = recipe.ingredients as number[][];
-
-        if (gameMode === 'survival') {
-            for (const id of craftingGrid) {
-                if (id) useGameStore.getState().addItem(id, 1);
-            }
-        }
-
-        // Flatten pattern into 3x3 grid
-        const flat = Array(9).fill(0);
-        for (let r = 0; r < pattern.length && r < 3; r++) {
-            for (let c = 0; c < (pattern[r]?.length ?? 0) && c < 3; c++) {
-                flat[r * 3 + c] = pattern[r][c] ?? 0;
-            }
-        }
-
-        if (gameMode === 'survival') {
-            // Check availability
-            const needed: Record<number, number> = {};
-            for (const id of flat) { if (id) needed[id] = (needed[id] || 0) + 1; }
-            const s = useGameStore.getState();
-            const available: Record<number, number> = {};
-            for (const sl of [...s.hotbar, ...s.inventory]) {
-                if (sl.id) available[sl.id] = (available[sl.id] || 0) + sl.count;
-            }
-            for (const [id, n] of Object.entries(needed)) {
-                if ((available[+id] || 0) < n) { playSound('click'); return; }
-            }
-            // Consume items
-            const newHotbar = s.hotbar.map(sl => ({ ...sl }));
-            const newInv = s.inventory.map(sl => ({ ...sl }));
-            for (const [id, n] of Object.entries(needed)) {
-                let rem = n;
-                for (let i = 0; i < 9 && rem > 0; i++) {
-                    if (newHotbar[i].id === +id) {
-                        const take = Math.min(rem, newHotbar[i].count);
-                        newHotbar[i].count -= take;
-                        if (newHotbar[i].count <= 0) newHotbar[i] = { id: 0, count: 0 };
-                        rem -= take;
-                    }
-                }
-                for (let i = 0; i < 27 && rem > 0; i++) {
-                    if (newInv[i].id === +id) {
-                        const take = Math.min(rem, newInv[i].count);
-                        newInv[i].count -= take;
-                        if (newInv[i].count <= 0) newInv[i] = { id: 0, count: 0 };
-                        rem -= take;
-                    }
-                }
-            }
-            s.setHotbar(newHotbar);
-            s.setInventory(newInv);
-        }
-        setCraftingGrid(flat);
+    const handleSlotClick = (source: 'hotbar' | 'inv', index: number) => {
         playSound('click');
+        const arr = source === 'hotbar' ? hotbar : inventory;
+        const setArr = source === 'hotbar' ? setHotbar : setInventory;
+        const newArr = arr.map(s => ({ ...s }));
+
+        if (cursorItem) {
+            const old = newArr[index];
+            if (old.id === cursorItem.id && old.count < 64) {
+                const add = Math.min(cursorItem.count, 64 - old.count);
+                newArr[index].count += add;
+                const remaining = cursorItem.count - add;
+                setArr(newArr);
+                setCursorItem(remaining > 0 ? { id: cursorItem.id, count: remaining } : null);
+            } else {
+                newArr[index] = cursorItem;
+                setArr(newArr);
+                setCursorItem(old.id ? old : null);
+            }
+        } else if (arr[index].id) {
+            setCursorItem({ ...arr[index] });
+            newArr[index] = { id: 0, count: 0 };
+            setArr(newArr);
+        }
+    };
+
+    const handlePaletteClick = (blockId: number) => {
+        playSound('click');
+        setCursorItem({ id: blockId, count: 64 });
+    };
+
+    const clearGrid = () => {
+        if (gameMode === 'survival') {
+            for (const slot of craftingGrid) {
+                if (slot.id > 0) useGameStore.getState().addItem(slot.id, slot.count, slot.durability);
+            }
+        }
+        setCraftingGrid(Array(9).fill({ id: 0, count: 0 }));
+    };
+
+    const renderSlot = (slot: InventorySlot, onClick: () => void, selected = false) => {
+        const icon = slot.id ? getBlockIcon(slot.id) : null;
+        const data = slot.id ? BLOCK_DATA[slot.id] : null;
+        return (
+            <div className={`inv-slot${selected ? ' selected' : ''}${cursorItem ? ' droppable' : ''}`}
+                onClick={onClick} title={data?.name ?? ''}>
+                {slot.id > 0 && icon && (
+                    <>
+                        <img src={icon} className="block-icon-3d" alt="" draggable={false} />
+                        {slot.count > 1 && <span className="item-count">{slot.count}</span>}
+                        {slot.durability !== undefined && data?.maxDurability && (
+                            <div style={{
+                                position: 'absolute', bottom: '2px', left: '2px', right: '2px',
+                                height: '3px', backgroundColor: '#000', borderRadius: '1px'
+                            }}>
+                                <div style={{
+                                    width: `${(slot.durability / data.maxDurability) * 100}%`,
+                                    height: '100%',
+                                    backgroundColor: `hsl(${((slot.durability / data.maxDurability) * 120).toString(10)}, 100%, 50%)`,
+                                }} />
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+        );
     };
 
     if (activeOverlay !== 'crafting') return null;
 
-    const availableItems = gameMode === 'creative'
-        ? [...PLACEABLE_BLOCKS, ...ITEM_BLOCKS]
-        : getPlayerItems();
+    const allItems = [...PLACEABLE_BLOCKS, ...ITEM_BLOCKS];
 
     return (
-        <div className="crafting-overlay" onClick={closeCrafting}>
-            <div className="crafting-window" onClick={(e) => e.stopPropagation()}>
-                <h3>⚒ Stół Rzemieślniczy (3×3)</h3>
+        <div className="inventory-overlay" onClick={closeCrafting}>
+            <div className="inventory-window" onClick={(e) => e.stopPropagation()}>
+                <h3>⚒ Stół Rzemieślniczy</h3>
 
-                <div style={{ display: 'flex', gap: '4px', marginBottom: '12px', justifyContent: 'center' }}>
-                    <button className={`mc-btn half${activeTab === 'grid' ? ' primary' : ''}`} onClick={() => setActiveTab('grid')}>Siatka</button>
-                    <button className={`mc-btn half${activeTab === 'recipes' ? ' primary' : ''}`} onClick={() => setActiveTab('recipes')}>Przepisy</button>
+                <div className="inv-crafting-section">
+                    <div className="inv-section-label">Craftowanie (3×3)</div>
+                    <div className="inv-crafting-layout" style={{ justifyContent: 'center' }}>
+                        <div className="crafting-grid" style={{
+                            display: 'grid', gridTemplateColumns: 'repeat(3, 44px)', gap: '4px',
+                            background: 'rgba(0,0,0,0.5)', padding: '6px', borderRadius: '4px'
+                        }}>
+                            {craftingGrid.map((slot, i) => {
+                                const icon = slot.id ? getBlockIcon(slot.id) : null;
+                                return (
+                                    <div key={i} className={`craft-slot${slot.id ? ' filled' : ''}`}
+                                        onClick={() => handleCraftGridClick(i)}
+                                        title={slot.id ? BLOCK_DATA[slot.id]?.name : ''}>
+                                        {slot.id > 0 && icon && (
+                                            <>
+                                                <img src={icon} className="block-icon-3d" alt="" draggable={false} />
+                                                {slot.count > 1 && <span className="item-count">{slot.count}</span>}
+                                            </>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div className="craft-arrow" style={{ padding: '0 20px' }}>→</div>
+                        <div className={`craft-result${craftResult ? ' has-result' : ''}`}
+                            onClick={craftResult ? craftItem : undefined}>
+                            {craftResult ? (
+                                <>
+                                    <img src={getBlockIcon(craftResult.result)} className="block-icon-3d large" alt="" draggable={false} />
+                                    {craftResult.count > 1 && <span className="result-count">×{craftResult.count}</span>}
+                                </>
+                            ) : (
+                                <span className="no-result">?</span>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
-                {activeTab === 'grid' && (
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '10px' }}>
+                    <button className="mc-btn" onClick={clearGrid} style={{ maxWidth: '200px' }}>Wyczyść siatkę</button>
+                </div>
+
+                {/* Creative palette */}
+                {gameMode === 'creative' && (
                     <>
-                        <div className="crafting-layout">
-                            <div className="crafting-grid">
-                                {craftingGrid.map((id, i) => {
-                                    const icon = id ? getBlockIcon(id) : null;
-                                    return (
-                                        <div key={i} className={`craft-slot${id ? ' filled' : ''}`} onClick={() => handleCraftGridClick(i)} title={id ? BLOCK_DATA[id]?.name : ''}>
-                                            {id > 0 && icon && <img src={icon} className="block-icon-3d" alt="" draggable={false} />}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-
-                            <div className="craft-arrow">→</div>
-
-                            <div className={`craft-result${result ? ' has-result' : ''}`} onClick={result ? craftItem : undefined}>
-                                {result ? (
-                                    <>
-                                        <img src={getBlockIcon(result.result)} className="block-icon-3d large" alt="" draggable={false} />
-                                        {result.count > 1 && <span className="result-count">×{result.count}</span>}
-                                        <span className="result-name">{result.name}</span>
-                                    </>
-                                ) : (
-                                    <span className="no-result">?</span>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="craft-palette-label">
-                            {gameMode === 'survival' ? 'Twoje przedmioty' : 'Wszystkie bloki'}
-                        </div>
-                        <div className="craft-palette">
-                            {availableItems.map((id) => {
+                        <div className="inv-section-label">Bloki (kliknij aby wziąć)</div>
+                        <div className="craft-palette" style={{ maxHeight: '120px' }}>
+                            {allItems.map((id) => {
                                 const data = BLOCK_DATA[id];
                                 if (!data) return null;
                                 const icon = getBlockIcon(id);
                                 return (
-                                    <div key={id} className="palette-slot" onClick={() => {
-                                        const emptyIdx = craftingGrid.findIndex(v => v === 0);
-                                        if (emptyIdx >= 0) setSlotFromPalette(emptyIdx, id);
-                                    }} title={data.name}>
+                                    <div key={id} className="palette-slot" onClick={() => handlePaletteClick(id)} title={data.name}>
                                         {icon && <img src={icon} className="block-icon-3d small" alt="" draggable={false} />}
                                     </div>
                                 );
                             })}
                         </div>
-
-                        <button className="mc-btn" onClick={clearGrid} style={{ marginTop: 8 }}>Wyczyść siatkę</button>
                     </>
                 )}
 
-                {activeTab === 'recipes' && (
-                    <div className="recipe-list" style={{ gridTemplateColumns: 'repeat(2, 1fr)', maxHeight: '300px' }}>
-                        {RECIPES.map((recipe, ri) => {
-                            const data = BLOCK_DATA[recipe.result];
-                            if (!data) return null;
-                            const icon = getBlockIcon(recipe.result);
-                            return (
-                                <div key={ri} className="recipe-item" onClick={() => { loadRecipe(ri); setActiveTab('grid'); }}>
-                                    {icon && <img src={icon} className="block-icon-3d small" alt="" draggable={false} />}
-                                    <span>{recipe.name} {recipe.count > 1 ? `×${recipe.count}` : ''}</span>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
+                {/* Main Inventory 3×9 */}
+                <div className="inv-section-label">Plecak</div>
+                <div className="inv-grid">
+                    {inventory.map((slot, i) => (
+                        <React.Fragment key={i}>{renderSlot(slot, () => handleSlotClick('inv', i))}</React.Fragment>
+                    ))}
+                </div>
 
-                <div className="inv-hint" style={{ marginTop: 8 }}>ESC — zamknij • Kliknij slot aby usunąć • Kliknij wynik aby skraftować</div>
+                {/* Hotbar */}
+                <div className="inv-section-label">Pasek szybkiego dostępu</div>
+                <div className="inv-hotbar">
+                    {hotbar.map((slot, i) => (
+                        <React.Fragment key={i}>{renderSlot(slot, () => handleSlotClick('hotbar', i), i === useGameStore.getState().hotbarSlot)}</React.Fragment>
+                    ))}
+                </div>
+
+                <div className="inv-hint">Kliknij slot aby przenieść • ESC — zamknij</div>
             </div>
 
             {/* Floating Cursor Item */}
@@ -342,14 +332,5 @@ const CraftingScreen: React.FC = () => {
         </div>
     );
 };
-
-function getPlayerItems(): number[] {
-    const s = useGameStore.getState();
-    const ids = new Set<number>();
-    for (const sl of [...s.hotbar, ...s.inventory]) {
-        if (sl.id) ids.add(sl.id);
-    }
-    return Array.from(ids);
-}
 
 export default CraftingScreen;

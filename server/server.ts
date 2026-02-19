@@ -21,6 +21,8 @@ interface Player {
     id: string;
     name: string;
     pos: [number, number, number];
+    rot: [number, number];
+    dimension: string;
     ws: WebSocket;
 }
 
@@ -89,13 +91,14 @@ wss.on('connection', (ws: WebSocket) => {
         switch (packet.type) {
             case 'join': {
                 const name = String(packet.payload?.name || 'Player').slice(0, 16);
-                player = { id, name, pos: [0, 80, 0], ws };
+                const dimension = String(packet.payload?.dimension || 'overworld');
+                player = { id, name, pos: [0, 80, 0], rot: [0, 0], dimension, ws };
                 state.players.set(id, player);
 
                 // Send welcome with all current players
                 const otherPlayers = Array.from(state.players.values())
                     .filter(p => p.id !== id)
-                    .map(p => ({ id: p.id, name: p.name, pos: p.pos }));
+                    .map(p => ({ id: p.id, name: p.name, pos: p.pos, rot: p.rot, dimension: p.dimension }));
 
                 sendTo(ws, {
                     type: 'welcome',
@@ -109,7 +112,7 @@ wss.on('connection', (ws: WebSocket) => {
                 }
 
                 // Broadcast join to others
-                broadcast({ type: 'player_join', payload: { id, name, pos: player.pos } }, id);
+                broadcast({ type: 'player_join', payload: { id, name, pos: player.pos, rot: player.rot, dimension: player.dimension } }, id);
                 console.log(`[Server] ${name} joined (${state.players.size} online)`);
                 break;
             }
@@ -117,9 +120,25 @@ wss.on('connection', (ws: WebSocket) => {
             case 'move': {
                 if (!player) return;
                 const pos = packet.payload?.pos;
+                const rot = packet.payload?.rot;
+                const dimension = packet.payload?.dimension;
+
+                let changed = false;
                 if (Array.isArray(pos) && pos.length === 3) {
                     player.pos = pos as [number, number, number];
-                    broadcast({ type: 'player_move', payload: { id, pos: player.pos } }, id);
+                    changed = true;
+                }
+                if (Array.isArray(rot) && rot.length === 2) {
+                    player.rot = rot as [number, number];
+                    changed = true;
+                }
+                if (typeof dimension === 'string') {
+                    player.dimension = dimension;
+                    changed = true;
+                }
+
+                if (changed) {
+                    broadcast({ type: 'player_move', payload: { id, pos: player.pos, rot: player.rot, dimension: player.dimension } }, id);
                 }
                 break;
             }

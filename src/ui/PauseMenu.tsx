@@ -6,6 +6,7 @@ import React, { useEffect, useCallback, useState } from 'react';
 import useGameStore from '../store/gameStore';
 import type { GameMode, Difficulty } from '../store/gameStore';
 import { startLANServer, stopLANServer, getLANState } from '../multiplayer/LANServer';
+import { exportWorldToFile } from '../core/storage';
 
 const PauseMenu: React.FC = () => {
     const isPaused = useGameStore((s) => s.isPaused);
@@ -50,6 +51,7 @@ const PauseMenu: React.FC = () => {
             stopLANServer();
             setLanActive(false);
         }
+        useGameStore.getState().saveGame();
         setPaused(false);
         setLocked(false);
         setScreen('mainMenu');
@@ -185,7 +187,10 @@ const PauseMenu: React.FC = () => {
                     </div>
                 </div>
 
-                <button className="mc-btn" onClick={returnToMenu}>🏠 Menu Główne</button>
+                <div className="menu-row" style={{ marginTop: '16px', gap: '8px', display: 'flex' }}>
+                    <button className="mc-btn half primary" onClick={() => exportWorldToFile()}>📥 Eksportuj Świat</button>
+                    <button className="mc-btn half" onClick={returnToMenu}>🏠 Zapisz i Wyjdź</button>
+                </div>
             </div>
         </div>
     );

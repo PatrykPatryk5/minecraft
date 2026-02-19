@@ -69,35 +69,41 @@ const Inventory: React.FC = () => {
         // Return 2x2 crafting items to player
         const s = useGameStore.getState();
         if (s.gameMode === 'survival') {
-            for (const id of invCraftGrid) {
-                if (id) s.addItem(id, 1);
+            for (const slot of invCraftGrid) {
+                if (slot.id > 0) s.addItem(slot.id, slot.count, slot.durability);
             }
-            // Return cursor item logic? For now, we keep it in store or drop it?
-            // MC Logic: Throw item. Here: just keep it in cursor?
-            // Usually cursor clears. Let's return it to inventory if possible.
             if (s.cursorItem) {
-                s.addItem(s.cursorItem.id, s.cursorItem.count);
+                s.addItem(s.cursorItem.id, s.cursorItem.count, s.cursorItem.durability);
                 s.setCursorItem(null);
             }
         } else {
             s.setCursorItem(null);
         }
-        setInvCraftGrid(Array(4).fill(0));
+        setInvCraftGrid(Array(4).fill({ id: 0, count: 0 }));
         setOverlay('none');
         playSound('close');
         document.querySelector('canvas')?.requestPointerLock();
     };
 
     // 2x2 crafting result
-    const craftResult = useMemo(() => matchRecipe(invCraftGrid, 2), [invCraftGrid]);
+    const craftResult = useMemo(() => matchRecipe(invCraftGrid.map(s => s.id), 2), [invCraftGrid]);
 
     const craftItem2x2 = () => {
         if (!craftResult) return;
         playSound('craft');
-        setInvCraftGrid(Array(4).fill(0));
-        // Result goes to cursor if empty, or inventory?
-        // Simple: Add to inventory.
-        // Better: Put in cursor if empty.
+
+        // Consume ingredients
+        const newGrid = [...invCraftGrid];
+        for (let i = 0; i < newGrid.length; i++) {
+            if (newGrid[i].id > 0) {
+                newGrid[i] = { ...newGrid[i], count: newGrid[i].count - 1 };
+                if (newGrid[i].count <= 0) {
+                    newGrid[i] = { id: 0, count: 0 };
+                }
+            }
+        }
+        setInvCraftGrid(newGrid);
+
         const s = useGameStore.getState();
         if (!s.cursorItem) {
             s.setCursorItem({ id: craftResult.result, count: craftResult.count });
@@ -112,44 +118,42 @@ const Inventory: React.FC = () => {
     const handleCraftGridClick = (index: number) => {
         playSound('click');
         const newGrid = [...invCraftGrid];
-        const slotId = newGrid[index];
-        const s = useGameStore.getState();
+        const slot = newGrid[index];
 
         if (cursorItem) {
             // Place 1 item from cursor
-            if (slotId === 0) {
-                newGrid[index] = cursorItem.id;
+            if (slot.id === 0) {
+                newGrid[index] = { id: cursorItem.id, count: 1, durability: cursorItem.durability };
                 setInvCraftGrid(newGrid);
                 if (gameMode === 'survival') {
                     const newCursor = { ...cursorItem, count: cursorItem.count - 1 };
                     setCursorItem(newCursor.count > 0 ? newCursor : null);
                 }
-            } else if (slotId === cursorItem.id) {
-                // Already filled with same? Do nothing (limit 1) or swap?
-                // Since it's number[], limit is 1.
+            } else if (slot.id === cursorItem.id && slot.count < 64) {
+                // Add 1 to stack
+                newGrid[index] = { ...slot, count: slot.count + 1 };
+                setInvCraftGrid(newGrid);
+                if (gameMode === 'survival') {
+                    const newCursor = { ...cursorItem, count: cursorItem.count - 1 };
+                    setCursorItem(newCursor.count > 0 ? newCursor : null);
+                }
             } else {
-                // Swap 1 for 1? 
-                // Takes slot item to cursor (count 1)?
-                // Put 1 cursor item?
-                // Complex. Let's just allow placing if empty.
+                // Swap
+                const temp = { ...slot };
+                newGrid[index] = cursorItem;
+                setInvCraftGrid(newGrid);
+                setCursorItem(temp);
             }
-        } else if (slotId !== 0) {
+        } else if (slot.id !== 0) {
             // Pick up
-            setCursorItem({ id: slotId, count: 1 });
-            newGrid[index] = 0;
+            setCursorItem({ ...slot });
+            newGrid[index] = { id: 0, count: 0 };
             setInvCraftGrid(newGrid);
         }
     };
 
     // Helper for Palette (fill crafting slot from inventory/creative)
     const setCraftSlotFromPalette = (index: number, blockId: number) => {
-        // ... implementation of old setCraftSlot logic shortened/simplified?
-        // This was used when clicking palette to AUTO-FILL simple 2x2?
-        // The user code separates Palette Click -> setHeld (lines 153-156).
-        // AND line 227: `setCraftSlot(emptyIdx, id)`.
-
-        // Reuse old logic partially or just simplify?
-        // Old logic consumed item from inventory.
         const newGrid = [...invCraftGrid];
         if (gameMode === 'survival' && blockId !== 0) {
             const s = useGameStore.getState();
@@ -157,9 +161,6 @@ const Inventory: React.FC = () => {
             const newHotbar = s.hotbar.map(sl => ({ ...sl }));
             const newInv = s.inventory.map(sl => ({ ...sl }));
             let found = false;
-            // ... search and decrement ...
-            // (Simulated logic for brevity, reusing exact logic helps)
-            // I'll copy-paste the consumption logic from original file lines 93-116
             for (let i = 0; i < 9 && !found; i++) {
                 if (newHotbar[i].id === blockId && newHotbar[i].count > 0) {
                     newHotbar[i].count--;
@@ -180,10 +181,10 @@ const Inventory: React.FC = () => {
         }
 
         // If slot had item, return it
-        if (gameMode === 'survival' && newGrid[index]) {
-            useGameStore.getState().addItem(newGrid[index], 1);
+        if (gameMode === 'survival' && newGrid[index].id > 0) {
+            useGameStore.getState().addItem(newGrid[index].id, newGrid[index].count, newGrid[index].durability);
         }
-        newGrid[index] = blockId;
+        newGrid[index] = { id: blockId, count: 1 };
         setInvCraftGrid(newGrid);
         playSound('click');
     };
@@ -232,6 +233,18 @@ const Inventory: React.FC = () => {
                     <>
                         <img src={icon} className="block-icon-3d" alt="" draggable={false} />
                         {slot.count > 1 && <span className="item-count">{slot.count}</span>}
+                        {slot.durability !== undefined && data?.maxDurability && (
+                            <div style={{
+                                position: 'absolute', bottom: '2px', left: '2px', right: '2px',
+                                height: '3px', backgroundColor: '#000', borderRadius: '1px'
+                            }}>
+                                <div style={{
+                                    width: `${(slot.durability / data.maxDurability) * 100}%`,
+                                    height: '100%',
+                                    backgroundColor: `hsl(${((slot.durability / data.maxDurability) * 120).toString(10)}, 100%, 50%)`,
+                                }} />
+                            </div>
+                        )}
                     </>
                 )}
             </div>
@@ -257,13 +270,18 @@ const Inventory: React.FC = () => {
                     <div className="inv-section-label">Craftowanie (2×2)</div>
                     <div className="inv-crafting-layout">
                         <div className="inv-crafting-grid">
-                            {invCraftGrid.map((id, i) => {
-                                const icon = id ? getBlockIcon(id) : null;
+                            {invCraftGrid.map((slot, i) => {
+                                const icon = slot.id ? getBlockIcon(slot.id) : null;
                                 return (
-                                    <div key={i} className={`craft-slot${id ? ' filled' : ''}`}
+                                    <div key={i} className={`craft-slot${slot.id ? ' filled' : ''}`}
                                         onClick={() => handleCraftGridClick(i)}
-                                        title={id ? BLOCK_DATA[id]?.name : ''}>
-                                        {id > 0 && icon && <img src={icon} className="block-icon-3d" alt="" draggable={false} />}
+                                        title={slot.id ? BLOCK_DATA[slot.id]?.name : ''}>
+                                        {slot.id > 0 && icon && (
+                                            <>
+                                                <img src={icon} className="block-icon-3d" alt="" draggable={false} />
+                                                {slot.count > 1 && <span className="item-count">{slot.count}</span>}
+                                            </>
+                                        )}
                                     </div>
                                 );
                             })}
@@ -290,7 +308,7 @@ const Inventory: React.FC = () => {
                             const icon = getBlockIcon(id);
                             return (
                                 <div key={id} className="palette-slot" onClick={() => {
-                                    const emptyIdx = invCraftGrid.findIndex(v => v === 0);
+                                    const emptyIdx = invCraftGrid.findIndex(v => v.id === 0);
                                     if (emptyIdx >= 0) setCraftSlotFromPalette(emptyIdx, id);
                                 }} title={data.name}>
                                     {icon && <img src={icon} className="block-icon-3d small" alt="" draggable={false} />}

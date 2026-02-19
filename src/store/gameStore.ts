@@ -13,8 +13,9 @@
 
 import { create } from 'zustand';
 import { BlockType, DEFAULT_HOTBAR, EMPTY_HOTBAR, BLOCK_DATA } from '../core/blockTypes';
-import type { ChunkData } from '../core/terrainGen';
+import { saveChunk, savePlayerState, loadPlayerState, clearAllChunks, clearPlayerState, PlayerSaveState } from '../core/storage';
 import { blockIndex, CHUNK_VOLUME } from '../core/terrainGen';
+import { SMELTING_RECIPES, FUEL_VALUES } from '../core/crafting';
 
 // ─── Helpers ─────────────────────────────────────────────
 export const chunkKey = (cx: number, cz: number): string => `${cx},${cz}`;
@@ -25,12 +26,14 @@ export type GameMode = 'survival' | 'creative' | 'spectator';
 export type GameScreen = 'mainMenu' | 'worldCreate' | 'settings' | 'keybinds' | 'multiplayer' | 'playing' | 'paused' | 'credits';
 export type Dimension = 'overworld' | 'nether' | 'end';
 
+// ── GameState Interface ───────────────────────────────────
 /** Which overlay is open (only one at a time) */
 export type ActiveOverlay = 'none' | 'pause' | 'inventory' | 'crafting' | 'furnace' | 'chest';
 
 export interface InventorySlot {
     id: number;   // block/item type
     count: number;
+    durability?: number; // current durability left
 }
 
 export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard';
@@ -111,13 +114,13 @@ export interface GameState {
     setGameMode: (m: GameMode) => void;
 
     // ── World ─────────────────────────────────────────────
-    chunks: Record<string, ChunkData>;
+    chunks: Record<string, Uint16Array>;
     chunkVersions: Record<string, number>;
     generatedChunks: Set<string>;
     worldSeed: number;
     worldName: string;
 
-    setChunkData: (cx: number, cz: number, dimension: string, data: ChunkData) => void;
+    setChunkData: (cx: number, cz: number, dimension: string, data: Uint16Array) => void;
     getBlock: (x: number, y: number, z: number) => number;
     addBlock: (x: number, y: number, z: number, typeId: number) => void;
     removeBlock: (x: number, y: number, z: number) => void;
@@ -128,6 +131,8 @@ export interface GameState {
     // ── Player ────────────────────────────────────────────
     playerPos: [number, number, number];
     setPlayerPos: (p: [number, number, number]) => void;
+    playerRot: [number, number];
+    setPlayerRot: (r: [number, number]) => void;
 
     health: number;
     maxHealth: number;
@@ -146,6 +151,8 @@ export interface GameState {
     oxygen: number;
     maxOxygen: number;
     setOxygen: (o: number) => void;
+    isUnderwater: boolean;
+    setUnderwater: (v: boolean) => void;
 
     // ── Death ──────────────────────────────────────────────
     isDead: boolean;
@@ -158,23 +165,27 @@ export interface GameState {
     setHotbar: (h: InventorySlot[]) => void;
     inventory: InventorySlot[];
     setInventory: (inv: InventorySlot[]) => void;
-    addItem: (id: number, count?: number) => boolean;
+    selectedSlot: number;
+    addItem: (id: number, count?: number, initialDurability?: number) => boolean;
     consumeHotbarItem: (slot: number) => void;
+    damageTool: (slotIndex: number) => void;
     getSelectedBlock: () => number;
 
     // ── Global Cursor ─────────────────────────────────────
     cursorItem: InventorySlot | null;
+
     setCursorItem: (item: InventorySlot | null) => void;
 
     // ── Crafting ──────────────────────────────────────────
-    craftingGrid: number[];           // 3x3 for table
-    setCraftingGrid: (g: number[]) => void;
-    inventoryCraftingGrid: number[];  // 2x2 for inventory
-    setInventoryCraftingGrid: (g: number[]) => void;
+    craftingGrid: InventorySlot[];           // 3x3 for table
+    setCraftingGrid: (g: InventorySlot[]) => void;
+    inventoryCraftingGrid: InventorySlot[];  // 2x2 for inventory
+    setInventoryCraftingGrid: (g: InventorySlot[]) => void;
 
     // ── Furnace ───────────────────────────────────────────
     furnace: FurnaceState;
     setFurnace: (f: FurnaceState) => void;
+    tickFurnace: () => void;
 
     // ── Food / Eat ────────────────────────────────────────
     eatFood: () => void;
@@ -224,8 +235,9 @@ export interface GameState {
     playerName: string;
     setPlayerName: (n: string) => void;
     isMultiplayer: boolean;
-    connectedPlayers: Record<string, { name: string; pos: [number, number, number] }>;
-    addConnectedPlayer: (id: string, name: string, pos: [number, number, number]) => void;
+    setIsMultiplayer: (v: boolean) => void;
+    connectedPlayers: Record<string, { name: string; pos: [number, number, number]; rot?: [number, number]; dimension?: string }>;
+    addConnectedPlayer: (id: string, name: string, pos: [number, number, number], rot?: [number, number], dimension?: string) => void;
     removeConnectedPlayer: (id: string) => void;
     chatMessages: { sender: string; text: string; time: number }[];
     addChatMessage: (sender: string, text: string) => void;
@@ -253,12 +265,17 @@ export interface GameState {
     dimension: Dimension;
     setDimension: (d: Dimension) => void;
     dimensionChunks: Record<string, {
-        chunks: Record<string, ChunkData>;
+        chunks: Record<string, Uint16Array>;
         chunkVersions: Record<string, number>;
         generatedChunks: Set<string>;
     }>;
     dragonDefeated: boolean;
     setDragonDefeated: (v: boolean) => void;
+
+    // ── Storage / Persistence ─────────────────────────────
+    loadWorldFromStorage: () => Promise<boolean>;
+    saveGame: () => void;
+    deleteWorld: () => Promise<void>;
 }
 
 const defaultKeybinds: Keybinds = {
@@ -302,7 +319,7 @@ const emptyArmor = (): ArmorSlots => ({
 const emptySlot = (): InventorySlot => ({ id: 0, count: 0 });
 const makeSlots = (n: number): InventorySlot[] => Array.from({ length: n }, emptySlot);
 const hotbarFromIds = (ids: number[]): InventorySlot[] =>
-    ids.map(id => id ? { id, count: 64 } : emptySlot());
+    ids.map(id => id ? { id, count: 64, durability: BLOCK_DATA[id]?.maxDurability } : emptySlot());
 
 const useGameStore = create<GameState>((set, get) => ({
     // ── Screen ────────────────────────────────────────────
@@ -334,6 +351,10 @@ const useGameStore = create<GameState>((set, get) => ({
         if (dimension !== get().dimension) return;
 
         const key = chunkKey(cx, cz);
+
+        // Save to IndexedDB asynchronously
+        saveChunk(`${dimension}:${cx},${cz}`, data);
+
         set((s) => {
             const newGen = new Set(s.generatedChunks);
             newGen.add(key);
@@ -381,6 +402,9 @@ const useGameStore = create<GameState>((set, get) => ({
             set((s) => ({ chunks: { ...s.chunks, [key]: chunk! } }));
         }
         chunk[blockIndex(lx, y, lz)] = typeId;
+
+        // Save to IndexedDB
+        saveChunk(`${state.dimension}:${cx},${cz}`, chunk);
     },
 
     removeBlock: (x, y, z) => {
@@ -393,6 +417,9 @@ const useGameStore = create<GameState>((set, get) => ({
         const chunk = get().chunks[key];
         if (!chunk) return;
         chunk[blockIndex(lx, y, lz)] = 0;
+
+        // Save to IndexedDB
+        saveChunk(`${get().dimension}:${cx},${cz}`, chunk);
     },
 
     bumpVersion: (cx, cz) => {
@@ -418,6 +445,8 @@ const useGameStore = create<GameState>((set, get) => ({
     // ── Player ────────────────────────────────────────────
     playerPos: [0, 80, 0] as [number, number, number],
     setPlayerPos: (p) => set({ playerPos: p }),
+    playerRot: [0, 0] as [number, number],
+    setPlayerRot: (r) => set({ playerRot: r }),
 
     health: 20,
     maxHealth: 20,
@@ -452,6 +481,8 @@ const useGameStore = create<GameState>((set, get) => ({
     oxygen: 300,
     maxOxygen: 300,
     setOxygen: (o) => set({ oxygen: Math.max(0, Math.min(get().maxOxygen, o)) }),
+    isUnderwater: false,
+    setUnderwater: (v) => set({ isUnderwater: v }),
 
     // ── Death ──────────────────────────────────────────────
     isDead: false,
@@ -464,52 +495,96 @@ const useGameStore = create<GameState>((set, get) => ({
     setHotbar: (h) => set({ hotbar: h }),
     inventory: makeSlots(27),
     setInventory: (inv) => set({ inventory: inv }),
-
-    addItem: (id, count = 1) => {
+    selectedSlot: 0,
+    addItem: (id, count = 1, initialDurability?: number) => {
         const s = get();
-        const newHotbar = s.hotbar.map(sl => ({ ...sl }));
-        const newInv = s.inventory.map(sl => ({ ...sl }));
-        let remaining = count;
+        const info = BLOCK_DATA[id];
+        const defaultDurability = initialDurability ?? info?.maxDurability;
 
-        // Try to stack in existing hotbar slots
-        for (let i = 0; i < 9 && remaining > 0; i++) {
-            if (newHotbar[i].id === id && newHotbar[i].count < 64) {
-                const add = Math.min(remaining, 64 - newHotbar[i].count);
+        const maxStack = info?.stackSize ?? 64;
+
+        if (maxStack === 1) {
+            // Find empty slot because unstackable (like tools)
+            let newHotbar = [...s.hotbar];
+            for (let i = 0; i < 9; i++) {
+                if (newHotbar[i].id === 0) {
+                    newHotbar[i] = { id, count: 1, durability: defaultDurability };
+                    set({ hotbar: newHotbar });
+                    return true;
+                }
+            }
+            let newInv = [...s.inventory];
+            for (let i = 0; i < 27; i++) {
+                if (newInv[i].id === 0) {
+                    newInv[i] = { id, count: 1, durability: defaultDurability };
+                    set({ inventory: newInv });
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Try existing stacks (for stackable items)
+        let newHotbar = [...s.hotbar];
+        for (let i = 0; i < 9; i++) {
+            if (newHotbar[i].id === id && newHotbar[i].count < maxStack) {
+                const add = Math.min(count, maxStack - newHotbar[i].count);
                 newHotbar[i].count += add;
-                remaining -= add;
+                count -= add;
+                if (count <= 0) {
+                    set({ hotbar: newHotbar });
+                    return true;
+                }
             }
         }
-        // Try to stack in existing inventory slots
-        for (let i = 0; i < 27 && remaining > 0; i++) {
-            if (newInv[i].id === id && newInv[i].count < 64) {
-                const add = Math.min(remaining, 64 - newInv[i].count);
+
+        let newInv = [...s.inventory];
+        for (let i = 0; i < 27; i++) {
+            if (newInv[i].id === id && newInv[i].count < maxStack) {
+                const add = Math.min(count, maxStack - newInv[i].count);
                 newInv[i].count += add;
-                remaining -= add;
+                count -= add;
+                if (count <= 0) {
+                    set({ inventory: newInv });
+                    return true;
+                }
             }
         }
-        // Try empty hotbar slot
-        for (let i = 0; i < 9 && remaining > 0; i++) {
+
+        // Now try empty slots
+        for (let i = 0; i < 9; i++) {
             if (newHotbar[i].id === 0) {
-                newHotbar[i] = { id, count: remaining };
-                remaining = 0;
+                const add = Math.min(count, maxStack);
+                newHotbar[i] = { id, count: add, durability: undefined };
+                count -= add;
+                if (count <= 0) {
+                    set({ hotbar: newHotbar });
+                    return true;
+                }
             }
         }
-        // Try empty inventory slot
-        for (let i = 0; i < 27 && remaining > 0; i++) {
+
+        for (let i = 0; i < 27; i++) {
             if (newInv[i].id === 0) {
-                newInv[i] = { id, count: remaining };
-                remaining = 0;
+                const add = Math.min(count, maxStack);
+                newInv[i] = { id, count: add, durability: undefined };
+                count -= add;
+                if (count <= 0) {
+                    set({ hotbar: newHotbar, inventory: newInv });
+                    return true;
+                }
             }
         }
 
-        set({ hotbar: newHotbar, inventory: newInv });
-        return remaining === 0;
+        if (count > 0) {
+            set({ hotbar: newHotbar, inventory: newInv });
+        }
+        return count <= 0;
     },
-
     consumeHotbarItem: (slot) => {
         const s = get();
-        if (s.gameMode === 'creative') return; // Infinite in creative
-        const newHotbar = s.hotbar.map(sl => ({ ...sl }));
+        if (s.gameMode === 'creative') return;
+        const newHotbar = [...s.hotbar];
         if (newHotbar[slot].count > 0) {
             newHotbar[slot].count--;
             if (newHotbar[slot].count <= 0) {
@@ -518,7 +593,19 @@ const useGameStore = create<GameState>((set, get) => ({
             set({ hotbar: newHotbar });
         }
     },
-
+    damageTool: (slotIndex) => {
+        const s = get();
+        if (s.gameMode === 'creative') return;
+        const newHotbar = [...s.hotbar];
+        const item = newHotbar[slotIndex];
+        if (item.id !== 0 && item.durability !== undefined) {
+            item.durability -= 1;
+            if (item.durability <= 0) {
+                newHotbar[slotIndex] = emptySlot(); // Break tool
+            }
+            set({ hotbar: newHotbar });
+        }
+    },
     getSelectedBlock: () => {
         const s = get();
         return s.hotbar[s.hotbarSlot]?.id ?? 0;
@@ -529,9 +616,9 @@ const useGameStore = create<GameState>((set, get) => ({
     setCursorItem: (item) => set({ cursorItem: item }),
 
     // ── Crafting ──────────────────────────────────────────
-    craftingGrid: Array(9).fill(0),
+    craftingGrid: makeSlots(9),
     setCraftingGrid: (g) => set({ craftingGrid: g }),
-    inventoryCraftingGrid: Array(4).fill(0),
+    inventoryCraftingGrid: makeSlots(4),
     setInventoryCraftingGrid: (g) => set({ inventoryCraftingGrid: g }),
 
     // ── Furnace ───────────────────────────────────────────
@@ -545,6 +632,73 @@ const useGameStore = create<GameState>((set, get) => ({
         cookTimeTotal: 200,
     },
     setFurnace: (f) => set({ furnace: f }),
+    tickFurnace: () => {
+        const s = get();
+        const f = s.furnace;
+
+        let newBurnRemaining = f.burnTimeRemaining;
+        const recipe = SMELTING_RECIPES.find(r => r.input === f.inputSlot.id);
+        const canCook = recipe !== undefined &&
+            f.inputSlot.count >= 1 &&
+            (f.outputSlot.id === 0 || (f.outputSlot.id === recipe.output && f.outputSlot.count < 64));
+
+        let newCookProgress = f.cookProgress;
+        let consumedFuel = false;
+        let fuelRemaining = f.fuelSlot.count;
+        let fuelId = f.fuelSlot.id;
+        let burnTotal = f.burnTimeTotal;
+
+        if (newBurnRemaining > 0) {
+            newBurnRemaining--;
+        } else if (canCook && FUEL_VALUES[fuelId]) {
+            // Consume fuel
+            burnTotal = FUEL_VALUES[fuelId] * 200;
+            newBurnRemaining = burnTotal;
+            fuelRemaining--;
+            consumedFuel = true;
+            if (fuelRemaining <= 0) fuelId = 0;
+        }
+
+        if (newBurnRemaining > 0 && canCook) {
+            newCookProgress++;
+        } else {
+            newCookProgress = 0;
+        }
+
+        let newOutputSlot = { ...f.outputSlot };
+        let newInputSlot = { ...f.inputSlot };
+
+        if (newCookProgress >= f.cookTimeTotal && canCook) {
+            newCookProgress = 0;
+            newInputSlot.count--;
+            if (newInputSlot.count <= 0) newInputSlot.id = 0;
+
+            if (newOutputSlot.id === 0) {
+                newOutputSlot = { id: recipe!.output, count: recipe!.count };
+            } else {
+                newOutputSlot.count += recipe!.count;
+            }
+        }
+
+        if (
+            newBurnRemaining !== f.burnTimeRemaining ||
+            newCookProgress !== f.cookProgress ||
+            consumedFuel ||
+            newInputSlot.count !== f.inputSlot.count
+        ) {
+            set({
+                furnace: {
+                    inputSlot: newInputSlot,
+                    outputSlot: newOutputSlot,
+                    fuelSlot: { id: fuelId, count: fuelRemaining },
+                    burnTimeRemaining: newBurnRemaining,
+                    burnTimeTotal: burnTotal,
+                    cookProgress: newCookProgress,
+                    cookTimeTotal: recipe ? recipe.duration : 200
+                }
+            });
+        }
+    },
 
     // ── Food / Eat ────────────────────────────────────────
     eatFood: () => {
@@ -562,7 +716,6 @@ const useGameStore = create<GameState>((set, get) => ({
     dayTime: 0.3,
     setDayTime: (t) => set({ dayTime: t }),
     skipNight: () => set({ dayTime: 0.3 }),
-
 
     // ── Mobs ──────────────────────────────────────────────
     mobs: [],
@@ -608,9 +761,10 @@ const useGameStore = create<GameState>((set, get) => ({
     playerName: 'Player',
     setPlayerName: (n) => set({ playerName: n }),
     isMultiplayer: false,
+    setIsMultiplayer: (v) => set({ isMultiplayer: v }),
     connectedPlayers: {},
-    addConnectedPlayer: (id, name, pos) => set((s) => ({
-        connectedPlayers: { ...s.connectedPlayers, [id]: { name, pos } },
+    addConnectedPlayer: (id, name, pos, rot, dimension) => set((s) => ({
+        connectedPlayers: { ...s.connectedPlayers, [id]: { name, pos, rot, dimension } },
     })),
     removeConnectedPlayer: (id) => set((s) => {
         const { [id]: _, ...rest } = s.connectedPlayers;
@@ -689,6 +843,49 @@ const useGameStore = create<GameState>((set, get) => ({
     },
     dragonDefeated: false,
     setDragonDefeated: (v) => set({ dragonDefeated: v }),
+
+    // ── Storage / Persistence ─────────────────────────────
+    saveGame: () => {
+        const s = get();
+        const state: PlayerSaveState = {
+            pos: s.playerPos,
+            rot: [0, 0], // Optional, can add pitch/yaw later
+            inventory: s.inventory.map(slot => slot.id === 0 ? null : slot.id),
+            health: s.health,
+            dayTime: s.dayTime,
+            dimension: s.dimension,
+            seed: s.worldSeed
+        };
+        savePlayerState(state);
+    },
+
+    loadWorldFromStorage: async () => {
+        const state = loadPlayerState();
+        if (state) {
+            // Inventory translation (null index format to InventorySlot format)
+            const loadedInventory = state.inventory.map(id =>
+                id ? { id, count: 64 } : emptySlot()
+            );
+
+            set({
+                playerPos: state.pos,
+                inventory: loadedInventory,
+                health: state.health,
+                dayTime: state.dayTime,
+                dimension: state.dimension,
+                worldSeed: state.seed
+            });
+            return true;
+        }
+        return false;
+    },
+
+    deleteWorld: async () => {
+        await clearAllChunks();
+        clearPlayerState();
+        get().resetWorld();
+        window.location.reload(); // Hard reset
+    }
 }));
 
 export default useGameStore;
