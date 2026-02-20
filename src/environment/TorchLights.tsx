@@ -53,6 +53,9 @@ const TorchLights: React.FC = () => {
 
                 if (!chunk) continue;
 
+                // Extremely fast native C++ array cull before doing 16000 element JS loop
+                if (!chunk.includes(BlockType.TORCH) && !chunk.includes(BlockType.REDSTONE_TORCH)) continue;
+
                 // Restrict Y range to save scanning time: scan around player's Y ± 32
                 const minY = Math.max(0, py - 32);
                 const maxY = Math.min(255, py + 32);

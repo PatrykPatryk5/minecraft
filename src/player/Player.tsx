@@ -933,8 +933,11 @@ const Player: React.FC = () => {
         // ── Camera sync (runs every frame for smooth visuals) ──
         camera.position.copy(pos.current);
         camera.position.y += bobY;
-        s.setPlayerPos([pos.current.x, pos.current.y, pos.current.z]);
-        s.setPlayerRot([camera.rotation.y, camera.rotation.x]);
+
+        const pp = s.playerPos;
+        pp[0] = pos.current.x; pp[1] = pos.current.y; pp[2] = pos.current.z;
+        const pr = s.playerRot;
+        pr[0] = camera.rotation.y; pr[1] = camera.rotation.x;
 
         if (rbRef.current) {
             rbRef.current.setNextKinematicTranslation(pos.current);

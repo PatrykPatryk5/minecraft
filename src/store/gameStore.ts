@@ -140,7 +140,7 @@ export interface GameState {
     bumpVersion: (cx: number, cz: number) => void;
     resetWorld: () => void;
     setWorldSeed: (seed: number) => void;
-    unloadChunkData: (key: string) => void;
+    unloadChunkData: (keys: string[]) => void;
 
     // ── Player ────────────────────────────────────────────
     playerPos: [number, number, number];
@@ -402,11 +402,13 @@ const useGameStore = create<GameState>((set, get) => ({
         });
     },
 
-    unloadChunkData: (key) => set((s) => {
+    unloadChunkData: (keys) => set((s) => {
         const newChunks = { ...s.chunks };
-        delete newChunks[key];
         const newVersions = { ...s.chunkVersions };
-        delete newVersions[key];
+        for (const key of keys) {
+            delete newChunks[key];
+            delete newVersions[key];
+        }
         return { chunks: newChunks, chunkVersions: newVersions };
     }),
 

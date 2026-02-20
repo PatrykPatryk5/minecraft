@@ -17,7 +17,7 @@ import { generateChunk, CHUNK_SIZE, initSeed } from '../core/terrainGen';
 import { generateEndChunk, generateNetherChunk } from '../core/dimensionGen';
 import { EnderDragon } from '../entities/EnderDragon';
 import { WorkerPool } from '../core/workerPool';
-import Chunk from './Chunk';
+import Chunk, { globalTerrainUniforms } from './Chunk';
 import { checkChunkBorders } from '../core/waterSystem';
 import { tickWorld } from '../core/worldTick';
 
@@ -181,7 +181,9 @@ const World: React.FC = () => {
         }
         for (const k of toRemove) {
             loadedKeysRef.current.delete(k);
-            useGameStore.getState().unloadChunkData(k);
+        }
+        if (toRemove.length > 0) {
+            useGameStore.getState().unloadChunkData(toRemove);
         }
 
         // Only update state when chunk list actually changed
@@ -194,7 +196,9 @@ const World: React.FC = () => {
     }, [recalculate, renderDistance]);
 
     // Per-frame: batch send requests + throttled re-render
-    useFrame(() => {
+    useFrame(({ clock }) => {
+        globalTerrainUniforms.uTime.value = clock.elapsedTime;
+
         // Random Ticks (Farming, Grass spread) - Async/Idle to reduce frame jank
         if ('requestIdleCallback' in window) {
             (window as any).requestIdleCallback(() => tickWorld(), { timeout: 50 });
@@ -250,7 +254,7 @@ const World: React.FC = () => {
     return (
         <>
             {visibleChunks.map((c) => (
-                <Chunk key={c.key} cx={c.cx} cz={c.cz} lod={c.lod} dist={c.dist} />
+                <Chunk key={c.key} cx={c.cx} cz={c.cz} lod={0} hasPhysics={c.dist <= 2} />
             ))}
             {dimension === 'end' && !useGameStore.getState().dragonDefeated && <EnderDragon />}
             <fog attach="fog" args={[

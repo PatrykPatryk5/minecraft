@@ -18,16 +18,24 @@ export const tickWorld = () => {
     // However, we can bail early if nothing loaded.
     if (keys.length === 0) return;
 
-    // Filter keys to only "active" chunks near player to save budget?
-    // For now, simple random sampling is fine as long as we don't iterate ALL.
+    const SIMULATION_DISTANCE = 6;
+    const playerPos = s.playerPos;
+    const pcx = Math.floor(playerPos[0] / CHUNK_SIZE);
+    const pcz = Math.floor(playerPos[2] / CHUNK_SIZE);
+
+    const activeKeys = keys.filter(key => {
+        const parts = key.split(',');
+        const distSq = (parseInt(parts[0]) - pcx) ** 2 + (parseInt(parts[1]) - pcz) ** 2;
+        return distSq <= SIMULATION_DISTANCE * SIMULATION_DISTANCE;
+    });
+
+    if (activeKeys.length === 0) return;
 
     // Budget: Attempt to tick roughly this many blocks per frame total.
-    // Minecraft does ~3 ticks per sub-chunk (16x16x16) per game tick (20tps).
-    // Start conservative: 1000 random probes per frame.
-    const TICK_BUDGET = 500; // Reduced from 1000 for performance safety
-    const attemptsPerChunk = Math.ceil(TICK_BUDGET / Math.max(1, keys.length));
+    const TICK_BUDGET = 150; // Optimized budget for strict simulation distance
+    const attemptsPerChunk = Math.ceil(TICK_BUDGET / Math.max(1, activeKeys.length));
 
-    for (const key of keys) {
+    for (const key of activeKeys) {
         const chunk = s.chunks[key];
         const [cx, cz] = key.split(',').map(Number); // Parse only once per chunk if needed? 
         // Actually, parsing per chunk is fine.

@@ -14,7 +14,7 @@ import BlockParticles from './effects/BlockParticles';
 import HUD from './ui/HUD';
 import DebugScreen from './ui/DebugScreen';
 import PauseMenu from './ui/PauseMenu';
-import { EffectComposer, Vignette, SMAA } from '@react-three/postprocessing';
+import { EffectComposer, Vignette, SMAA, N8AO } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
 import { Physics } from '@react-three/rapier';
 import Inventory from './ui/Inventory';
@@ -45,9 +45,8 @@ const LoadingScreen: React.FC<{ caps: RendererCapabilities | null; progress: str
 );
 
 const UnderwaterOverlay = () => {
-    const pos = useGameStore((s) => s.playerPos);
-    const isWater = useGameStore.getState().getBlock(Math.floor(pos[0]), Math.floor(pos[1] + 1.62), Math.floor(pos[2])) === 9;
-    if (!isWater) return null;
+    const isUnderwater = useGameStore((s) => s.isUnderwater);
+    if (!isUnderwater) return null;
     return <div className="water-overlay" />;
 };
 
@@ -62,7 +61,7 @@ const SceneContent: React.FC = () => {
         <>
             <fog attach="fog" args={['#7cb1e8', renderDist * 16 * 0.6, renderDist * 16]} />
             <DayNightCycle />
-            <Physics timeStep="vary">
+            <Physics>
                 <World />
                 <Player />
                 <MobRenderer />
@@ -76,6 +75,7 @@ const SceneContent: React.FC = () => {
 
             {usePostProcessing && isFabulous && (
                 <EffectComposer multisampling={0}>
+                    <N8AO aoRadius={2} intensity={1} color="black" />
                     <SMAA />
                     <Vignette eskil={false} offset={0.1} darkness={0.2} />
                 </EffectComposer>

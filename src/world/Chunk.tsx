@@ -45,7 +45,9 @@ const geoPool: THREE.BufferGeometry[] = [];
 const MAX_POOL = 512;
 
 function getPooledGeo(): THREE.BufferGeometry {
-    return geoPool.pop() || new THREE.BufferGeometry();
+    const geo = geoPool.pop() || new THREE.BufferGeometry();
+    geo.uuid = THREE.MathUtils.generateUUID();
+    return geo;
 }
 
 function returnToPool(geo: THREE.BufferGeometry): void {
@@ -95,14 +97,19 @@ function getSharedBuffer(key: string): MeshBuffer {
 }
 
 // ─── Component ───────────────────────────────────────────
+export const globalTerrainUniforms = {
+    uTime: { value: 0 }
+};
+
 interface ChunkProps {
     cx: number;
     cz: number;
     lod?: 0 | 1 | 2; // 0=full, 1=no AO, 2=simplified
-    dist?: number;
+    hasPhysics?: boolean;
+    key?: string;
 }
 
-const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) => {
+const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = false }) => {
     const key = chunkKey(cx, cz);
     const version = useGameStore((s) => s.chunkVersions[key] ?? 0);
 
@@ -114,9 +121,6 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
 
     const useShadows = useGameStore((s) => s.settings.graphics !== 'fast');
     const [meshData, setMeshData] = React.useState<{ solidGeo: THREE.BufferGeometry | null, waterGeo: THREE.BufferGeometry | null, atlas: THREE.Texture } | null>(null);
-
-    const solidShaderRef = useRef<any>(null);
-    const waterShaderRef = useRef<any>(null);
 
     useEffect(() => {
         return () => {
@@ -150,27 +154,11 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
             const nNz = state.chunks[chunkKey(cx, cz - 1)];
 
             // Data arrays for SOLID mesh
-            const solid = {
-                pos: [] as number[],
-                norm: [] as number[],
-                uv: [] as number[],
-                color: [] as number[],
-                isFlora: [] as number[],
-                isLiquid: [] as number[],
-                ind: [] as number[]
-            };
+            const solid = getSharedBuffer('solid');
             let solidIdx = 0;
 
             // Data arrays for WATER mesh (transparent)
-            const water = {
-                pos: [] as number[],
-                norm: [] as number[],
-                uv: [] as number[],
-                color: [] as number[],
-                isFlora: [] as number[],
-                isLiquid: [] as number[],
-                ind: [] as number[]
-            };
+            const water = getSharedBuffer('water');
             let waterIdx = 0;
 
             // AO Helper
@@ -257,6 +245,15 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
 
                             if (!isTransparent(nbt)) continue;
 
+                            if (lod === 2 && (
+                                bt === BlockType.TALL_GRASS ||
+                                bt === BlockType.FLOWER_RED ||
+                                bt === BlockType.FLOWER_YELLOW ||
+                                (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7)
+                            )) {
+                                continue;
+                            }
+
                             if (bt === nbt && bt !== BlockType.LEAVES) {
                                 if (isLiquidBlock && liquidHeight > neighborLiquidHeight) {
                                     // Draw the connecting face because we are taller!
@@ -276,12 +273,12 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
 
                                 if (corner[1] === 1 && liquidHeight < 1.0) cy0 = y + liquidHeight;
 
-                                target.pos.push(cx0, cy0, cz0);
-                                target.norm.push(face.dir[0], face.dir[1], face.dir[2]);
+                                target.positions.push(cx0, cy0, cz0);
+                                target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
 
                                 const ux = atlasUV.u + face.uv[i][0] * atlasUV.su;
                                 const uy = atlasUV.v + face.uv[i][1] * atlasUV.sv;
-                                target.uv.push(ux, uy);
+                                target.uvs.push(ux, uy);
 
                                 if (lod === 0 && !isWater) {
                                     let aoLevel = 0;
@@ -307,9 +304,9 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                                         aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
                                     }
                                     const br = 1.0 - aoLevel * 0.24; // Increased AO intensity for better block connections
-                                    target.color.push(br, br, br);
+                                    target.colors.push(br, br, br);
                                 } else {
-                                    target.color.push(1.0, 1.0, 1.0);
+                                    target.colors.push(1.0, 1.0, 1.0);
                                 }
 
                                 const isFloraBlock =
@@ -331,7 +328,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                                 }
                             }
 
-                            target.ind.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
+                            target.indices.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
                             if (isWater) waterIdx += 4; else solidIdx += 4;
                         }
                     }
@@ -339,19 +336,19 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
             }
 
             const createGeo = (data: typeof solid) => {
-                if (data.pos.length === 0) return null;
+                if (data.positions.length === 0) return null;
                 const g = getPooledGeo();
-                g.setAttribute('position', new THREE.Float32BufferAttribute(data.pos, 3));
-                g.setAttribute('normal', new THREE.Float32BufferAttribute(data.norm, 3));
-                g.setAttribute('uv', new THREE.Float32BufferAttribute(data.uv, 2));
-                g.setAttribute('color', new THREE.Float32BufferAttribute(data.color, 3));
+                g.setAttribute('position', new THREE.Float32BufferAttribute(data.positions, 3));
+                g.setAttribute('normal', new THREE.Float32BufferAttribute(data.normals, 3));
+                g.setAttribute('uv', new THREE.Float32BufferAttribute(data.uvs, 2));
+                g.setAttribute('color', new THREE.Float32BufferAttribute(data.colors, 3));
                 if ((data as any).isFlora && (data as any).isFlora.length > 0) {
                     g.setAttribute('isFlora', new THREE.Float32BufferAttribute((data as any).isFlora, 1));
                 }
                 if ((data as any).isLiquid && (data as any).isLiquid.length > 0) {
                     g.setAttribute('isLiquid', new THREE.Float32BufferAttribute((data as any).isLiquid, 1));
                 }
-                g.setIndex(data.ind);
+                g.setIndex(data.indices);
                 g.computeBoundingSphere();
                 return g;
             };
@@ -379,15 +376,6 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key, version, v_nPx, v_nNx, v_nPz, v_nNz, lod, cx, cz]);
 
-    useFrame(({ clock }) => {
-        if (solidShaderRef.current) {
-            solidShaderRef.current.uniforms.uTime.value = clock.elapsedTime;
-        }
-        if (waterShaderRef.current) {
-            waterShaderRef.current.uniforms.uTime.value = clock.elapsedTime;
-        }
-    });
-
     if (!meshData) return null;
 
     const renderSolidMesh = () => (
@@ -400,7 +388,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                 roughness={0.9}
                 metalness={0.05}
                 onBeforeCompile={(shader) => {
-                    shader.uniforms.uTime = { value: 0 };
+                    shader.uniforms.uTime = globalTerrainUniforms.uTime;
                     shader.uniforms.uChunkOffset = { value: new THREE.Vector2(cx * CHUNK_SIZE, cz * CHUNK_SIZE) };
                     // Add attribute and uniform
                     shader.vertexShader = shader.vertexShader.replace(
@@ -435,7 +423,6 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                         }
                         `
                     );
-                    solidShaderRef.current = shader;
                 }}
             />
         </mesh>
@@ -444,7 +431,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
     return (
         <group position={[cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE]}>
             {meshData.solidGeo && (
-                dist <= 4 ? (
+                hasPhysics ? (
                     <RigidBody key={meshData.solidGeo.uuid} type="fixed" colliders="trimesh">
                         {renderSolidMesh()}
                     </RigidBody>
@@ -462,7 +449,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                         roughness={0.1}
                         metalness={0.1}
                         onBeforeCompile={(shader) => {
-                            shader.uniforms.uTime = { value: 0 };
+                            shader.uniforms.uTime = globalTerrainUniforms.uTime;
                             shader.uniforms.uChunkOffset = { value: new THREE.Vector2(cx * CHUNK_SIZE, cz * CHUNK_SIZE) };
                             shader.vertexShader = shader.vertexShader.replace(
                                 '#include <common>',
@@ -487,7 +474,6 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                                 }
                                 `
                             );
-                            waterShaderRef.current = shader;
                         }}
                     />
                 </mesh>

@@ -29,7 +29,7 @@ const DayNightCycle: React.FC = () => {
     const graphics = useGameStore((s) => s.settings.graphics);
     const renderDist = useGameStore((s) => s.settings.renderDistance);
     const useShadows = graphics !== 'fast';
-    const shadowMapSize = graphics === 'fabulous' ? 8192 : 4096;
+    const shadowMapSize = graphics === 'fabulous' ? 4096 : 2048;
     const dirLightRef = useRef<THREE.DirectionalLight>(null);
     const ambLightRef = useRef<THREE.AmbientLight>(null);
     const hemiRef = useRef<THREE.HemisphereLight>(null);

@@ -1,21 +1,21 @@
-/**
- * Debug Screen (F3) — shows game mode, seed, overlay state, item count
- */
-
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import useGameStore from '../store/gameStore';
 import { getCachedRendererCaps } from '../core/renderer';
 
 const DebugScreen: React.FC = () => {
     const showDebug = useGameStore((s) => s.showDebug);
     const toggleDebug = useGameStore((s) => s.toggleDebug);
-    const playerPos = useGameStore((s) => s.playerPos);
-    const fps = useGameStore((s) => s.fps);
-    const setFps = useGameStore((s) => s.setFps);
     const renderDistance = useGameStore((s) => s.renderDistance);
-    const dayTime = useGameStore((s) => s.dayTime);
-    const fov = useGameStore((s) => s.fov);
     const gameMode = useGameStore((s) => s.gameMode);
+    const fov = useGameStore((s) => s.fov);
+
+    const fpsRef = useRef<HTMLSpanElement>(null);
+    const xyzRef = useRef<HTMLSpanElement>(null);
+    const blockRef = useRef<HTMLSpanElement>(null);
+    const chunkRef = useRef<HTMLSpanElement>(null);
+    const loadedRef = useRef<HTMLSpanElement>(null);
+    const timeRef = useRef<HTMLSpanElement>(null);
+    const itemsRef = useRef<HTMLSpanElement>(null);
 
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -26,53 +26,71 @@ const DebugScreen: React.FC = () => {
     }, [toggleDebug]);
 
     useEffect(() => {
+        if (!showDebug) return;
+
         let count = 0;
-        let last = performance.now();
+        let lastFpsTime = performance.now();
+        let lastFpsVal = 0;
         let id: number;
+
         const tick = () => {
             count++;
             const now = performance.now();
-            if (now - last >= 1000) { setFps(count); count = 0; last = now; }
+
+            if (now - lastFpsTime >= 1000) {
+                lastFpsVal = count;
+                count = 0;
+                lastFpsTime = now;
+            }
+
+            const state = useGameStore.getState();
+            const [x, y, z] = state.playerPos;
+            const cx = Math.floor(x / 16);
+            const cz = Math.floor(z / 16);
+
+            const chunkCount = Object.keys(state.chunks).length;
+            const timeH = String(Math.floor(state.dayTime * 24)).padStart(2, '0');
+            const timeM = String(Math.floor((state.dayTime * 24 * 60) % 60)).padStart(2, '0');
+            const totalItems = [...state.hotbar, ...state.inventory].reduce((sum, sl) => sum + (sl.id ? sl.count : 0), 0);
+
+            if (fpsRef.current) fpsRef.current.textContent = String(lastFpsVal);
+            if (xyzRef.current) xyzRef.current.textContent = `${x.toFixed(2)} / ${y.toFixed(2)} / ${z.toFixed(2)}`;
+            if (blockRef.current) blockRef.current.textContent = `${Math.floor(x)} ${Math.floor(y)} ${Math.floor(z)}`;
+            if (chunkRef.current) chunkRef.current.textContent = `${cx} / ${cz}`;
+            if (loadedRef.current) loadedRef.current.textContent = String(chunkCount);
+            if (timeRef.current) timeRef.current.textContent = `${timeH}:${timeM}`;
+            if (itemsRef.current) itemsRef.current.textContent = String(totalItems);
+
             id = requestAnimationFrame(tick);
         };
         id = requestAnimationFrame(tick);
         return () => cancelAnimationFrame(id);
-    }, [setFps]);
+    }, [showDebug]);
 
     if (!showDebug) return null;
-
-    const [x, y, z] = playerPos;
-    const cx = Math.floor(x / 16);
-    const cz = Math.floor(z / 16);
-    const state = useGameStore.getState();
-    const chunkCount = Object.keys(state.chunks).length;
-    const timeH = String(Math.floor(dayTime * 24)).padStart(2, '0');
-    const timeM = String(Math.floor((dayTime * 24 * 60) % 60)).padStart(2, '0');
 
     const caps = getCachedRendererCaps();
     const rendererLabel = caps?.label ?? 'Detecting...';
     const gpuName = caps?.gpuName ?? 'Unknown';
     const maxTex = caps?.maxTextureSize ?? '?';
-
-    // Count total items
-    const totalItems = [...state.hotbar, ...state.inventory].reduce((sum, sl) => sum + (sl.id ? sl.count : 0), 0);
+    const seed = useGameStore.getState().worldSeed;
 
     return (
         <div className="debug-screen">
             <div className="debug-left">
                 <p><strong>Minecraft R3F</strong> v2.0 (React 19 + Three.js)</p>
-                <p><strong>{fps}</strong> FPS | {rendererLabel}</p>
+                <p><strong ref={fpsRef}>0</strong> FPS | {rendererLabel}</p>
                 <p>GPU: {gpuName}</p>
                 <p>Max Texture: {maxTex}px</p>
                 <p>&nbsp;</p>
-                <p>XYZ: {x.toFixed(2)} / {y.toFixed(2)} / {z.toFixed(2)}</p>
-                <p>Block: {Math.floor(x)} {Math.floor(y)} {Math.floor(z)}</p>
-                <p>Chunk: {cx} / {cz}</p>
-                <p>Loaded: <strong>{chunkCount}</strong> chunks</p>
+                <p>XYZ: <span ref={xyzRef}>0.00 / 0.00 / 0.00</span></p>
+                <p>Block: <span ref={blockRef}>0 0 0</span></p>
+                <p>Chunk: <span ref={chunkRef}>0 / 0</span></p>
+                <p>Loaded: <strong ref={loadedRef}>0</strong> chunks</p>
                 <p>Render Distance: {renderDistance} | FOV: {fov}°</p>
-                <p>Time: {timeH}:{timeM}</p>
+                <p>Time: <span ref={timeRef}>00:00</span></p>
                 <p>Mode: <strong>{gameMode.toUpperCase()}</strong></p>
-                <p>Items: {totalItems} | Seed: {state.worldSeed}</p>
+                <p>Items: <span ref={itemsRef}>0</span> | Seed: {seed}</p>
                 <p>&nbsp;</p>
                 <p>E — inventory | C — crafting | ESC — pause</p>
             </div>
