@@ -11,7 +11,7 @@ import { BLOCK_DATA, BlockType } from './blockTypes';
 
 const TEX_SIZE = 16;
 const cache = new Map<string, THREE.CanvasTexture>();
-const materialCache = new Map<string, THREE.MeshLambertMaterial>();
+const materialCache = new Map<string, THREE.MeshStandardMaterial>();
 
 // ─── Deterministic RNG ───────────────────────────────────
 function sRng(seed: number): () => number {
@@ -57,14 +57,20 @@ function drawStone(ctx: CanvasRenderingContext2D, seed: number) {
     const base: RGB = [125, 125, 125];
     // Stone has subtle gray variation with darker cracks
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        const v = (rng() - 0.5) * 25;
+        const v = (rng() - 0.5) * 35; // Increased variance
         px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
     }
+    // High-frequency detail noise
+    for (let i = 0; i < 40; i++) {
+        const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
+        const v = (rng() - 0.5) * 50;
+        px(ctx, sx, sy, base[0] + v, base[1] + v, base[2] + v);
+    }
     // Dark crack lines
-    const dark: RGB = [100, 100, 100];
-    for (let i = 0; i < 4; i++) {
+    const dark: RGB = [95, 95, 95];
+    for (let i = 0; i < 6; i++) { // Increased crack count
         let cx = (rng() * 14 + 1) | 0, cy = (rng() * 14 + 1) | 0;
-        for (let j = 0; j < 3 + (rng() * 3 | 0); j++) {
+        for (let j = 0; j < 3 + (rng() * 4 | 0); j++) {
             px(ctx, cx & 15, cy & 15, dark[0], dark[1], dark[2]);
             cx += rng() > 0.5 ? 1 : 0;
             cy += rng() > 0.5 ? 1 : 0;
@@ -94,13 +100,20 @@ function drawCobble(ctx: CanvasRenderingContext2D, seed: number) {
 function drawDirt(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        const v = rng() * 30 - 15;
+        const v = rng() * 45 - 22; // Increased variance
         px(ctx, x, y, 134 + v, 96 + v * 0.7, 67 + v * 0.5);
     }
-    // Small pebble spots
-    for (let i = 0; i < 5; i++) {
+    // High-frequency detail noise (pebbles and dirt clumps)
+    for (let i = 0; i < 20; i++) {
+        const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
+        const v = rng() > 0.5 ? 30 : -30;
+        px(ctx, sx, sy, 134 + v, 96 + v * 0.7, 67 + v * 0.5);
+    }
+    // Real pebbles
+    for (let i = 0; i < 8; i++) {
         const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
-        px(ctx, sx, sy, 115, 82, 55);
+        px(ctx, sx, sy, 105, 75, 50); // Darker
+        px(ctx, sx + 1, sy, 140, 100, 70); // Highlight
     }
 }
 
@@ -126,20 +139,27 @@ function drawGrassSide(ctx: CanvasRenderingContext2D, seed: number) {
 function drawGrassTop(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        const v = rng() * 35 - 17;
+        const v = rng() * 45 - 22; // Increased variance
         px(ctx, x, y, 90 + v * 0.5, 155 + v, 40 + v * 0.3);
     }
-    for (let i = 0; i < 8; i++) {
+    // Small grass blades
+    for (let i = 0; i < 20; i++) { // More blades
         const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
         px(ctx, sx, sy, 70 + (rng() * 20 | 0), 140 + (rng() * 15 | 0), 30);
+        px(ctx, sx, sy - 1, 90 + (rng() * 20 | 0), 180 + (rng() * 15 | 0), 40); // Highlight tip
     }
 }
 
 function drawSand(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        const v = rng() * 18 - 9;
+        const v = rng() * 26 - 13; // Increased variance
         px(ctx, x, y, 219 + v, 206 + v * 0.9, 163 + v * 0.6);
+    }
+    // Small dark grains
+    for (let i = 0; i < 30; i++) {
+        const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
+        px(ctx, sx, sy, 190, 175, 130);
     }
 }
 
@@ -149,13 +169,14 @@ function drawOakLogSide(ctx: CanvasRenderingContext2D, seed: number) {
     for (let y = 0; y < 16; y++) {
         const stripe = y % 4 === 0 ? -15 : 0;
         for (let x = 0; x < 16; x++) {
-            const v = rng() * 15 - 7 + stripe;
+            const v = rng() * 25 - 12 + stripe; // Increased variance
             px(ctx, x, y, bark[0] + v, bark[1] + v * 0.8, bark[2] + v * 0.5);
         }
     }
-    // Vertical bark lines
-    for (let x = 0; x < 16; x += 3 + (rng() * 2 | 0)) {
-        for (let y = 0; y < 16; y++) if (rng() < 0.3) px(ctx, x, y, 85, 65, 38);
+    // Vertical bark lines (more pronounced)
+    for (let x = 0; x < 16; x += 2 + (rng() * 2 | 0)) {
+        for (let y = 0; y < 16; y++) if (rng() < 0.4) px(ctx, x, y, 75, 55, 30); // Darker furrows
+        for (let y = 0; y < 16; y++) if (rng() < 0.2) px(ctx, x + 1, y, 125, 100, 65); // Lighter edges
     }
 }
 
@@ -199,7 +220,7 @@ function drawPlanks(ctx: CanvasRenderingContext2D, base: RGB, seed: number) {
 function drawLeaves(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        if (rng() < 0.15) { px(ctx, x, y, 20, 50, 15); continue; } // gaps (dark)
+        if (rng() < 0.05) continue; // transparent gaps (no px drawn) - made less transparent
         const v = rng() * 40 - 20;
         px(ctx, x, y, 45 + v * 0.5, 120 + v, 25 + v * 0.3);
     }
@@ -244,17 +265,16 @@ function drawBricks(ctx: CanvasRenderingContext2D, seed: number) {
 
 function drawGlass(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
-    // Clear center
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        px(ctx, x, y, 200 + (rng() * 10 | 0), 230 + (rng() * 10 | 0), 255);
-    }
     // Border frame (lighter edge)
     for (let i = 0; i < 16; i++) {
         px(ctx, i, 0, 180, 210, 235); px(ctx, i, 15, 180, 210, 235);
         px(ctx, 0, i, 180, 210, 235); px(ctx, 15, i, 180, 210, 235);
     }
-    // Highlight corner
+    // Highlight corner reflection
     px(ctx, 1, 1, 245, 250, 255); px(ctx, 2, 1, 240, 248, 255); px(ctx, 1, 2, 240, 248, 255);
+    // A couple streaks
+    px(ctx, 3, 3, 220, 230, 245); px(ctx, 4, 3, 220, 230, 245);
+    px(ctx, 12, 12, 220, 230, 245); px(ctx, 12, 11, 220, 230, 245);
 }
 
 function drawTNT(ctx: CanvasRenderingContext2D, face: string, seed: number) {
@@ -296,13 +316,44 @@ function drawTNT(ctx: CanvasRenderingContext2D, face: string, seed: number) {
 
 function drawCraftingTop(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
-    // Wood base
-    const base: RGB = [165, 120, 70];
-    fillNoise(ctx, base, 15, seed);
-    // 2x2 grid (darker lines at center)
-    for (let i = 0; i < 16; i++) {
-        px(ctx, 7, i, 120, 85, 45); px(ctx, 8, i, 120, 85, 45);
-        px(ctx, i, 7, 120, 85, 45); px(ctx, i, 8, 120, 85, 45);
+    const base: RGB = [190, 140, 80];
+    fillNoise(ctx, base, 10, seed);
+
+    // 3x3 grid (dark lines)
+    ctx.fillStyle = '#8B6B3E';
+    for (const line of [4, 5, 10, 11]) {
+        ctx.fillRect(0, line, 16, 1);
+        ctx.fillRect(line, 0, 1, 16);
+    }
+
+    // Outer border
+    ctx.strokeStyle = '#5c4120';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, 0, 16, 16);
+
+    // Corners
+    ctx.fillStyle = '#634725';
+    ctx.fillRect(0, 0, 2, 2); ctx.fillRect(14, 0, 2, 2);
+    ctx.fillRect(0, 14, 2, 2); ctx.fillRect(14, 14, 2, 2);
+}
+
+function drawCraftingSide(ctx: CanvasRenderingContext2D, face: string, seed: number) {
+    drawPlanks(ctx, [165, 120, 70], seed);
+
+    // Top border connecting to the generic plank texture
+    for (let x = 0; x < 16; x++) px(ctx, x, 0, 190, 140, 80);
+
+    // Add tools depending on face
+    if (face === 'front' || face === 'left') {
+        // Saw
+        ctx.fillStyle = '#aaaaaa'; ctx.fillRect(4, 5, 8, 2);
+        ctx.fillStyle = '#664422'; ctx.fillRect(12, 5, 2, 3);
+        px(ctx, 4, 7, 170, 170, 170); px(ctx, 6, 7, 170, 170, 170); px(ctx, 8, 7, 170, 170, 170);
+    } else {
+        // Scissors / Hammer
+        ctx.fillStyle = '#aaaaaa'; ctx.fillRect(6, 4, 3, 4);
+        ctx.fillStyle = '#664422'; ctx.fillRect(7, 8, 1, 5);
+        ctx.fillStyle = '#444'; ctx.fillRect(5, 3, 5, 2);
     }
 }
 
@@ -488,7 +539,7 @@ function drawChest(ctx: CanvasRenderingContext2D, face: string, seed: number) {
     const rng = sRng(seed);
     const base: RGB = [160, 120, 60];
     fillNoise(ctx, base, 12, seed);
-    if (face === 'side') {
+    if (face === 'front') {
         // Latch
         px(ctx, 7, 6, 50, 45, 40); px(ctx, 8, 6, 50, 45, 40);
         px(ctx, 7, 7, 60, 55, 45); px(ctx, 8, 7, 60, 55, 45);
@@ -542,7 +593,7 @@ function drawBed(ctx: CanvasRenderingContext2D, face: string, seed: number) {
         for (let y = 0; y < 4; y++) for (let x = 0; x < 16; x++) {
             px(ctx, x, y, 220 + (rng() * 30 | 0), 220 + (rng() * 30 | 0), 220 + (rng() * 30 | 0));
         }
-    } else if (face === 'side') {
+    } else if (face !== 'bottom') {
         // Wood legs/frame at bottom
         drawPlanks(ctx, [107, 84, 51], seed);
         // Blanket on top
@@ -560,7 +611,7 @@ function drawDoor(ctx: CanvasRenderingContext2D, face: string, seed: number) {
     const base: RGB = [107, 84, 51];
     fillNoise(ctx, base, 15, seed);
 
-    if (face === 'side') {
+    if (face !== 'top' && face !== 'bottom') {
         // Frame
         for (let y = 0; y < 16; y++) {
             px(ctx, 0, y, 85, 65, 40); px(ctx, 15, y, 85, 65, 40);
@@ -584,7 +635,7 @@ function drawFence(ctx: CanvasRenderingContext2D, seed: number) {
 
 // ─── Main Texture Creation (MC-Accurate) ──────────────────
 
-function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 'top' | 'bottom' | 'side', seed: number): void {
+function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right', seed: number): void {
     const data = BLOCK_DATA[blockId];
     if (!data) return;
 
@@ -602,8 +653,8 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.DIRT: drawDirt(ctx, seed); return;
         case BlockType.GRASS:
             if (face === 'top') drawGrassTop(ctx, seed);
-            else if (face === 'side') drawGrassSide(ctx, seed);
-            else drawDirt(ctx, seed);
+            else if (face === 'bottom') drawDirt(ctx, seed);
+            else drawGrassSide(ctx, seed);
             return;
         case BlockType.SAND: drawSand(ctx, seed); return;
         case BlockType.OAK_LOG:
@@ -648,11 +699,12 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.BOOKSHELF: drawBookshelf(ctx, face, seed); return;
         case BlockType.CRAFTING:
             if (face === 'top') drawCraftingTop(ctx, seed);
-            else drawPlanks(ctx, [165, 120, 70], seed);
+            else if (face === 'bottom') drawPlanks(ctx, [165, 120, 70], seed);
+            else drawCraftingSide(ctx, face, seed);
             return;
         case BlockType.FURNACE:
         case BlockType.FURNACE_ON:
-            drawFurnaceSide(ctx, face === 'side', blockId === BlockType.FURNACE_ON, seed); return;
+            drawFurnaceSide(ctx, face === 'front', blockId === BlockType.FURNACE_ON, seed); return;
         case BlockType.CHEST: drawChest(ctx, face, seed); return;
         case BlockType.CACTUS: drawCactus(ctx, face, seed); return;
         case BlockType.MELON: drawMelon(ctx, face, seed); return;
@@ -984,7 +1036,7 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.ENDER_CHEST:
             drawChest(ctx, face, seed + 5000);
             // Replace colors with dark End theme
-            if (face === 'side') {
+            if (face !== 'top' && face !== 'bottom') {
                 for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
                     const v = rng() * 12 - 6;
                     px(ctx, x, y, 13 + v, 17 + v, 23 + v);
@@ -1115,7 +1167,7 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
 
 // ─── Texture & Material Creation ─────────────────────────
 
-function createTexture(blockId: number, face: 'top' | 'bottom' | 'side'): THREE.CanvasTexture {
+function createTexture(blockId: number, face: 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right'): THREE.CanvasTexture {
     const key = `${blockId}_${face}`;
     const cached = cache.get(key);
     if (cached) return cached;
@@ -1153,8 +1205,8 @@ function createFallbackTexture(): THREE.CanvasTexture {
     return t;
 }
 
-/** Get cached material for a block face — MeshLambertMaterial for performance */
-export function getBlockMaterial(blockId: number, face: 'top' | 'bottom' | 'side'): THREE.MeshLambertMaterial {
+/** Get cached material for a block face — MeshStandardMaterial for better graphics */
+export function getBlockMaterial(blockId: number, face: 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right'): THREE.MeshStandardMaterial {
     const key = `${blockId}_${face}`;
     const cached = materialCache.get(key);
     if (cached) return cached;
@@ -1168,7 +1220,7 @@ export function getBlockMaterial(blockId: number, face: 'top' | 'bottom' | 'side
     const isLava = blockId === BlockType.LAVA;
     const isEmissive = data?.emissive || blockId === BlockType.GLOWSTONE || blockId === BlockType.TORCH || isLava;
 
-    const mat = new THREE.MeshLambertMaterial({
+    const mat = new THREE.MeshStandardMaterial({
         map: tex,
         transparent: data?.transparent ?? false,
         opacity: isWater ? 0.55 : isGlass ? 0.7 : isLeaf ? 0.9 : 1,
@@ -1177,6 +1229,8 @@ export function getBlockMaterial(blockId: number, face: 'top' | 'bottom' | 'side
         emissiveIntensity: isLava ? 0.8 : isEmissive ? 0.5 : 0,
         alphaTest: isLeaf ? 0.15 : 0,
         vertexColors: true,
+        roughness: 0.9,
+        metalness: 0.05
     });
 
     materialCache.set(key, mat);
@@ -1189,8 +1243,11 @@ export function preloadAllTextures(): void {
         const numId = Number(id);
         if (numId >= 100) continue;
         createTexture(numId, 'top');
-        createTexture(numId, 'side');
         createTexture(numId, 'bottom');
+        createTexture(numId, 'front');
+        createTexture(numId, 'back');
+        createTexture(numId, 'left');
+        createTexture(numId, 'right');
     }
 }
 
@@ -1240,14 +1297,21 @@ export function getBlockIcon(blockId: number): string {
         const topSeed = blockId * 1000 + 1;
         drawBlockTexture(topCtx, blockId, 'top', topSeed);
 
-        const sideTex = document.createElement('canvas');
-        sideTex.width = TEX_SIZE; sideTex.height = TEX_SIZE;
-        const sideCtx = sideTex.getContext('2d')!;
-        const sideSeed = blockId * 1000 + 3;
-        drawBlockTexture(sideCtx, blockId, 'side', sideSeed);
+        const leftTex = document.createElement('canvas');
+        leftTex.width = TEX_SIZE; leftTex.height = TEX_SIZE;
+        const leftCtx = leftTex.getContext('2d')!;
+        const leftSeed = blockId * 1000 + 3;
+        drawBlockTexture(leftCtx, blockId, 'left', leftSeed);
+
+        const rightTex = document.createElement('canvas');
+        rightTex.width = TEX_SIZE; rightTex.height = TEX_SIZE;
+        const rightCtx = rightTex.getContext('2d')!;
+        const rightSeed = blockId * 1000 + 4;
+        drawBlockTexture(rightCtx, blockId, 'right', rightSeed);
 
         const topImgData = topCtx.getImageData(0, 0, TEX_SIZE, TEX_SIZE);
-        const sideImgData = sideCtx.getImageData(0, 0, TEX_SIZE, TEX_SIZE);
+        const leftImgData = leftCtx.getImageData(0, 0, TEX_SIZE, TEX_SIZE);
+        const rightImgData = rightCtx.getImageData(0, 0, TEX_SIZE, TEX_SIZE);
 
         const cX = size / 2;
         const cY = size / 2 - 2;
@@ -1272,7 +1336,7 @@ export function getBlockIcon(blockId: number): string {
         for (let ty = 0; ty < TEX_SIZE; ty++) {
             for (let tx = 0; tx < TEX_SIZE; tx++) {
                 const idx = (ty * TEX_SIZE + tx) * 4;
-                const r = sideImgData.data[idx], g = sideImgData.data[idx + 1], b = sideImgData.data[idx + 2];
+                const r = leftImgData.data[idx], g = leftImgData.data[idx + 1], b = leftImgData.data[idx + 2];
                 const u = tx / TEX_SIZE, v = ty / TEX_SIZE;
                 const px2 = cX + (u - 1) * sc;
                 const py2 = cY + u * halfH + v * sc * 0.9 - halfH * 0.1;
@@ -1285,7 +1349,7 @@ export function getBlockIcon(blockId: number): string {
         for (let ty = 0; ty < TEX_SIZE; ty++) {
             for (let tx = 0; tx < TEX_SIZE; tx++) {
                 const idx = (ty * TEX_SIZE + tx) * 4;
-                const r = sideImgData.data[idx], g = sideImgData.data[idx + 1], b = sideImgData.data[idx + 2];
+                const r = rightImgData.data[idx], g = rightImgData.data[idx + 1], b = rightImgData.data[idx + 2];
                 const u = tx / TEX_SIZE, v = ty / TEX_SIZE;
                 const px2 = cX + u * sc;
                 const py2 = cY - u * halfH + halfH + v * sc * 0.9 - halfH * 0.1;
@@ -1351,9 +1415,8 @@ export function getAtlasTexture(): THREE.CanvasTexture {
     // Disable smoothing for sharp upscaled pixels
     ctx.imageSmoothingEnabled = false;
 
-    // Fill with magenta for debug
-    ctx.fillStyle = '#ff00ff';
-    ctx.fillRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
+    // Clear canvas to ensure transparency
+    ctx.clearRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
 
     let currentSlot = 0;
 
@@ -1405,7 +1468,7 @@ export function getAtlasTexture(): THREE.CanvasTexture {
     // Iterate all blocks
     Object.keys(BLOCK_DATA).forEach((key) => {
         const id = Number(key);
-        const faces: ('top' | 'bottom' | 'side')[] = ['top', 'bottom', 'side'];
+        const faces: ('top' | 'bottom' | 'front' | 'back' | 'left' | 'right')[] = ['top', 'bottom', 'front', 'back', 'left', 'right'];
 
         for (const face of faces) {
             const cacheKey = `${id}_${face}`;
@@ -1417,11 +1480,12 @@ export function getAtlasTexture(): THREE.CanvasTexture {
     atlasTexture.magFilter = THREE.NearestFilter;
     atlasTexture.minFilter = THREE.NearestFilter;
     atlasTexture.colorSpace = THREE.SRGBColorSpace;
+    atlasTexture.premultiplyAlpha = true; // Important for alphaTest transparency blending
 
     return atlasTexture;
 }
 
-export function getAtlasUV(blockId: number, face: 'top' | 'bottom' | 'side'): AtlasUV {
+export function getAtlasUV(blockId: number, face: 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right'): AtlasUV {
     if (!atlasTexture) getAtlasTexture(); // Ensure init
     const uv = atlasUVs.get(`${blockId}_${face}`);
     if (!uv) {

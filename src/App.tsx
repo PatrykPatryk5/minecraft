@@ -3,6 +3,7 @@
  */
 
 import React, { Suspense, useEffect, useState, useRef } from 'react';
+import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import World from './world/World';
 import Player from './player/Player';
@@ -13,7 +14,7 @@ import BlockParticles from './effects/BlockParticles';
 import HUD from './ui/HUD';
 import DebugScreen from './ui/DebugScreen';
 import PauseMenu from './ui/PauseMenu';
-import { EffectComposer, SMAA, SSAO } from '@react-three/postprocessing';
+import { EffectComposer, SMAA, SSAO, Bloom, Vignette } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
 import Inventory from './ui/Inventory';
 import CraftingScreen from './ui/CraftingScreen';
@@ -42,11 +43,12 @@ const LoadingScreen: React.FC<{ caps: RendererCapabilities | null; progress: str
 
 const SceneContent: React.FC = () => {
     const graphics = useGameStore((s) => s.settings.graphics);
-    const usePostProcessing = graphics === 'fabulous';
+    const usePostProcessing = graphics !== 'fast';
+    const isFabulous = graphics === 'fabulous';
 
     return (
         <>
-            <fog attach="fog" args={['#87ceeb', 60, 220]} />
+            <fog attach="fog" args={['#3b82f6', 240, 500]} />
             <DayNightCycle />
             <World />
             <Player />
@@ -56,12 +58,12 @@ const SceneContent: React.FC = () => {
             <MobRenderer />
             <MultiplayerRenderer />
 
-            {usePostProcessing && (
+            {usePostProcessing && isFabulous && (
                 <EffectComposer multisampling={0}>
                     <SSAO
                         samples={16}
-                        radius={0.2}
-                        intensity={15}
+                        radius={0.12}
+                        intensity={10}
                         luminanceInfluence={0.6}
                     />
                     <SMAA />
@@ -136,7 +138,7 @@ const App: React.FC = () => {
                         alpha: false,
                         failIfMajorPerformanceCaveat: false,
                     }}
-                    shadows
+                    shadows={{ type: THREE.PCFSoftShadowMap }}
                     dpr={[1, Math.min(window.devicePixelRatio, 2)]}
                     style={{ width: '100%', height: '100%' }}
                     onContextMenu={(e) => e.preventDefault()}

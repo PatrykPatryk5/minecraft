@@ -772,7 +772,9 @@ const useGameStore = create<GameState>((set, get) => ({
     setMiningProgress: (p) => set({ miningProgressValue: p }),
 
     // ── Multiplayer ───────────────────────────────────────
-    playerId: crypto.randomUUID(),
+    // Provide a Math.random fallback since crypto.randomUUID() is unavailable on non-HTTPS LAN connections
+    playerId: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() :
+        `muzo-${Math.random().toString(36).substring(2, 10)}-${Date.now()}`,
     playerName: 'Player',
     setPlayerName: (n) => set({ playerName: n }),
     isMultiplayer: false,

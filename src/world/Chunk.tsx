@@ -33,12 +33,6 @@ const FACES: FaceDef[] = [
     { dir: [0, 0, -1], corners: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]], uv: [[0, 0], [1, 0], [1, 1], [0, 1]], name: 'back' },
 ];
 
-function faceType(name: string): 'top' | 'bottom' | 'side' {
-    if (name === 'top') return 'top';
-    if (name === 'bottom') return 'bottom';
-    return 'side';
-}
-
 function isTransparent(bt: number): boolean {
     if (!bt) return true;
     return BLOCK_DATA[bt]?.transparent ?? true;
@@ -202,10 +196,9 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                         }
 
                         if (!isTransparent(nbt)) continue;
-                        if (bt === nbt) continue;
+                        if (bt === nbt && bt !== BlockType.LEAVES) continue;
 
-                        const ft = faceType(face.name);
-                        const atlasUV = getAtlasUV(bt, ft);
+                        const atlasUV = getAtlasUV(bt, face.name);
 
                         let waterHeight = 1.0;
                         if (isWater) {
@@ -254,7 +247,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                                     const c = isSolidAt(lx + ox, y + oy, lz + dz);
                                     aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
                                 }
-                                const br = 1.0 - aoLevel * 0.18;
+                                const br = 1.0 - aoLevel * 0.24; // Increased AO intensity for better block connections
                                 target.color.push(br, br, br);
                             } else {
                                 target.color.push(1.0, 1.0, 1.0);
@@ -297,19 +290,28 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
     return (
         <group position={[cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE]}>
             {meshData.solidGeo && (
-                <mesh geometry={meshData.solidGeo} frustumCulled>
-                    <meshLambertMaterial map={meshData.atlas} vertexColors alphaTest={0.1} transparent={false} />
+                <mesh geometry={meshData.solidGeo} frustumCulled castShadow receiveShadow>
+                    <meshStandardMaterial
+                        map={meshData.atlas}
+                        vertexColors
+                        alphaTest={0.1}
+                        transparent={false}
+                        roughness={0.9}
+                        metalness={0.05}
+                    />
                 </mesh>
             )}
             {meshData.waterGeo && (
-                <mesh geometry={meshData.waterGeo} frustumCulled renderOrder={1}>
-                    <meshLambertMaterial
+                <mesh geometry={meshData.waterGeo} frustumCulled renderOrder={1} receiveShadow>
+                    <meshStandardMaterial
                         map={meshData.atlas}
                         vertexColors
                         transparent={true}
                         opacity={0.8}
                         side={THREE.DoubleSide}
                         depthWrite={false}
+                        roughness={0.1}
+                        metalness={0.1}
                     />
                 </mesh>
             )}

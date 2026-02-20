@@ -43,7 +43,7 @@ const DayNightCycle: React.FC = () => {
     }), []);
 
     const skyColors = useMemo(() => ({
-        day: new THREE.Color('#87ceeb'),
+        day: new THREE.Color('#3b82f6'), // Richer, deeper blue for cloud contrast
         dawn: new THREE.Color('#cc7744'),
         night: new THREE.Color('#0a0a1a'),
     }), []);
@@ -82,8 +82,8 @@ const DayNightCycle: React.FC = () => {
                 intensity = lerp(0.4, 0.15, p);
             } else {
                 color = sunColors.day;
-                // Much softer base sunlight to prevent blowing out colors
-                intensity = 0.4 + sunFactor * 0.3;
+                // Stronger sunlight for PBR MeshStandardMaterial
+                intensity = 0.6 + sunFactor * 0.5;
             }
 
             dirLightRef.current.color.copy(color);
@@ -137,14 +137,23 @@ const DayNightCycle: React.FC = () => {
         <>
             <Sky
                 sunPosition={[sunX, sunY, 50]}
-                turbidity={isNight ? 0 : 8}
-                rayleigh={isNight ? 0 : 2.5}
+                turbidity={isNight ? 0 : 1}
+                rayleigh={isNight ? 0 : 0.5}
                 mieCoefficient={0.005}
-                mieDirectionalG={0.85}
+                mieDirectionalG={0.7}
             />
             {isNight && <Stars radius={300} depth={50} count={7000} factor={4} saturation={0} fade speed={1} />}
             <ambientLight ref={ambLightRef} intensity={0.4} />
-            <directionalLight ref={dirLightRef} position={[sunX, sunY, 50]} intensity={0.8} castShadow={false} />
+            <directionalLight
+                ref={dirLightRef}
+                position={[sunX, sunY, 50]}
+                intensity={0.8}
+                castShadow={true}
+                shadow-bias={-0.001}
+                shadow-mapSize={[2048, 2048]}
+            >
+                <orthographicCamera attach="shadow-camera" args={[-128, 128, 128, -128, 1, 500]} />
+            </directionalLight>
             <hemisphereLight ref={hemiRef} args={['#87ceeb', '#553322', 0.3]} />
         </>
     );
