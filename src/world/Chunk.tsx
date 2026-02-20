@@ -72,6 +72,7 @@ interface MeshBuffer {
     colors: number[];
     indices: number[];
     isFlora: number[];
+    isLiquid: number[];
 }
 
 const SHARED_GROUPS = new Map<string, MeshBuffer>();
@@ -79,7 +80,7 @@ const SHARED_GROUPS = new Map<string, MeshBuffer>();
 function getSharedBuffer(key: string): MeshBuffer {
     let b = SHARED_GROUPS.get(key);
     if (!b) {
-        b = { positions: [], normals: [], uvs: [], colors: [], indices: [], isFlora: [] };
+        b = { positions: [], normals: [], uvs: [], colors: [], indices: [], isFlora: [], isLiquid: [] };
         SHARED_GROUPS.set(key, b);
     }
     // Clear for reuse
@@ -89,6 +90,7 @@ function getSharedBuffer(key: string): MeshBuffer {
     b.colors.length = 0;
     b.indices.length = 0;
     b.isFlora.length = 0;
+    b.isLiquid.length = 0;
     return b;
 }
 
@@ -140,6 +142,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
             uv: [] as number[],
             color: [] as number[],
             isFlora: [] as number[],
+            isLiquid: [] as number[],
             ind: [] as number[]
         };
         let solidIdx = 0;
@@ -151,6 +154,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
             uv: [] as number[],
             color: [] as number[],
             isFlora: [] as number[],
+            isLiquid: [] as number[],
             ind: [] as number[]
         };
         let waterIdx = 0;
@@ -180,6 +184,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                     const bt = chunkData[blockIndex(lx, y, lz)];
                     if (!bt) continue;
 
+                    const isLiquidBlock = bt === BlockType.WATER || bt === BlockType.LAVA;
                     const isWater = bt === BlockType.WATER;
                     const target = isWater ? water : solid;
 
@@ -207,11 +212,11 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
 
                         const atlasUV = getAtlasUV(bt, face.name);
 
-                        let waterHeight = 1.0;
-                        if (isWater) {
+                        let liquidHeight = 1.0;
+                        if (isLiquidBlock) {
                             let up = 0;
                             if (y < MAX_HEIGHT - 1) up = chunkData[blockIndex(lx, y + 1, lz)];
-                            if (up !== BlockType.WATER) waterHeight = 0.88;
+                            if (up !== bt) liquidHeight = 0.88;
                         }
 
                         const baseIdx = isWater ? waterIdx : solidIdx;
@@ -222,7 +227,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                             let cy0 = y + corner[1];
                             const cz0 = lz + corner[2];
 
-                            if (corner[1] === 1 && waterHeight < 1.0) cy0 = y + waterHeight;
+                            if (corner[1] === 1 && liquidHeight < 1.0) cy0 = y + liquidHeight;
 
                             target.pos.push(cx0, cy0, cz0);
                             target.norm.push(face.dir[0], face.dir[1], face.dir[2]);
@@ -273,6 +278,14 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                                 const isTopVert = corner[1] > 0;
                                 const swayLevel = isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0;
                                 solid.isFlora.push(swayLevel);
+                                target.isLiquid.push(0.0);
+                            }
+
+                            // Add Liquid attributes
+                            if (isLiquidBlock && corner[1] > 0 && liquidHeight < 1.0) {
+                                target.isLiquid.push(1.0); // Only animate top face if it's open
+                            } else if (isWater) {
+                                target.isLiquid.push(0.0);
                             }
                         }
 
@@ -292,6 +305,9 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
             g.setAttribute('color', new THREE.Float32BufferAttribute(data.color, 3));
             if ((data as any).isFlora && (data as any).isFlora.length > 0) {
                 g.setAttribute('isFlora', new THREE.Float32BufferAttribute((data as any).isFlora, 1));
+            }
+            if ((data as any).isLiquid && (data as any).isLiquid.length > 0) {
+                g.setAttribute('isLiquid', new THREE.Float32BufferAttribute((data as any).isLiquid, 1));
             }
             g.setIndex(data.ind);
             g.computeBoundingSphere();
@@ -317,6 +333,9 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
         if (meshData && meshData.solidGeo && meshData.solidGeo.userData && meshData.solidGeo.userData.shader) {
             meshData.solidGeo.userData.shader.uniforms.uTime.value = clock.elapsedTime;
         }
+        if (meshData && meshData.waterGeo && meshData.waterGeo.userData && meshData.waterGeo.userData.shader) {
+            meshData.waterGeo.userData.shader.uniforms.uTime.value = clock.elapsedTime;
+        }
     });
 
     if (!meshData) return null;
@@ -341,6 +360,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                                     `
                                     #include <common>
                                     attribute float isFlora;
+                                    attribute float isLiquid;
                                     uniform float uTime;
                                     `
                                 );
@@ -356,6 +376,11 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                                         float swayZ = cos(position.z * 2.0 + position.y * 3.0 + (speed * 1.2)) * 0.08 * isFlora;
                                         transformed.x += swayX;
                                         transformed.z += swayZ;
+                                    }
+                                    if (isLiquid > 0.0) {
+                                        float speed = uTime * 1.5;
+                                        float wave = sin(position.x * 2.0 + position.z * 2.0 + speed) * 0.06 * isLiquid;
+                                        transformed.y += wave;
                                     }
                                     `
                                 );
@@ -378,6 +403,32 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                         depthWrite={false}
                         roughness={0.1}
                         metalness={0.1}
+                        onBeforeCompile={(shader) => {
+                            shader.uniforms.uTime = { value: 0 };
+                            shader.vertexShader = shader.vertexShader.replace(
+                                '#include <common>',
+                                `
+                                #include <common>
+                                attribute float isLiquid;
+                                uniform float uTime;
+                                `
+                            );
+
+                            shader.vertexShader = shader.vertexShader.replace(
+                                '#include <begin_vertex>',
+                                `
+                                #include <begin_vertex>
+                                if (isLiquid > 0.0) {
+                                    float speed = uTime * 1.5;
+                                    float wave = sin(position.x * 2.0 + position.z * 2.0 + speed) * 0.06 * isLiquid;
+                                    transformed.y += wave;
+                                }
+                                `
+                            );
+                            if (meshData.waterGeo) {
+                                meshData.waterGeo.userData.shader = shader;
+                            }
+                        }}
                     />
                 </mesh>
             )}

@@ -81,6 +81,19 @@ export interface ChestData {
     slots: InventorySlot[];
 }
 
+export interface DroppedItem {
+    id: string;
+    type: number;
+    pos: [number, number, number];
+    velocity?: [number, number, number];
+}
+
+export interface FallingBlock {
+    id: string;
+    type: number;
+    pos: [number, number, number];
+}
+
 export interface FurnaceState {
     inputSlot: InventorySlot;
     fuelSlot: InventorySlot;
@@ -248,6 +261,16 @@ export interface GameState {
     armor: ArmorSlots;
     setArmor: (a: ArmorSlots) => void;
     getArmorPoints: () => number;
+
+    // ── Dropped Items ──────────────────────────────────────
+    droppedItems: DroppedItem[];
+    addDroppedItem: (type: number, pos: [number, number, number], velocity?: [number, number, number]) => void;
+    removeDroppedItem: (id: string) => void;
+
+    // ── Falling/Gravity Blocks ─────────────────────────────
+    fallingBlocks: FallingBlock[];
+    spawnFallingBlock: (type: number, pos: [number, number, number]) => void;
+    landFallingBlock: (id: string, pos: [number, number, number], type: number) => void;
 
     // ── Chests ─────────────────────────────────────────────
     chests: Record<string, ChestData>;
@@ -822,6 +845,34 @@ const useGameStore = create<GameState>((set, get) => ({
     setChest: (key, data) => set((s) => ({
         chests: { ...s.chests, [key]: data },
     })),
+
+    // ── Dropped Items ──────────────────────────────────────
+    droppedItems: [],
+    addDroppedItem: (type, pos, velocity) => {
+        const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `item-${Math.random().toString(36).substring(2, 10)}`;
+        set((s) => ({
+            droppedItems: [...s.droppedItems, { id, type, pos, velocity }]
+        }));
+    },
+    removeDroppedItem: (id) => set((s) => ({
+        droppedItems: s.droppedItems.filter(i => i.id !== id)
+    })),
+
+    // ── Falling/Gravity Blocks ─────────────────────────────
+    fallingBlocks: [],
+    spawnFallingBlock: (type, pos) => {
+        const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `falling-${Math.random().toString(36).substring(2, 10)}`;
+        set((s) => ({
+            fallingBlocks: [...s.fallingBlocks, { id, type, pos }]
+        }));
+    },
+    landFallingBlock: (id, pos, type) => {
+        const s = get();
+        s.addBlock(pos[0], pos[1], pos[2], type);
+        set((st) => ({
+            fallingBlocks: st.fallingBlocks.filter(b => b.id !== id)
+        }));
+    },
 
     // ── Pistons ────────────────────────────────────────────
     pistons: {},

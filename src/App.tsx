@@ -32,6 +32,8 @@ import { MultiplayerRenderer } from './multiplayer/MultiplayerRenderer';
 import useGameStore from './store/gameStore';
 import { getRendererCaps, type RendererCapabilities } from './core/renderer';
 import { preloadAllTextures } from './core/textures';
+import DroppedItemsManager from './entities/DroppedItems';
+import FallingBlocksManager from './entities/FallingBlocks';
 
 const LoadingScreen: React.FC<{ caps: RendererCapabilities | null; progress: string }> = ({ caps, progress }) => (
     <div className="loading-screen">
@@ -58,6 +60,8 @@ const SceneContent: React.FC = () => {
                 <Player />
                 <MobRenderer />
                 <MultiplayerRenderer />
+                <DroppedItemsManager />
+                <FallingBlocksManager />
             </Physics>
             <Clouds />
             <TorchLights />

@@ -250,7 +250,7 @@ const Player: React.FC = () => {
 
                     const drop = getBlockDrop(type);
                     if (drop && drop !== BlockType.AIR) {
-                        s.addItem(drop, 1);
+                        s.addDroppedItem(drop, [bx + 0.5, by + 0.5, bz + 0.5]);
                         playSound('pop');
                     }
                 }
@@ -787,7 +787,7 @@ const Player: React.FC = () => {
                                 processGravity(mbx, mby, mbz);
                                 const drop = getBlockDrop(mType);
                                 if (drop && drop !== BlockType.AIR) {
-                                    s.addItem(drop, 1);
+                                    s.addDroppedItem(drop, [mbx + 0.5, mby + 0.5, mbz + 0.5]);
                                     playSound('pop');
                                 }
 

@@ -14,7 +14,6 @@ import { CHUNK_SIZE, MAX_HEIGHT } from './terrainGen';
 // Blocks affected by gravity
 const GRAVITY_BLOCKS = new Set([BlockType.SAND, BlockType.GRAVEL]);
 
-/** Check and process gravity blocks above a removed block */
 export function checkGravityAbove(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
 
@@ -23,47 +22,27 @@ export function checkGravityAbove(x: number, y: number, z: number): void {
         const block = s.getBlock(x, checkY, z);
         if (!block || !GRAVITY_BLOCKS.has(block)) break; // stop at first non-gravity block
 
-        // This gravity block needs to fall — find where it lands
-        let landY = y;
-        for (let fy = checkY - 1; fy >= 0; fy--) {
-            const below = s.getBlock(x, fy, z);
-            if (below && BLOCK_DATA[below]?.solid) {
-                landY = fy + 1;
-                break;
-            }
-            if (fy === 0) landY = 0;
-        }
-
-        // Move block from checkY to landY
-        if (landY !== checkY) {
-            s.removeBlock(x, checkY, z);
-            s.addBlock(x, landY, z, block);
-            bumpChunks(x, z);
-        }
+        // This gravity block falls physically
+        s.removeBlock(x, checkY, z);
+        s.spawnFallingBlock(block, [x + 0.5, checkY + 0.5, z + 0.5]);
+        bumpChunks(x, z);
     }
 }
 
-/** Called whenever a specific gravity block might need to fall (e.g. just placed) */
 export function checkGravityBlock(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
     const block = s.getBlock(x, y, z);
 
     if (!block || !GRAVITY_BLOCKS.has(block)) return;
 
-    let landY = y;
-    for (let fy = y - 1; fy >= 0; fy--) {
-        const below = s.getBlock(x, fy, z);
-        if (below && BLOCK_DATA[below]?.solid) {
-            landY = fy + 1;
-            break;
+    // Check if block below can be fallen through
+    const below = s.getBlock(x, y - 1, z);
+    if (!below || !BLOCK_DATA[below]?.solid) {
+        if (y > 0) {
+            s.removeBlock(x, y, z);
+            s.spawnFallingBlock(block, [x + 0.5, y + 0.5, z + 0.5]);
+            bumpChunks(x, z);
         }
-        if (fy === 0) landY = 0;
-    }
-
-    if (landY !== y) {
-        s.removeBlock(x, y, z);
-        s.addBlock(x, landY, z, block);
-        bumpChunks(x, z);
     }
 }
 
