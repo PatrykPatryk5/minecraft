@@ -125,8 +125,8 @@ const PauseMenu: React.FC = () => {
 
                 <div className="settings-compact">
                     <div className="setting-row">
-                        <span>Zasięg: <strong>{settings.renderDistance}</strong></span>
-                        <input type="range" min={2} max={16} value={settings.renderDistance}
+                        <span>Zasięg: <strong>{settings.renderDistance}</strong> {settings.renderDistance > 12 && <span style={{ color: '#fa0', fontSize: '0.8em' }}>(Zalecane. max 12)</span>}</span>
+                        <input type="range" min={2} max={32} value={settings.renderDistance}
                             onChange={(e) => updateSettings({ renderDistance: +e.target.value })} className="mc-slider" />
                     </div>
                     <div className="setting-row">
