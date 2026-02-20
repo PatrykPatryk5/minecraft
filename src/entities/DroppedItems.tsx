@@ -9,6 +9,7 @@ import { playSound } from '../audio/sounds';
 const DroppedItem: React.FC<{ id: string; type: number; initialPos: [number, number, number]; initialVel?: [number, number, number] }> = ({ id, type, initialPos, initialVel }) => {
     const rbRef = useRef<RapierRigidBody>(null);
     const meshRef = useRef<THREE.Mesh>(null);
+    const pickedUp = useRef(false);
     const atlas = getAtlasTexture();
 
     // Generate accurate texture mapping for the small box based on the atlas
@@ -28,6 +29,7 @@ const DroppedItem: React.FC<{ id: string; type: number; initialPos: [number, num
             array[v0 + 6] = uvData.u + uvData.su; array[v0 + 7] = uvData.v;
         }
         geo.attributes.uv.needsUpdate = true;
+        geo.translate(0, 0.15, 0); // Visual offset so it doesn't look sunken into the floor
         return geo;
     }, [type]);
 
@@ -38,18 +40,21 @@ const DroppedItem: React.FC<{ id: string; type: number; initialPos: [number, num
         }
 
         // Check pickup distance continuously
-        if (rbRef.current) {
+        if (rbRef.current && !pickedUp.current) {
             const pos = rbRef.current.translation();
             const playerPos = useGameStore.getState().playerPos;
             const distSq = (pos.x - playerPos[0]) ** 2 + (pos.y - playerPos[1]) ** 2 + (pos.z - playerPos[2]) ** 2;
 
-            // Pickup radius: ~1.4 blocks
-            if (distSq < 2.0) {
+            // Pickup radius: ~2.0 blocks
+            if (distSq < 4.0) {
+                pickedUp.current = true;
                 const s = useGameStore.getState();
                 const added = s.addItem(type, 1);
                 if (added) {
                     s.removeDroppedItem(id);
                     playSound('pop');
+                } else {
+                    pickedUp.current = false; // Inventory full
                 }
             }
         }
@@ -61,9 +66,10 @@ const DroppedItem: React.FC<{ id: string; type: number; initialPos: [number, num
             type="dynamic"
             colliders="cuboid"
             position={initialPos}
-            linearVelocity={initialVel || [0, 2, 0]}
+            linearVelocity={initialVel || [0, 3, 0]}
             restitution={0.2}
             friction={0.8}
+            ccd={true}
             lockRotations // keep it upright, only spinning visually via the inner mesh
         >
             <mesh ref={meshRef} geometry={geometry} castShadow>

@@ -104,35 +104,40 @@ interface ChunkProps {
 
 const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) => {
     const key = chunkKey(cx, cz);
-    const prevGeoRef = useRef<THREE.BufferGeometry[]>([]);
-
-    // Subscribe to version counter and graphics settings
     const version = useGameStore((s) => s.chunkVersions[key] ?? 0);
-    const useShadows = useGameStore((s) => s.settings.graphics !== 'fast');
 
-    const disposeOld = () => {
-        for (const g of prevGeoRef.current) {
-            returnToPool(g);
-        }
-        prevGeoRef.current = [];
-    };
+    // Subscribe to neighbor versions so borders (liquid connections, AO) update correctly
+    const v_nPx = useGameStore((s) => s.chunkVersions[chunkKey(cx + 1, cz)] ?? -1);
+    const v_nNx = useGameStore((s) => s.chunkVersions[chunkKey(cx - 1, cz)] ?? -1);
+    const v_nPz = useGameStore((s) => s.chunkVersions[cx + ',' + (cz + 1)] ?? -1);
+    const v_nNz = useGameStore((s) => s.chunkVersions[cx + ',' + (cz - 1)] ?? -1);
+
+    const useShadows = useGameStore((s) => s.settings.graphics !== 'fast');
+    const [meshData, setMeshData] = React.useState<{ solidGeo: THREE.BufferGeometry | null, waterGeo: THREE.BufferGeometry | null, atlas: THREE.Texture } | null>(null);
+
+    const solidShaderRef = useRef<any>(null);
+    const waterShaderRef = useRef<any>(null);
 
     useEffect(() => {
-        return () => { disposeOld(); };
-    }, []);
-
-    const [meshData, setMeshData] = React.useState<{ solidGeo: THREE.BufferGeometry | null, waterGeo: THREE.BufferGeometry | null, atlas: THREE.Texture } | null>(null);
+        return () => {
+            if (meshData) {
+                if (meshData.solidGeo) returnToPool(meshData.solidGeo);
+                if (meshData.waterGeo) returnToPool(meshData.waterGeo);
+            }
+        };
+    }, [meshData]);
 
     useEffect(() => {
         let active = true;
-        let handle: any;
 
-        const buildMesh = () => {
+        const buildMesh = async () => {
+            // Yield to main thread briefly before heavy work
+            await new Promise(r => setTimeout(r, 0));
             if (!active) return;
             const state = useGameStore.getState();
             const chunkData: ChunkData | undefined = state.chunks[key];
             if (!chunkData) {
-                if (active && meshData !== null) setMeshData(null);
+                if (active) setMeshData(null);
                 return;
             }
 
@@ -187,9 +192,18 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                 return type > 0 && (BLOCK_DATA[type]?.solid ?? false);
             };
 
+            let maxChunkHeight = 0;
+            for (let i = 0; i < chunkData.length; i++) {
+                if (chunkData[i] > 0) {
+                    const y = i >> 8;
+                    if (y > maxChunkHeight) maxChunkHeight = y;
+                }
+            }
+            maxChunkHeight = Math.min(MAX_HEIGHT - 1, maxChunkHeight + 1);
+
             for (let lx = 0; lx < CHUNK_SIZE; lx++) {
                 for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-                    for (let y = 0; y < MAX_HEIGHT; y++) {
+                    for (let y = 0; y <= maxChunkHeight; y++) {
                         const bt = chunkData[blockIndex(lx, y, lz)];
                         if (!bt) continue;
 
@@ -206,7 +220,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                             let nbt = 0;
                             if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0 && ny < MAX_HEIGHT) {
                                 nbt = chunkData[blockIndex(nx, ny, nz)];
-                            } else if (ny >= 0) {
+                            } else if (ny >= 0 && ny < MAX_HEIGHT) {
                                 let nc: ChunkData | undefined;
                                 let nlx = nx, nlz = nz;
                                 if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
@@ -348,38 +362,32 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
             const solidGeo = createGeo(solid);
             const waterGeo = createGeo(water);
 
-            if (!active) {
-                if (solidGeo) returnToPool(solidGeo);
-                if (waterGeo) returnToPool(waterGeo);
-                return;
-            }
-
-            disposeOld();
-
             const newGeos: THREE.BufferGeometry[] = [];
             if (solidGeo) newGeos.push(solidGeo);
             if (waterGeo) newGeos.push(waterGeo);
-            prevGeoRef.current = newGeos;
+
+            if (!active) {
+                newGeos.forEach(returnToPool);
+                return;
+            }
 
             setMeshData({ solidGeo, waterGeo, atlas });
         };
 
-        handle = (window as any).requestIdleCallback ? (window as any).requestIdleCallback(buildMesh, { timeout: 1000 }) : setTimeout(buildMesh, 0);
+        buildMesh();
 
         return () => {
             active = false;
-            if ((window as any).cancelIdleCallback) (window as any).cancelIdleCallback(handle);
-            else clearTimeout(handle as number);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [key, version, lod, cx, cz]);
+    }, [key, version, v_nPx, v_nNx, v_nPz, v_nNz, lod, cx, cz]);
 
     useFrame(({ clock }) => {
-        if (meshData && meshData.solidGeo && meshData.solidGeo.userData && meshData.solidGeo.userData.shader) {
-            meshData.solidGeo.userData.shader.uniforms.uTime.value = clock.elapsedTime;
+        if (solidShaderRef.current) {
+            solidShaderRef.current.uniforms.uTime.value = clock.elapsedTime;
         }
-        if (meshData && meshData.waterGeo && meshData.waterGeo.userData && meshData.waterGeo.userData.shader) {
-            meshData.waterGeo.userData.shader.uniforms.uTime.value = clock.elapsedTime;
+        if (waterShaderRef.current) {
+            waterShaderRef.current.uniforms.uTime.value = clock.elapsedTime;
         }
     });
 
@@ -430,9 +438,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                         }
                         `
                     );
-                    if (meshData.solidGeo) {
-                        meshData.solidGeo.userData.shader = shader;
-                    }
+                    solidShaderRef.current = shader;
                 }}
             />
         </mesh>
@@ -441,8 +447,8 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
     return (
         <group position={[cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE]}>
             {meshData.solidGeo && (
-                dist <= 16 ? (
-                    <RigidBody type="fixed" colliders="trimesh">
+                dist <= 4 ? (
+                    <RigidBody key={meshData.solidGeo.uuid} type="fixed" colliders="trimesh">
                         {renderSolidMesh()}
                     </RigidBody>
                 ) : renderSolidMesh()
@@ -484,9 +490,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                                 }
                                 `
                             );
-                            if (meshData.waterGeo) {
-                                meshData.waterGeo.userData.shader = shader;
-                            }
+                            waterShaderRef.current = shader;
                         }}
                     />
                 </mesh>

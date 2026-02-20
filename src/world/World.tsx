@@ -22,7 +22,7 @@ import { checkChunkBorders } from '../core/waterSystem';
 import { tickWorld } from '../core/worldTick';
 
 const UNLOAD_BUFFER = 3;
-const BATCH_PER_FRAME = 2; // Reduced to prevent main thread stutter
+const BATCH_PER_FRAME = 1; // Reduced to 1 to drastically decrease main thread stutter on Generation
 const RECALCULATE_COOLDOWN = 600;
 
 // LOD thresholds (in chunk distance²)

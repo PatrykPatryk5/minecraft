@@ -1490,7 +1490,8 @@ export function getAtlasTexture(): THREE.CanvasTexture {
 
     atlasTexture = new THREE.CanvasTexture(canvas);
     atlasTexture.magFilter = THREE.NearestFilter;
-    atlasTexture.minFilter = THREE.NearestFilter;
+    atlasTexture.minFilter = THREE.NearestMipmapLinearFilter;
+    atlasTexture.generateMipmaps = true;
     atlasTexture.colorSpace = THREE.SRGBColorSpace;
     atlasTexture.premultiplyAlpha = true; // Important for alphaTest transparency blending
 

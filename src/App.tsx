@@ -14,7 +14,7 @@ import BlockParticles from './effects/BlockParticles';
 import HUD from './ui/HUD';
 import DebugScreen from './ui/DebugScreen';
 import PauseMenu from './ui/PauseMenu';
-import { EffectComposer, SMAA, SSAO, Bloom, Vignette } from '@react-three/postprocessing';
+import { EffectComposer, Vignette } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
 import { Physics } from '@react-three/rapier';
 import Inventory from './ui/Inventory';
@@ -44,6 +44,13 @@ const LoadingScreen: React.FC<{ caps: RendererCapabilities | null; progress: str
     </div>
 );
 
+const UnderwaterOverlay = () => {
+    const pos = useGameStore((s) => s.playerPos);
+    const isWater = useGameStore.getState().getBlock(Math.floor(pos[0]), Math.floor(pos[1] + 1.62), Math.floor(pos[2])) === 9;
+    if (!isWater) return null;
+    return <div className="water-overlay" />;
+};
+
 const SceneContent: React.FC = () => {
     const graphics = useGameStore((s) => s.settings.graphics);
     const usePostProcessing = graphics !== 'fast';
@@ -69,15 +76,7 @@ const SceneContent: React.FC = () => {
 
             {usePostProcessing && isFabulous && (
                 <EffectComposer multisampling={0}>
-                    <SSAO
-                        samples={16}
-                        radius={0.12}
-                        intensity={10}
-                        luminanceInfluence={0.6}
-                    />
-                    <Bloom luminanceThreshold={0.85} luminanceSmoothing={0.1} intensity={0.6} />
-                    <Vignette eskil={false} offset={0.1} darkness={1.0} />
-                    <SMAA />
+                    <Vignette eskil={false} offset={0.1} darkness={0.2} />
                 </EffectComposer>
             )}
         </>
@@ -90,7 +89,6 @@ const App: React.FC = () => {
     const gameMode = useGameStore((s) => s.gameMode);
     const showHUD = useGameStore((s) => s.showHUD);
     const activeOverlay = useGameStore((s) => s.activeOverlay);
-    const playerPos = useGameStore((s) => s.playerPos);
     const graphics = useGameStore((s) => s.settings.graphics);
     const useShadows = graphics !== 'fast';
     const [caps, setCaps] = useState<RendererCapabilities | null>(null);
@@ -151,7 +149,7 @@ const App: React.FC = () => {
                         alpha: false,
                         failIfMajorPerformanceCaveat: false,
                     }}
-                    shadows={useShadows ? { type: THREE.PCFSoftShadowMap } : false}
+                    shadows={useShadows ? { type: THREE.PCFShadowMap } : false}
                     dpr={graphics === 'fabulous' ? [1, Math.min(window.devicePixelRatio, 2)] : [1, 1]}
                     style={{ width: '100%', height: '100%' }}
                     onContextMenu={(e) => e.preventDefault()}
@@ -186,9 +184,7 @@ const App: React.FC = () => {
             {screen === 'credits' && <CreditsScreen />}
 
             {/* Underwater overlay */}
-            {isPlaying && useGameStore.getState().getBlock(Math.floor(playerPos[0]), Math.floor(playerPos[1] + 1.62), Math.floor(playerPos[2])) === 9 && (
-                <div className="water-overlay" />
-            )}
+            {isPlaying && <UnderwaterOverlay />}
 
             {/* Game mode indicator */}
             {isPlaying && activeOverlay === 'none' && (

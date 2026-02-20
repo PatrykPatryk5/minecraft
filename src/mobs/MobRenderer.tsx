@@ -97,7 +97,6 @@ function getMat(color: string, emissive?: boolean): THREE.MeshLambertMaterial {
 const MobRenderer: React.FC = () => {
     const groupRef = useRef<THREE.Group>(null);
     const mobs = useGameStore((s) => s.mobs);
-    const playerPos = useGameStore((s) => s.playerPos);
 
     // Per-mob limb rotation for walk animation
     const limbPhases = useRef<Map<string, number>>(new Map());
