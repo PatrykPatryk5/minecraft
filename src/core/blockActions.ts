@@ -9,7 +9,7 @@ import useGameStore from '../store/gameStore';
 import { attemptNetherPortalIgnite } from './portalSystem';
 import { BlockType, BLOCK_DATA } from './blockTypes';
 import { playSound } from '../audio/sounds';
-import { emitBlockBreak, emitExplosion } from '../effects/BlockParticles';
+import { emitBlockBreak, emitExplosion } from '../core/particles';
 
 // ─── TNT Explosion ──────────────────────────────────────
 const EXPLOSION_RADIUS = 4;

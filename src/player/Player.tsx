@@ -24,7 +24,7 @@ import useKeyboard from './useKeyboard';
 import useGameStore from '../store/gameStore';
 import { BLOCK_DATA, BlockType, getBlockDrop } from '../core/blockTypes';
 import { getSpawnHeight, MAX_HEIGHT } from '../core/terrainGen';
-import { emitBlockBreak } from '../effects/BlockParticles';
+import { emitBlockBreak } from '../core/particles';
 import { playSound, startAmbience, updateListener } from '../audio/sounds';
 import { checkWaterFill, spreadWater } from '../core/waterSystem';
 import { handleBlockAction, isOnLadder } from '../core/blockActions';

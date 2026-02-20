@@ -141,6 +141,8 @@ export interface GameState {
     resetWorld: () => void;
     setWorldSeed: (seed: number) => void;
     unloadChunkData: (keys: string[]) => void;
+    getBlockPower: (x: number, y: number, z: number) => number;
+    setBlockPower: (x: number, y: number, z: number, power: number) => void;
 
     // ── Player ────────────────────────────────────────────
     playerPos: [number, number, number];
@@ -420,7 +422,20 @@ const useGameStore = create<GameState>((set, get) => ({
         if (!chunk) return 0;
         const lx = ((x % 16) + 16) % 16;
         const lz = ((z % 16) + 16) % 16;
-        return chunk[blockIndex(lx, y, lz)];
+        const raw = chunk[blockIndex(lx, y, lz)];
+        return raw & 0x0FFF; // 12-bit ID
+    },
+
+    getBlockPower: (x, y, z) => {
+        if (y < 0 || y > 255) return 0;
+        const cx = Math.floor(x / 16);
+        const cz = Math.floor(z / 16);
+        const chunk = get().chunks[chunkKey(cx, cz)];
+        if (!chunk) return 0;
+        const lx = ((x % 16) + 16) % 16;
+        const lz = ((z % 16) + 16) % 16;
+        const raw = chunk[blockIndex(lx, y, lz)];
+        return (raw & 0xF000) >> 12; // 4-bit power
     },
 
     addBlock: (x, y, z, typeId, fromNetwork = false) => {
@@ -436,7 +451,10 @@ const useGameStore = create<GameState>((set, get) => ({
             chunk = new Uint16Array(CHUNK_VOLUME);
             set((s) => ({ chunks: { ...s.chunks, [key]: chunk! } }));
         }
-        chunk[blockIndex(lx, y, lz)] = typeId;
+
+        // Preserve power if modifying existing block? 
+        // Generally, replacing a block resets power to 0.
+        chunk[blockIndex(lx, y, lz)] = typeId & 0x0FFF;
 
         // Save to IndexedDB
         saveChunk(`${state.dimension}:${cx},${cz}`, chunk);
@@ -449,6 +467,28 @@ const useGameStore = create<GameState>((set, get) => ({
         }
     },
 
+    setBlockPower: (x, y, z, power) => {
+        if (y < 0 || y > 255) return;
+        const cx = Math.floor(x / 16);
+        const cz = Math.floor(z / 16);
+        const key = chunkKey(cx, cz);
+        const lx = ((x % 16) + 16) % 16;
+        const lz = ((z % 16) + 16) % 16;
+        const chunk = get().chunks[key];
+        if (!chunk) return;
+
+        const idx = blockIndex(lx, y, lz);
+        const raw = chunk[idx];
+        const id = raw & 0x0FFF;
+        // Apply 4-bit power (capped 0-15)
+        const p = Math.max(0, Math.min(15, power));
+        chunk[idx] = id | (p << 12);
+
+        // No need to save to DB for every power change if it's frequent?
+        // Actually, redstone state SHOULD persist.
+        saveChunk(`${get().dimension}:${cx},${cz}`, chunk);
+    },
+
     removeBlock: (x, y, z, fromNetwork = false) => {
         if (y < 0 || y > 255) return;
         const cx = Math.floor(x / 16);
@@ -458,7 +498,7 @@ const useGameStore = create<GameState>((set, get) => ({
         const lz = ((z % 16) + 16) % 16;
         const chunk = get().chunks[key];
         if (!chunk) return;
-        chunk[blockIndex(lx, y, lz)] = 0;
+        chunk[blockIndex(lx, y, lz)] = 0; // Reset ID and power to 0
 
         // Save to IndexedDB
         saveChunk(`${get().dimension}:${cx},${cz}`, chunk);
