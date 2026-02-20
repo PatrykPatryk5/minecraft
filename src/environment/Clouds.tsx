@@ -14,7 +14,7 @@ const CLOUD_HEIGHT = 140;
 const CLOUD_SPEED = 1.5;
 const CLOUD_GRID_W = 64; // Grid size width
 const CLOUD_GRID_D = 64; // Grid size depth
-const CLOUD_SCALE = 16;  // Size of one cloud "voxel"
+const CLOUD_SCALE = 10;  // Size of one cloud "voxel"
 const TOTAL_WIDTH = CLOUD_GRID_W * CLOUD_SCALE;
 const TOTAL_DEPTH = CLOUD_GRID_D * CLOUD_SCALE;
 
@@ -44,15 +44,15 @@ const Clouds: React.FC = () => {
             for (let z = 0; z < CLOUD_GRID_D; z++) {
                 const n = simpleNoise(x, z);
 
-                if (n > 0.4) {
+                if (n > 0.45) {
                     // Base cloud layer
                     positions.push([x * CLOUD_SCALE, 0, z * CLOUD_SCALE]);
 
                     if (isVolumetric) {
                         // Thicker clouds in the center of the noise peak
-                        if (n > 0.7) positions.push([x * CLOUD_SCALE, CLOUD_SCALE * 0.5, z * CLOUD_SCALE]);
-                        if (n > 0.7) positions.push([x * CLOUD_SCALE, -CLOUD_SCALE * 0.5, z * CLOUD_SCALE]);
-                        if (n > 0.9) positions.push([x * CLOUD_SCALE, CLOUD_SCALE, z * CLOUD_SCALE]);
+                        if (n > 0.75) positions.push([x * CLOUD_SCALE, CLOUD_SCALE * 0.5, z * CLOUD_SCALE]);
+                        if (n > 0.75) positions.push([x * CLOUD_SCALE, -CLOUD_SCALE * 0.5, z * CLOUD_SCALE]);
+                        if (n > 0.95) positions.push([x * CLOUD_SCALE, CLOUD_SCALE, z * CLOUD_SCALE]);
                     }
                 }
             }
@@ -69,6 +69,7 @@ const Clouds: React.FC = () => {
 
     const material = useMemo(() => new THREE.MeshStandardMaterial({
         color: '#ffffff', // Pure white
+        emissive: '#111111', // Prevent them from being pitch black underneath
         transparent: false,
         opacity: 1.0,
         depthWrite: true,
@@ -106,7 +107,7 @@ const Clouds: React.FC = () => {
         const snapZ = Math.floor(playerPos[2] / TOTAL_DEPTH) * TOTAL_DEPTH;
 
         wrapRef.current.position.set(
-            snapX + windOffset.current - TOTAL_WIDTH / 2,
+            snapX + windOffset.current,
             CLOUD_HEIGHT,
             snapZ
         );

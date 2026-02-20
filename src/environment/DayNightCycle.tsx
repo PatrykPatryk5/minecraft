@@ -43,7 +43,7 @@ const DayNightCycle: React.FC = () => {
     }), []);
 
     const skyColors = useMemo(() => ({
-        day: new THREE.Color('#1e40af'), // Much deeper blue
+        day: new THREE.Color('#7cb1e8'), // Natural sky blue
         dawn: new THREE.Color('#cc7744'),
         night: new THREE.Color('#0a0a1a'),
     }), []);
@@ -137,10 +137,10 @@ const DayNightCycle: React.FC = () => {
         <>
             <Sky
                 sunPosition={[sunX, sunY, 50]}
-                turbidity={isNight ? 0 : 1}
-                rayleigh={isNight ? 0 : 0.5}
-                mieCoefficient={0.005}
-                mieDirectionalG={0.7}
+                turbidity={isNight ? 0 : 0.6}
+                rayleigh={isNight ? 0 : 1.2}
+                mieCoefficient={0.003}
+                mieDirectionalG={0.8}
             />
             {isNight && <Stars radius={300} depth={50} count={7000} factor={4} saturation={0} fade speed={1} />}
             <ambientLight ref={ambLightRef} intensity={0.4} />
@@ -150,11 +150,11 @@ const DayNightCycle: React.FC = () => {
                 intensity={0.8}
                 castShadow={true}
                 shadow-bias={-0.001}
-                shadow-mapSize={[2048, 2048]}
+                shadow-mapSize={[4096, 4096]}
             >
-                <orthographicCamera attach="shadow-camera" args={[-128, 128, 128, -128, 1, 500]} />
+                <orthographicCamera attach="shadow-camera" args={[-90, 90, 90, -90, 1, 500]} />
             </directionalLight>
-            <hemisphereLight ref={hemiRef} args={['#1e40af', '#442211', 0.3]} />
+            <hemisphereLight ref={hemiRef} args={['#aaccff', '#443322', 0.4]} />
         </>
     );
 };

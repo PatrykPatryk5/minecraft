@@ -48,7 +48,7 @@ const SceneContent: React.FC = () => {
 
     return (
         <>
-            <fog attach="fog" args={['#1e40af', 240, 500]} />
+            <fog attach="fog" args={['#7cb1e8', 240, 500]} />
             <DayNightCycle />
             <World />
             <Player />
