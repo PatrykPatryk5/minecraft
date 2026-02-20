@@ -71,9 +71,9 @@ const SceneContent: React.FC = () => {
                 <EffectComposer multisampling={0}>
                     <SSAO
                         samples={16}
-                        radius={0.18}
-                        intensity={20}
-                        luminanceInfluence={0.7}
+                        radius={0.12}
+                        intensity={10}
+                        luminanceInfluence={0.6}
                     />
                     <Bloom luminanceThreshold={0.85} luminanceSmoothing={0.1} intensity={0.6} />
                     <Vignette eskil={false} offset={0.1} darkness={1.0} />

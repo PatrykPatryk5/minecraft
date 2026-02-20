@@ -128,9 +128,9 @@ const DayNightCycle: React.FC = () => {
                 scene.fog.color.copy(fogColor);
 
                 const maxFog = renderDist * 16;
-                // At night, fog feels slightly closer and thicker
-                scene.fog.near = isNight ? maxFog * 0.2 : maxFog * 0.6;
-                scene.fog.far = isNight ? maxFog * 0.8 : maxFog;
+                // Reduce fog density (push near closer to far)
+                scene.fog.near = isNight ? maxFog * 0.4 : maxFog * 0.8;
+                scene.fog.far = maxFog;
             }
         }
     });
@@ -150,18 +150,18 @@ const DayNightCycle: React.FC = () => {
                 mieDirectionalG={0.8}
             />
             {isNight && <Stars radius={300} depth={50} count={7000} factor={4} saturation={0} fade speed={1} />}
-            <ambientLight ref={ambLightRef} intensity={0.4} />
+            <ambientLight ref={ambLightRef} intensity={0.2} />
             <directionalLight
                 ref={dirLightRef}
                 position={[sunX, sunY, 50]}
-                intensity={0.8}
+                intensity={0.65}
                 castShadow={useShadows}
                 shadow-bias={-0.001}
                 shadow-mapSize={[shadowMapSize, shadowMapSize]}
             >
                 <orthographicCamera attach="shadow-camera" args={[-90, 90, 90, -90, 1, 500]} />
             </directionalLight>
-            <hemisphereLight ref={hemiRef} args={['#aaccff', '#443322', 0.4]} />
+            <hemisphereLight ref={hemiRef} args={['#aaccff', '#443322', 0.2]} />
         </>
     );
 };

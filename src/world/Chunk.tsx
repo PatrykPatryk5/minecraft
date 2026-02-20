@@ -121,233 +121,258 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
         return () => { disposeOld(); };
     }, []);
 
-    const meshData = useMemo(() => {
-        disposeOld();
+    const [meshData, setMeshData] = React.useState<{ solidGeo: THREE.BufferGeometry | null, waterGeo: THREE.BufferGeometry | null, atlas: THREE.Texture } | null>(null);
 
-        const state = useGameStore.getState();
-        const chunkData: ChunkData | undefined = state.chunks[key];
-        if (!chunkData) return null;
+    useEffect(() => {
+        let active = true;
+        let handle: any;
 
-        // Ensure atlas is ready
-        const atlas = getAtlasTexture();
-
-        const nPx = state.chunks[chunkKey(cx + 1, cz)];
-        const nNx = state.chunks[chunkKey(cx - 1, cz)];
-        const nPz = state.chunks[chunkKey(cx, cz + 1)];
-        const nNz = state.chunks[chunkKey(cx, cz - 1)];
-
-        // Data arrays for SOLID mesh
-        const solid = {
-            pos: [] as number[],
-            norm: [] as number[],
-            uv: [] as number[],
-            color: [] as number[],
-            isFlora: [] as number[],
-            isLiquid: [] as number[],
-            ind: [] as number[]
-        };
-        let solidIdx = 0;
-
-        // Data arrays for WATER mesh (transparent)
-        const water = {
-            pos: [] as number[],
-            norm: [] as number[],
-            uv: [] as number[],
-            color: [] as number[],
-            isFlora: [] as number[],
-            isLiquid: [] as number[],
-            ind: [] as number[]
-        };
-        let waterIdx = 0;
-
-        // AO Helper
-        const isSolidAt = (lx: number, y: number, lz: number): boolean => {
-            if (y < 0) return true;
-            if (y >= MAX_HEIGHT) return false;
-            let type = 0;
-            if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
-                type = chunkData[blockIndex(lx, y, lz)];
-            } else {
-                let nc: ChunkData | undefined;
-                let nlx = lx, nlz = lz;
-                if (lx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
-                else if (lx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
-                else if (lz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
-                else if (lz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                if (nc) type = nc[blockIndex(nlx, y, nlz)];
+        const buildMesh = () => {
+            if (!active) return;
+            const state = useGameStore.getState();
+            const chunkData: ChunkData | undefined = state.chunks[key];
+            if (!chunkData) {
+                if (active && meshData !== null) setMeshData(null);
+                return;
             }
-            return type > 0 && (BLOCK_DATA[type]?.solid ?? false);
-        };
 
-        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-            for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-                for (let y = 0; y < MAX_HEIGHT; y++) {
-                    const bt = chunkData[blockIndex(lx, y, lz)];
-                    if (!bt) continue;
+            // Ensure atlas is ready
+            const atlas = getAtlasTexture();
 
-                    const isLiquidBlock = bt === BlockType.WATER || bt === BlockType.LAVA;
-                    const isWater = bt === BlockType.WATER;
-                    const target = isWater ? water : solid;
+            const nPx = state.chunks[chunkKey(cx + 1, cz)];
+            const nNx = state.chunks[chunkKey(cx - 1, cz)];
+            const nPz = state.chunks[chunkKey(cx, cz + 1)];
+            const nNz = state.chunks[chunkKey(cx, cz - 1)];
 
-                    for (let f = 0; f < FACES.length; f++) {
-                        const face = FACES[f];
-                        const nx = lx + face.dir[0];
-                        const ny = y + face.dir[1];
-                        const nz = lz + face.dir[2];
+            // Data arrays for SOLID mesh
+            const solid = {
+                pos: [] as number[],
+                norm: [] as number[],
+                uv: [] as number[],
+                color: [] as number[],
+                isFlora: [] as number[],
+                isLiquid: [] as number[],
+                ind: [] as number[]
+            };
+            let solidIdx = 0;
 
-                        let nbt = 0;
-                        if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0 && ny < MAX_HEIGHT) {
-                            nbt = chunkData[blockIndex(nx, ny, nz)];
-                        } else if (ny >= 0) {
-                            let nc: ChunkData | undefined;
-                            let nlx = nx, nlz = nz;
-                            if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
-                            else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
-                            else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
-                            else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                            if (nc) nbt = nc[blockIndex(nlx, ny, nlz)];
-                        }
+            // Data arrays for WATER mesh (transparent)
+            const water = {
+                pos: [] as number[],
+                norm: [] as number[],
+                uv: [] as number[],
+                color: [] as number[],
+                isFlora: [] as number[],
+                isLiquid: [] as number[],
+                ind: [] as number[]
+            };
+            let waterIdx = 0;
 
-                        let liquidHeight = 1.0;
-                        let neighborLiquidHeight = 1.0;
+            // AO Helper
+            const isSolidAt = (lx: number, y: number, lz: number): boolean => {
+                if (y < 0) return true;
+                if (y >= MAX_HEIGHT) return false;
+                let type = 0;
+                if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
+                    type = chunkData[blockIndex(lx, y, lz)];
+                } else {
+                    let nc: ChunkData | undefined;
+                    let nlx = lx, nlz = lz;
+                    if (lx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
+                    else if (lx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
+                    else if (lz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
+                    else if (lz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
+                    if (nc) type = nc[blockIndex(nlx, y, nlz)];
+                }
+                return type > 0 && (BLOCK_DATA[type]?.solid ?? false);
+            };
 
-                        if (isLiquidBlock) {
-                            let up = 0;
-                            if (y < MAX_HEIGHT - 1) up = chunkData[blockIndex(lx, y + 1, lz)];
-                            if (up !== bt) liquidHeight = 0.88;
+            for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+                for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+                    for (let y = 0; y < MAX_HEIGHT; y++) {
+                        const bt = chunkData[blockIndex(lx, y, lz)];
+                        if (!bt) continue;
 
-                            if (nbt === bt) {
-                                let n_up = 0;
-                                if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
-                                    n_up = chunkData[blockIndex(nx, ny + 1, nz)];
-                                } else if (ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
-                                    let nc: ChunkData | undefined;
-                                    let nlx = nx, nlz = nz;
-                                    if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
-                                    else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
-                                    else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
-                                    else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                                    if (nc) n_up = nc[blockIndex(nlx, ny + 1, nlz)];
+                        const isLiquidBlock = bt === BlockType.WATER || bt === BlockType.LAVA;
+                        const isWater = bt === BlockType.WATER;
+                        const target = isWater ? water : solid;
+
+                        for (let f = 0; f < FACES.length; f++) {
+                            const face = FACES[f];
+                            const nx = lx + face.dir[0];
+                            const ny = y + face.dir[1];
+                            const nz = lz + face.dir[2];
+
+                            let nbt = 0;
+                            if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0 && ny < MAX_HEIGHT) {
+                                nbt = chunkData[blockIndex(nx, ny, nz)];
+                            } else if (ny >= 0) {
+                                let nc: ChunkData | undefined;
+                                let nlx = nx, nlz = nz;
+                                if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
+                                else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
+                                else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
+                                else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
+                                if (nc) nbt = nc[blockIndex(nlx, ny, nlz)];
+                            }
+
+                            let liquidHeight = 1.0;
+                            let neighborLiquidHeight = 1.0;
+
+                            if (isLiquidBlock) {
+                                let up = 0;
+                                if (y < MAX_HEIGHT - 1) up = chunkData[blockIndex(lx, y + 1, lz)];
+                                if (up !== bt) liquidHeight = 0.88;
+
+                                if (nbt === bt) {
+                                    let n_up = 0;
+                                    if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
+                                        n_up = chunkData[blockIndex(nx, ny + 1, nz)];
+                                    } else if (ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
+                                        let nc: ChunkData | undefined;
+                                        let nlx = nx, nlz = nz;
+                                        if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
+                                        else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
+                                        else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
+                                        else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
+                                        if (nc) n_up = nc[blockIndex(nlx, ny + 1, nlz)];
+                                    }
+                                    if (n_up !== nbt) neighborLiquidHeight = 0.88;
                                 }
-                                if (n_up !== nbt) neighborLiquidHeight = 0.88;
                             }
-                        }
 
-                        if (!isTransparent(nbt)) continue;
+                            if (!isTransparent(nbt)) continue;
 
-                        if (bt === nbt && bt !== BlockType.LEAVES) {
-                            if (isLiquidBlock && liquidHeight > neighborLiquidHeight) {
-                                // Draw the connecting face because we are taller!
-                            } else {
-                                continue;
-                            }
-                        }
-
-                        const atlasUV = getAtlasUV(bt, face.name);
-                        const baseIdx = isWater ? waterIdx : solidIdx;
-
-                        for (let i = 0; i < 4; i++) {
-                            const corner = face.corners[i];
-                            const cx0 = lx + corner[0];
-                            let cy0 = y + corner[1];
-                            const cz0 = lz + corner[2];
-
-                            if (corner[1] === 1 && liquidHeight < 1.0) cy0 = y + liquidHeight;
-
-                            target.pos.push(cx0, cy0, cz0);
-                            target.norm.push(face.dir[0], face.dir[1], face.dir[2]);
-
-                            const ux = atlasUV.u + face.uv[i][0] * atlasUV.su;
-                            const uy = atlasUV.v + face.uv[i][1] * atlasUV.sv;
-                            target.uv.push(ux, uy);
-
-                            if (lod === 0 && !isWater) {
-                                let aoLevel = 0;
-                                const dx = face.dir[0], dy = face.dir[1], dz = face.dir[2];
-                                const ox = corner[0] * 2 - 1;
-                                const oy = corner[1] * 2 - 1;
-                                const oz = corner[2] * 2 - 1;
-
-                                if (Math.abs(dx) === 1) {
-                                    const s1 = isSolidAt(lx + dx, y + corner[1], lz + oz);
-                                    const s2 = isSolidAt(lx + dx, y + oy, lz + corner[2]);
-                                    const c = isSolidAt(lx + dx, y + oy, lz + oz);
-                                    aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
-                                } else if (Math.abs(dy) === 1) {
-                                    const s1 = isSolidAt(lx + ox, y + dy, lz + corner[2]);
-                                    const s2 = isSolidAt(lx + corner[0], y + dy, lz + oz);
-                                    const c = isSolidAt(lx + ox, y + dy, lz + oz);
-                                    aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
+                            if (bt === nbt && bt !== BlockType.LEAVES) {
+                                if (isLiquidBlock && liquidHeight > neighborLiquidHeight) {
+                                    // Draw the connecting face because we are taller!
                                 } else {
-                                    const s1 = isSolidAt(lx + ox, y + corner[1], lz + dz);
-                                    const s2 = isSolidAt(lx + corner[0], y + oy, lz + dz);
-                                    const c = isSolidAt(lx + ox, y + oy, lz + dz);
-                                    aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
+                                    continue;
                                 }
-                                const br = 1.0 - aoLevel * 0.24; // Increased AO intensity for better block connections
-                                target.color.push(br, br, br);
-                            } else {
-                                target.color.push(1.0, 1.0, 1.0);
                             }
 
-                            const isFloraBlock =
-                                bt === BlockType.LEAVES ||
-                                bt === BlockType.TALL_GRASS ||
-                                bt === BlockType.FLOWER_RED ||
-                                bt === BlockType.FLOWER_YELLOW ||
-                                (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7);
+                            const atlasUV = getAtlasUV(bt, face.name);
+                            const baseIdx = isWater ? waterIdx : solidIdx;
 
-                            const isTopVert = corner[1] > 0;
-                            const swayLevel = isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0;
+                            for (let i = 0; i < 4; i++) {
+                                const corner = face.corners[i];
+                                const cx0 = lx + corner[0];
+                                let cy0 = y + corner[1];
+                                const cz0 = lz + corner[2];
 
-                            target.isFlora.push(swayLevel);
+                                if (corner[1] === 1 && liquidHeight < 1.0) cy0 = y + liquidHeight;
 
-                            if (isLiquidBlock && isTopVert && liquidHeight < 1.0) {
-                                target.isLiquid.push(1.0); // Only animate top face if it's open
-                            } else {
-                                target.isLiquid.push(0.0);
+                                target.pos.push(cx0, cy0, cz0);
+                                target.norm.push(face.dir[0], face.dir[1], face.dir[2]);
+
+                                const ux = atlasUV.u + face.uv[i][0] * atlasUV.su;
+                                const uy = atlasUV.v + face.uv[i][1] * atlasUV.sv;
+                                target.uv.push(ux, uy);
+
+                                if (lod === 0 && !isWater) {
+                                    let aoLevel = 0;
+                                    const dx = face.dir[0], dy = face.dir[1], dz = face.dir[2];
+                                    const ox = corner[0] * 2 - 1;
+                                    const oy = corner[1] * 2 - 1;
+                                    const oz = corner[2] * 2 - 1;
+
+                                    if (Math.abs(dx) === 1) {
+                                        const s1 = isSolidAt(lx + dx, y + corner[1], lz + oz);
+                                        const s2 = isSolidAt(lx + dx, y + oy, lz + corner[2]);
+                                        const c = isSolidAt(lx + dx, y + oy, lz + oz);
+                                        aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
+                                    } else if (Math.abs(dy) === 1) {
+                                        const s1 = isSolidAt(lx + ox, y + dy, lz + corner[2]);
+                                        const s2 = isSolidAt(lx + corner[0], y + dy, lz + oz);
+                                        const c = isSolidAt(lx + ox, y + dy, lz + oz);
+                                        aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
+                                    } else {
+                                        const s1 = isSolidAt(lx + ox, y + corner[1], lz + dz);
+                                        const s2 = isSolidAt(lx + corner[0], y + oy, lz + dz);
+                                        const c = isSolidAt(lx + ox, y + oy, lz + dz);
+                                        aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
+                                    }
+                                    const br = 1.0 - aoLevel * 0.24; // Increased AO intensity for better block connections
+                                    target.color.push(br, br, br);
+                                } else {
+                                    target.color.push(1.0, 1.0, 1.0);
+                                }
+
+                                const isFloraBlock =
+                                    bt === BlockType.LEAVES ||
+                                    bt === BlockType.TALL_GRASS ||
+                                    bt === BlockType.FLOWER_RED ||
+                                    bt === BlockType.FLOWER_YELLOW ||
+                                    (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7);
+
+                                const isTopVert = corner[1] > 0;
+                                const swayLevel = isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0;
+
+                                target.isFlora.push(swayLevel);
+
+                                if (isLiquidBlock && isTopVert && liquidHeight < 1.0) {
+                                    target.isLiquid.push(1.0); // Only animate top face if it's open
+                                } else {
+                                    target.isLiquid.push(0.0);
+                                }
                             }
+
+                            target.ind.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
+                            if (isWater) waterIdx += 4; else solidIdx += 4;
                         }
-
-                        target.ind.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
-                        if (isWater) waterIdx += 4; else solidIdx += 4;
                     }
                 }
             }
-        }
 
-        const createGeo = (data: typeof solid) => {
-            if (data.pos.length === 0) return null;
-            const g = getPooledGeo();
-            g.setAttribute('position', new THREE.Float32BufferAttribute(data.pos, 3));
-            g.setAttribute('normal', new THREE.Float32BufferAttribute(data.norm, 3));
-            g.setAttribute('uv', new THREE.Float32BufferAttribute(data.uv, 2));
-            g.setAttribute('color', new THREE.Float32BufferAttribute(data.color, 3));
-            if ((data as any).isFlora && (data as any).isFlora.length > 0) {
-                g.setAttribute('isFlora', new THREE.Float32BufferAttribute((data as any).isFlora, 1));
+            const createGeo = (data: typeof solid) => {
+                if (data.pos.length === 0) return null;
+                const g = getPooledGeo();
+                g.setAttribute('position', new THREE.Float32BufferAttribute(data.pos, 3));
+                g.setAttribute('normal', new THREE.Float32BufferAttribute(data.norm, 3));
+                g.setAttribute('uv', new THREE.Float32BufferAttribute(data.uv, 2));
+                g.setAttribute('color', new THREE.Float32BufferAttribute(data.color, 3));
+                if ((data as any).isFlora && (data as any).isFlora.length > 0) {
+                    g.setAttribute('isFlora', new THREE.Float32BufferAttribute((data as any).isFlora, 1));
+                }
+                if ((data as any).isLiquid && (data as any).isLiquid.length > 0) {
+                    g.setAttribute('isLiquid', new THREE.Float32BufferAttribute((data as any).isLiquid, 1));
+                }
+                g.setIndex(data.ind);
+                g.computeBoundingSphere();
+                if ((g as any).computeBoundsTree) {
+                    (g as any).computeBoundsTree();
+                }
+                return g;
+            };
+
+            const solidGeo = createGeo(solid);
+            const waterGeo = createGeo(water);
+
+            if (!active) {
+                if (solidGeo) returnToPool(solidGeo);
+                if (waterGeo) returnToPool(waterGeo);
+                return;
             }
-            if ((data as any).isLiquid && (data as any).isLiquid.length > 0) {
-                g.setAttribute('isLiquid', new THREE.Float32BufferAttribute((data as any).isLiquid, 1));
-            }
-            g.setIndex(data.ind);
-            g.computeBoundingSphere();
-            if ((g as any).computeBoundsTree) {
-                (g as any).computeBoundsTree();
-            }
-            return g;
+
+            disposeOld();
+
+            const newGeos: THREE.BufferGeometry[] = [];
+            if (solidGeo) newGeos.push(solidGeo);
+            if (waterGeo) newGeos.push(waterGeo);
+            prevGeoRef.current = newGeos;
+
+            setMeshData({ solidGeo, waterGeo, atlas });
         };
 
-        const solidGeo = createGeo(solid);
-        const waterGeo = createGeo(water);
+        handle = (window as any).requestIdleCallback ? (window as any).requestIdleCallback(buildMesh, { timeout: 1000 }) : setTimeout(buildMesh, 0);
 
-        const newGeos: THREE.BufferGeometry[] = [];
-        if (solidGeo) newGeos.push(solidGeo);
-        if (waterGeo) newGeos.push(waterGeo);
-        prevGeoRef.current = newGeos;
-
-        return { solidGeo, waterGeo, atlas };
+        return () => {
+            active = false;
+            if ((window as any).cancelIdleCallback) (window as any).cancelIdleCallback(handle);
+            else clearTimeout(handle as number);
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [key, version, lod]);
+    }, [key, version, lod, cx, cz]);
 
     useFrame(({ clock }) => {
         if (meshData && meshData.solidGeo && meshData.solidGeo.userData && meshData.solidGeo.userData.shader) {
