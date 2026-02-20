@@ -16,6 +16,7 @@ import DebugScreen from './ui/DebugScreen';
 import PauseMenu from './ui/PauseMenu';
 import { EffectComposer, SMAA, SSAO, Bloom, Vignette } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
+import { Physics } from '@react-three/rapier';
 import Inventory from './ui/Inventory';
 import CraftingScreen from './ui/CraftingScreen';
 import FurnaceScreen from './ui/FurnaceScreen';
@@ -46,17 +47,21 @@ const SceneContent: React.FC = () => {
     const usePostProcessing = graphics !== 'fast';
     const isFabulous = graphics === 'fabulous';
 
+    const renderDist = useGameStore((s) => s.settings.renderDistance);
+
     return (
         <>
-            <fog attach="fog" args={['#7cb1e8', 240, 500]} />
+            <fog attach="fog" args={['#7cb1e8', renderDist * 16 * 0.6, renderDist * 16]} />
             <DayNightCycle />
-            <World />
-            <Player />
+            <Physics timeStep="vary">
+                <World />
+                <Player />
+                <MobRenderer />
+                <MultiplayerRenderer />
+            </Physics>
             <Clouds />
             <TorchLights />
             <BlockParticles />
-            <MobRenderer />
-            <MultiplayerRenderer />
 
             {usePostProcessing && isFabulous && (
                 <EffectComposer multisampling={0}>
@@ -80,6 +85,8 @@ const App: React.FC = () => {
     const showHUD = useGameStore((s) => s.showHUD);
     const activeOverlay = useGameStore((s) => s.activeOverlay);
     const playerPos = useGameStore((s) => s.playerPos);
+    const graphics = useGameStore((s) => s.settings.graphics);
+    const useShadows = graphics !== 'fast';
     const [caps, setCaps] = useState<RendererCapabilities | null>(null);
     const [ready, setReady] = useState(false);
     const prevScreenRef = useRef(screen);
@@ -138,8 +145,8 @@ const App: React.FC = () => {
                         alpha: false,
                         failIfMajorPerformanceCaveat: false,
                     }}
-                    shadows={{ type: THREE.PCFSoftShadowMap }}
-                    dpr={[1, Math.min(window.devicePixelRatio, 2)]}
+                    shadows={useShadows ? { type: THREE.PCFSoftShadowMap } : false}
+                    dpr={graphics === 'fabulous' ? [1, Math.min(window.devicePixelRatio, 2)] : [1, 1]}
                     style={{ width: '100%', height: '100%' }}
                     onContextMenu={(e) => e.preventDefault()}
                     frameloop="always"

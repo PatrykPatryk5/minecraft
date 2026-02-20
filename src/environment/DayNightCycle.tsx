@@ -28,6 +28,10 @@ function lerpColor(a: THREE.Color, b: THREE.Color, t: number): THREE.Color {
 const DayNightCycle: React.FC = () => {
     const dayTime = useGameStore((s) => s.dayTime);
     const setDayTime = useGameStore((s) => s.setDayTime);
+    const graphics = useGameStore((s) => s.settings.graphics);
+    const renderDist = useGameStore((s) => s.settings.renderDistance);
+    const useShadows = graphics !== 'fast';
+    const shadowMapSize = graphics === 'fabulous' ? 4096 : 2048;
     const dirLightRef = useRef<THREE.DirectionalLight>(null);
     const ambLightRef = useRef<THREE.AmbientLight>(null);
     const hemiRef = useRef<THREE.HemisphereLight>(null);
@@ -122,8 +126,11 @@ const DayNightCycle: React.FC = () => {
                         isDusk ? lerpColor(skyColors.day, skyColors.night, ((t - 0.65) / 0.15)) :
                             skyColors.day;
                 scene.fog.color.copy(fogColor);
-                scene.fog.near = isNight ? 30 : 60;
-                scene.fog.far = isNight ? 140 : 280;
+
+                const maxFog = renderDist * 16;
+                // At night, fog feels slightly closer and thicker
+                scene.fog.near = isNight ? maxFog * 0.2 : maxFog * 0.6;
+                scene.fog.far = isNight ? maxFog * 0.8 : maxFog;
             }
         }
     });
@@ -148,9 +155,9 @@ const DayNightCycle: React.FC = () => {
                 ref={dirLightRef}
                 position={[sunX, sunY, 50]}
                 intensity={0.8}
-                castShadow={true}
+                castShadow={useShadows}
                 shadow-bias={-0.001}
-                shadow-mapSize={[4096, 4096]}
+                shadow-mapSize={[shadowMapSize, shadowMapSize]}
             >
                 <orthographicCamera attach="shadow-camera" args={[-90, 90, 90, -90, 1, 500]} />
             </directionalLight>

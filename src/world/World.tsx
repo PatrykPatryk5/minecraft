@@ -181,6 +181,7 @@ const World: React.FC = () => {
         }
         for (const k of toRemove) {
             loadedKeysRef.current.delete(k);
+            useGameStore.getState().unloadChunkData(k);
         }
 
         // Only update state when chunk list actually changed

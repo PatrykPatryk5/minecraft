@@ -10,9 +10,11 @@
  */
 
 import React, { useMemo, useRef, useEffect } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BLOCK_DATA, BlockType } from '../core/blockTypes';
 import { getBlockMaterial, getAtlasTexture, getAtlasUV } from '../core/textures';
+import { RigidBody } from '@react-three/rapier';
 import useGameStore, { chunkKey } from '../store/gameStore';
 import { CHUNK_SIZE, blockIndex, type ChunkData, MAX_HEIGHT } from '../core/terrainGen';
 
@@ -69,6 +71,7 @@ interface MeshBuffer {
     uvs: number[];
     colors: number[];
     indices: number[];
+    isFlora: number[];
 }
 
 const SHARED_GROUPS = new Map<string, MeshBuffer>();
@@ -76,7 +79,7 @@ const SHARED_GROUPS = new Map<string, MeshBuffer>();
 function getSharedBuffer(key: string): MeshBuffer {
     let b = SHARED_GROUPS.get(key);
     if (!b) {
-        b = { positions: [], normals: [], uvs: [], colors: [], indices: [] };
+        b = { positions: [], normals: [], uvs: [], colors: [], indices: [], isFlora: [] };
         SHARED_GROUPS.set(key, b);
     }
     // Clear for reuse
@@ -85,6 +88,7 @@ function getSharedBuffer(key: string): MeshBuffer {
     b.uvs.length = 0;
     b.colors.length = 0;
     b.indices.length = 0;
+    b.isFlora.length = 0;
     return b;
 }
 
@@ -99,8 +103,9 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
     const key = chunkKey(cx, cz);
     const prevGeoRef = useRef<THREE.BufferGeometry[]>([]);
 
-    // Subscribe to version counter ONLY
+    // Subscribe to version counter and graphics settings
     const version = useGameStore((s) => s.chunkVersions[key] ?? 0);
+    const useShadows = useGameStore((s) => s.settings.graphics !== 'fast');
 
     const disposeOld = () => {
         for (const g of prevGeoRef.current) {
@@ -134,6 +139,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
             norm: [] as number[],
             uv: [] as number[],
             color: [] as number[],
+            isFlora: [] as number[],
             ind: [] as number[]
         };
         let solidIdx = 0;
@@ -144,6 +150,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
             norm: [] as number[],
             uv: [] as number[],
             color: [] as number[],
+            isFlora: [] as number[],
             ind: [] as number[]
         };
         let waterIdx = 0;
@@ -252,6 +259,21 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                             } else {
                                 target.color.push(1.0, 1.0, 1.0);
                             }
+
+                            if (!isWater) {
+                                const isFloraBlock =
+                                    bt === BlockType.LEAVES ||
+                                    bt === BlockType.TALL_GRASS ||
+                                    bt === BlockType.FLOWER_RED ||
+                                    bt === BlockType.FLOWER_YELLOW ||
+                                    (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7);
+
+                                // Only top vertices of flora move (y=1 or full block offsets), bottom stays anchored.
+                                // For leaves, we can move everything a bit.
+                                const isTopVert = corner[1] > 0;
+                                const swayLevel = isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0;
+                                solid.isFlora.push(swayLevel);
+                            }
                         }
 
                         target.ind.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
@@ -268,8 +290,14 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
             g.setAttribute('normal', new THREE.Float32BufferAttribute(data.norm, 3));
             g.setAttribute('uv', new THREE.Float32BufferAttribute(data.uv, 2));
             g.setAttribute('color', new THREE.Float32BufferAttribute(data.color, 3));
+            if ((data as any).isFlora && (data as any).isFlora.length > 0) {
+                g.setAttribute('isFlora', new THREE.Float32BufferAttribute((data as any).isFlora, 1));
+            }
             g.setIndex(data.ind);
             g.computeBoundingSphere();
+            if ((g as any).computeBoundsTree) {
+                (g as any).computeBoundsTree();
+            }
             return g;
         };
 
@@ -285,24 +313,62 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key, version, lod]);
 
+    useFrame(({ clock }) => {
+        if (meshData && meshData.solidGeo && meshData.solidGeo.userData && meshData.solidGeo.userData.shader) {
+            meshData.solidGeo.userData.shader.uniforms.uTime.value = clock.elapsedTime;
+        }
+    });
+
     if (!meshData) return null;
 
     return (
         <group position={[cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE]}>
             {meshData.solidGeo && (
-                <mesh geometry={meshData.solidGeo} frustumCulled castShadow receiveShadow>
-                    <meshStandardMaterial
-                        map={meshData.atlas}
-                        vertexColors
-                        alphaTest={0.1}
-                        transparent={false}
-                        roughness={0.9}
-                        metalness={0.05}
-                    />
-                </mesh>
+                <RigidBody type="fixed" colliders="trimesh">
+                    <mesh geometry={meshData.solidGeo} frustumCulled castShadow={useShadows} receiveShadow={useShadows}>
+                        <meshStandardMaterial
+                            map={meshData.atlas}
+                            vertexColors
+                            alphaTest={0.1}
+                            transparent={false}
+                            roughness={0.9}
+                            metalness={0.05}
+                            onBeforeCompile={(shader) => {
+                                shader.uniforms.uTime = { value: 0 };
+                                // Add attribute and uniform
+                                shader.vertexShader = shader.vertexShader.replace(
+                                    '#include <common>',
+                                    `
+                                    #include <common>
+                                    attribute float isFlora;
+                                    uniform float uTime;
+                                    `
+                                );
+
+                                // Add displacement math
+                                shader.vertexShader = shader.vertexShader.replace(
+                                    '#include <begin_vertex>',
+                                    `
+                                    #include <begin_vertex>
+                                    if (isFlora > 0.0) {
+                                        float speed = uTime * 2.0;
+                                        float swayX = sin(position.x * 2.0 + position.y * 3.0 + speed) * 0.08 * isFlora;
+                                        float swayZ = cos(position.z * 2.0 + position.y * 3.0 + (speed * 1.2)) * 0.08 * isFlora;
+                                        transformed.x += swayX;
+                                        transformed.z += swayZ;
+                                    }
+                                    `
+                                );
+                                if (meshData.solidGeo) {
+                                    meshData.solidGeo.userData.shader = shader;
+                                }
+                            }}
+                        />
+                    </mesh>
+                </RigidBody>
             )}
             {meshData.waterGeo && (
-                <mesh geometry={meshData.waterGeo} frustumCulled renderOrder={1} receiveShadow>
+                <mesh geometry={meshData.waterGeo} frustumCulled renderOrder={1} receiveShadow={useShadows}>
                     <meshStandardMaterial
                         map={meshData.atlas}
                         vertexColors

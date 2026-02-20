@@ -18,6 +18,7 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { PointerLockControls } from '@react-three/drei';
+import { RigidBody, RapierRigidBody } from '@react-three/rapier';
 import * as THREE from 'three';
 import useKeyboard from './useKeyboard';
 import useGameStore from '../store/gameStore';
@@ -56,6 +57,7 @@ const Player: React.FC = () => {
     const { camera } = useThree();
     const keys = useKeyboard();
     const controlsRef = useRef<any>(null);
+    const rbRef = useRef<RapierRigidBody>(null);
     const velocity = useRef(new THREE.Vector3());
     const onGround = useRef(false);
     const pos = useRef(new THREE.Vector3(8, 80, 8));
@@ -911,6 +913,10 @@ const Player: React.FC = () => {
         s.setPlayerPos([pos.current.x, pos.current.y, pos.current.z]);
         s.setPlayerRot([camera.rotation.y, camera.rotation.x]);
 
+        if (rbRef.current) {
+            rbRef.current.setNextKinematicTranslation(pos.current);
+        }
+
         // ─── Block Highlight ─────────────────────────────────
         const hit = raycastBlock();
         if (highlightRef.current) {
@@ -932,6 +938,11 @@ const Player: React.FC = () => {
     return (
         <>
             <PointerLockControls ref={controlsRef} />
+            <RigidBody ref={rbRef} type="kinematicPosition" colliders="cuboid" args={[PLAYER_WIDTH, PLAYER_HEIGHT / 2, PLAYER_WIDTH]}>
+                <mesh visible={false}>
+                    <boxGeometry args={[PLAYER_WIDTH * 2, PLAYER_HEIGHT, PLAYER_WIDTH * 2]} />
+                </mesh>
+            </RigidBody>
             {/* Selection highlight */}
             <mesh ref={highlightRef} visible={false}>
                 <boxGeometry args={[1.01, 1.01, 1.01]} />

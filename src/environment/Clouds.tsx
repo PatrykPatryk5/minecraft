@@ -33,9 +33,9 @@ const Clouds: React.FC = () => {
     const meshRef = useRef<THREE.InstancedMesh>(null);
     const wrapRef = useRef<THREE.Group>(null);
     const windOffset = useRef(0);
-
-    // Default to volumetric 3D clouds
-    const isVolumetric = true;
+    const graphics = useGameStore((s) => s.settings.graphics);
+    const isVolumetric = graphics !== 'fast';
+    const useShadows = graphics !== 'fast';
 
     const cloudData = useMemo(() => {
         const positions: [number, number, number][] = [];
@@ -119,8 +119,8 @@ const Clouds: React.FC = () => {
                 ref={meshRef}
                 args={[geometry, material, instanceCount]}
                 frustumCulled={false} // Important since we translate the parent group
-                castShadow
-                receiveShadow
+                castShadow={useShadows}
+                receiveShadow={useShadows}
             />
         </group>
     );
