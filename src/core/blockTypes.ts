@@ -106,6 +106,7 @@ export enum BlockType {
     ANVIL = 88,
     BEACON = 89,
     NOTEBLOCK = 91,
+    BUTTON = 92,
     // ─── Farming ────────────────────────────────────────
     FARMLAND = 160,
     WHEAT_0 = 161,
