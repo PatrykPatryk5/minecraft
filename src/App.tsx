@@ -14,7 +14,7 @@ import BlockParticles from './effects/BlockParticles';
 import HUD from './ui/HUD';
 import DebugScreen from './ui/DebugScreen';
 import PauseMenu from './ui/PauseMenu';
-import { EffectComposer, Vignette } from '@react-three/postprocessing';
+import { EffectComposer, Vignette, SMAA } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
 import { Physics } from '@react-three/rapier';
 import Inventory from './ui/Inventory';
@@ -76,6 +76,7 @@ const SceneContent: React.FC = () => {
 
             {usePostProcessing && isFabulous && (
                 <EffectComposer multisampling={0}>
+                    <SMAA />
                     <Vignette eskil={false} offset={0.1} darkness={0.2} />
                 </EffectComposer>
             )}

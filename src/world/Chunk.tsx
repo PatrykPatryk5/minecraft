@@ -353,9 +353,6 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) =
                 }
                 g.setIndex(data.ind);
                 g.computeBoundingSphere();
-                if ((g as any).computeBoundsTree) {
-                    (g as any).computeBoundsTree();
-                }
                 return g;
             };
 
