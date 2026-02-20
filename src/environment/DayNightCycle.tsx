@@ -43,7 +43,7 @@ const DayNightCycle: React.FC = () => {
     }), []);
 
     const skyColors = useMemo(() => ({
-        day: new THREE.Color('#3b82f6'), // Richer, deeper blue for cloud contrast
+        day: new THREE.Color('#1e40af'), // Much deeper blue
         dawn: new THREE.Color('#cc7744'),
         night: new THREE.Color('#0a0a1a'),
     }), []);
@@ -154,7 +154,7 @@ const DayNightCycle: React.FC = () => {
             >
                 <orthographicCamera attach="shadow-camera" args={[-128, 128, 128, -128, 1, 500]} />
             </directionalLight>
-            <hemisphereLight ref={hemiRef} args={['#87ceeb', '#553322', 0.3]} />
+            <hemisphereLight ref={hemiRef} args={['#1e40af', '#442211', 0.3]} />
         </>
     );
 };

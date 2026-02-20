@@ -76,8 +76,8 @@ const Clouds: React.FC = () => {
         roughness: 1,
     }), [isVolumetric]);
 
-    // Initialize matrices ONCE
-    useMemo(() => {
+    // Initialize matrices ONCE (must be useEffect so ref is attached)
+    React.useEffect(() => {
         if (!meshRef.current) return;
         for (let i = 0; i < cloudData.length; i++) {
             const p = cloudData[i];
@@ -85,7 +85,7 @@ const Clouds: React.FC = () => {
             _dummy.updateMatrix();
             meshRef.current.setMatrixAt(i, _dummy.matrix);
         }
-        meshRef.current.instanceMatrix.needsUpdate = true; // Required after setting matrices
+        meshRef.current.instanceMatrix.needsUpdate = true;
     }, [cloudData]);
 
     useFrame((_, delta) => {
