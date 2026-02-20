@@ -221,7 +221,7 @@ const Player: React.FC = () => {
                     // Creative = instant break
                     if (s.gameMode === 'creative') {
                         emitBlockBreak(bx, by, bz, type);
-                        playSound('break');
+                        playSound('break', [bx, by, bz]);
                         s.removeBlock(bx, by, bz);
                         bumpAround(bx, bz);
                         checkWaterFill(bx, by, bz);
@@ -241,7 +241,7 @@ const Player: React.FC = () => {
 
                     // Instant break blocks (breakTime = 0)
                     emitBlockBreak(bx, by, bz, type);
-                    playSound('break');
+                    playSound('break', [bx, by, bz]);
                     s.removeBlock(bx, by, bz);
                     bumpAround(bx, bz);
                     checkWaterFill(bx, by, bz);
@@ -307,7 +307,7 @@ const Player: React.FC = () => {
 
                 s.addBlock(px, py, pz, selected);
                 s.consumeHotbarItem(s.hotbarSlot);
-                playSound('place');
+                playSound('place', [px, py, pz]);
                 bumpAround(px, pz);
 
                 // If placing water/lava, trigger spreading
@@ -336,7 +336,7 @@ const Player: React.FC = () => {
                     // The `plantSeed` function checks if block below is Farmland.
                     if (plantSeed(px, py, pz)) {
                         s.consumeHotbarItem(s.hotbarSlot);
-                        playSound('place');
+                        playSound('place', [px, py, pz]);
                         bumpAround(px, pz);
                         return;
                     }
@@ -373,7 +373,7 @@ const Player: React.FC = () => {
 
                 s.addBlock(px, py, pz, selected);
                 s.consumeHotbarItem(s.hotbarSlot);
-                playSound('place');
+                playSound('place', [px, py, pz]);
                 bumpAround(px, pz);
                 checkGravityBlock(px, py, pz);
             } else if (e.button === 2) {
@@ -576,7 +576,30 @@ const Player: React.FC = () => {
                 }
                 vel.y += GRAVITY * dt;
                 if (vel.y < TERMINAL_VEL) vel.y = TERMINAL_VEL;
+
+                // Footsteps
+                if (onGround.current && (Math.abs(vel.x) > 0.1 || Math.abs(vel.z) > 0.1)) {
+                    stepTimer.current += dt;
+                    const stepInterval = isSprinting ? 0.3 : 0.45;
+                    if (stepTimer.current > stepInterval) {
+                        stepTimer.current = 0;
+                        const blockBelow = storeRef.current.getBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
+                        let stepSound: any = 'grass_step';
+                        if (blockBelow) {
+                            const data = BLOCK_DATA[blockBelow];
+                            if (data?.tool === 'pickaxe' || data?.name.includes('Kamień') || data?.name.includes('Podłoże') || data?.name.includes('Piec')) stepSound = 'stone_step';
+                            else if (data?.tool === 'axe' || data?.name.includes('Pień') || data?.name.includes('Skrzynia') || data?.name.includes('Biblioteczka')) stepSound = 'wood_step';
+                            else if (data?.name.includes('Piasek')) stepSound = 'sand_step';
+                        }
+                        playSound(stepSound, [p.x, p.y - PLAYER_HEIGHT, p.z]);
+                    }
+                } else {
+                    stepTimer.current = 0;
+                }
             }
+
+            // Sync Spatial Audio Listener
+            updateListener(p.x, p.y, p.z, forward.x, forward.y, forward.z);
 
             // Track fall start
             if (!onGround.current && !flying && !inWater) {
@@ -618,11 +641,11 @@ const Player: React.FC = () => {
                             const damage = Math.floor(fallDist - FALL_DAMAGE_THRESHOLD);
                             if (damage > 0) {
                                 s.setHealth(s.health - damage);
-                                playSound('hurt');
-                                playSound('land');
+                                playSound('hurt', [p.x, p.y, p.z]);
+                                playSound('land', [p.x, p.y - PLAYER_HEIGHT, p.z]);
                             }
                         } else if (fallDist > 1) {
-                            playSound('land');
+                            playSound('land', [p.x, p.y - PLAYER_HEIGHT, p.z]);
                         }
                     }
 
@@ -779,7 +802,7 @@ const Player: React.FC = () => {
                             if (miningProgress.current >= 1) {
                                 // Block broken!
                                 emitBlockBreak(mbx, mby, mbz, mType);
-                                playSound('break');
+                                playSound('break', [mbx, mby, mbz]);
                                 s.removeBlock(mbx, mby, mbz);
                                 bumpAround(mbx, mbz);
                                 checkWaterFill(mbx, mby, mbz);

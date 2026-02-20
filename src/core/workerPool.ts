@@ -1,13 +1,5 @@
-/**
- * Worker Pool — Manages multiple Web Workers for parallel chunk generation
- *
- * Features:
- *   - Configurable pool size (default 4 workers)
- *   - Round-robin task distribution
- *   - Automatic fallback if workers unavailable
- *   - Transferable buffer support (zero-copy)
- *   - Task queue with priority
- */
+import * as Comlink from 'comlink';
+import type { TerrainWorker } from './generation.worker';
 
 type WorkerCallback = (data: any) => void;
 
@@ -17,11 +9,12 @@ interface PendingTask {
 }
 
 export class WorkerPool {
-    private workers: Worker[] = [];
+    private rawWorkers: Worker[] = [];
+    private workers: Comlink.Remote<TerrainWorker>[] = [];
     private pending: Map<string, PendingTask> = new Map();
     private nextWorker = 0;
     private ready = false;
-    private taskQueue: { msg: any; id: string; resolve: WorkerCallback }[] = [];
+    private taskQueue: { cx: number, cz: number, id: string; dimension: string; resolve: WorkerCallback }[] = [];
     private activeTasks = 0;
     private maxConcurrent: number;
 
@@ -38,34 +31,17 @@ export class WorkerPool {
         try {
             for (let i = 0; i < this.poolSize; i++) {
                 const worker = new Worker(this.workerUrl, { type: 'module' });
+                const proxy = Comlink.wrap<TerrainWorker>(worker);
 
-                worker.onmessage = (e: MessageEvent) => {
-                    const { type: msgType, cx, cz, id, data } = e.data;
-                    if (msgType === 'ready') return;
+                // Initialize the worker's RNG
+                proxy.initSeed(seed);
 
-                    const key = id || `${cx},${cz}`;
-                    const task = this.pending.get(key);
-                    if (task) {
-                        this.pending.delete(key);
-                        this.activeTasks--;
-                        task.resolve(e.data);
-                    }
-
-                    // Process queued tasks
-                    this.processQueue();
-                };
-
-                worker.onerror = (err) => {
-                    console.warn(`[WorkerPool] Worker ${i} error:`, err);
-                };
-
-                // Init seed
-                worker.postMessage({ type: 'init', seed });
-                this.workers.push(worker);
+                this.rawWorkers.push(worker);
+                this.workers.push(proxy);
             }
 
             this.ready = true;
-            console.log(`[WorkerPool] ${this.poolSize} workers initialized, seed: ${seed}`);
+            console.log(`[WorkerPool] ${this.poolSize} Comlink workers initialized, seed: ${seed}`);
             return true;
         } catch (err) {
             console.warn('[WorkerPool] Failed to create workers:', err);
@@ -82,30 +58,58 @@ export class WorkerPool {
     submit(cx: number, cz: number, dimension: string, callback: WorkerCallback): void {
         const id = `${cx},${cz}`;
 
-        if (this.pending.has(id)) return; // Already processing
+        if (this.pending.has(id)) return; // Already processing or queued
+
+        this.pending.set(id, { id, resolve: callback });
 
         if (this.activeTasks >= this.maxConcurrent) {
             // Queue it
-            this.taskQueue.push({ msg: { cx, cz, id, dimension }, id, resolve: callback });
+            this.taskQueue.push({ cx, cz, id, dimension, resolve: callback });
             return;
         }
 
+        this.activeTasks++;
         this.dispatch(cx, cz, dimension, id, callback);
     }
 
-    private dispatch(cx: number, cz: number, dimension: string, id: string, callback: WorkerCallback): void {
+    private async dispatch(cx: number, cz: number, dimension: string, id: string, callback: WorkerCallback) {
         const worker = this.workers[this.nextWorker % this.workers.length];
         this.nextWorker++;
-        this.activeTasks++;
 
-        this.pending.set(id, { id, resolve: callback });
-        worker.postMessage({ cx, cz, id, dimension });
+        try {
+            // Await the generation natively with a timeout safety to prevent permanent lockups
+            const generatePromise = worker.generate(cx, cz, dimension);
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Worker timeout')), 25000)
+            );
+
+            const data = await Promise.race([generatePromise, timeoutPromise]);
+
+            // Re-check pending map in case the queue was cleared (e.g. dimension switch)
+            const task = this.pending.get(id);
+            if (task) {
+                this.pending.delete(id);
+                this.activeTasks--;
+                task.resolve({ cx, cz, id, data, dimension });
+            }
+        } catch (e) {
+            console.error('[WorkerPool] Generation error/timeout for chunk', id, e);
+            this.activeTasks--;
+            this.pending.delete(id);
+        }
+
+        // Process queued tasks
+        this.processQueue();
     }
 
     private processQueue(): void {
         while (this.taskQueue.length > 0 && this.activeTasks < this.maxConcurrent) {
             const task = this.taskQueue.shift()!;
-            this.dispatch(task.msg.cx, task.msg.cz, task.msg.dimension, task.id, task.resolve);
+            // Only dispatch if still pending (might have been cleared)
+            if (this.pending.has(task.id)) {
+                this.activeTasks++;
+                this.dispatch(task.cx, task.cz, task.dimension, task.id, task.resolve);
+            }
         }
     }
 
@@ -122,11 +126,14 @@ export class WorkerPool {
     /** Clear pending queue (useful when switching dimensions) */
     clearQueue(): void {
         this.taskQueue = [];
+        this.pending.clear();
+        this.activeTasks = 0; // The active promises will still resolve, but will be ignored due to pending map clear
     }
 
     /** Terminate all workers */
     terminate(): void {
-        for (const w of this.workers) w.terminate();
+        for (const w of this.rawWorkers) w.terminate();
+        this.rawWorkers = [];
         this.workers = [];
         this.pending.clear();
         this.taskQueue = [];

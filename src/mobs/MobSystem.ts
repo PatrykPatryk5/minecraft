@@ -13,6 +13,7 @@
 import useGameStore from '../store/gameStore';
 import { BlockType } from '../core/blockTypes';
 import { playSound } from '../audio/sounds';
+import { getNextStep, isSolid } from './pathfinding';
 
 // ─── Types ──────────────────────────────────────────────
 export type MobType = 'zombie' | 'skeleton' | 'creeper' | 'pig' | 'cow' | 'sheep'
@@ -231,7 +232,7 @@ export function updateMobs(delta: number): void {
             }
         }
 
-        // Movement
+        // Movement & Pathfinding
         if (mob.target && (mob.state === 'chase' || mob.state === 'wander' || mob.state === 'flee')) {
             const tdx = mob.target[0] - mob.pos[0];
             const tdz = mob.target[2] - mob.pos[2];
@@ -239,15 +240,39 @@ export function updateMobs(delta: number): void {
 
             if (tDist > 0.5) {
                 const speed = stats.speed * delta;
-                mob.pos[0] += (tdx / tDist) * speed;
-                mob.pos[2] += (tdz / tDist) * speed;
-                mob.rotation = Math.atan2(tdx, tdz);
 
-                // Jump up blocks? (Simplified auto-jump)
-                // const s = useGameStore.getState(); // already have s
-                const forwardBlock = getGroundLevel(mob.pos[0] + (tdx / tDist) * 0.5, mob.pos[2] + (tdz / tDist) * 0.5, s);
-                if (forwardBlock > mob.pos[1] && forwardBlock < mob.pos[1] + 1.2) {
-                    mob.vel[1] = 5; // Hop
+                // Get next optimal step using pathfinding
+                const next = getNextStep(mob.pos[0], mob.pos[1], mob.pos[2], mob.target[0], mob.target[1], mob.target[2]);
+
+                let nx = mob.target[0];
+                let nz = mob.target[2];
+                let shouldJump = false;
+
+                if (next) {
+                    nx = next.x;
+                    nz = next.z;
+                    shouldJump = next.jump;
+                }
+
+                const ndx = nx - mob.pos[0];
+                const ndz = nz - mob.pos[2];
+                const nDist = Math.sqrt(ndx * ndx + ndz * ndz);
+
+                if (nDist > 0.1) {
+                    mob.pos[0] += (ndx / nDist) * speed;
+                    mob.pos[2] += (ndz / nDist) * speed;
+                    mob.rotation = Math.atan2(ndx, ndz);
+                }
+
+                // Smooth climbing / Jumps
+                if (shouldJump && mob.vel[1] === 0) {
+                    mob.vel[1] = 6.5; // Jump impulse
+                } else if (!next) {
+                    // Fallback to old simple auto-climb if pathfinding doesn't know what to do
+                    const forwardBlock = getGroundLevel(mob.pos[0] + (tdx / tDist) * 0.5, mob.pos[2] + (tdz / tDist) * 0.5, s);
+                    if (forwardBlock > mob.pos[1] && forwardBlock < mob.pos[1] + 1.2 && mob.vel[1] === 0) {
+                        mob.vel[1] = 5.5; // Hop
+                    }
                 }
             } else if (mob.state === 'wander') {
                 mob.state = 'idle';
@@ -266,17 +291,33 @@ export function updateMobs(delta: number): void {
         }
 
         // Gravity
-        const groundY = getGroundLevel(mob.pos[0], mob.pos[2], s);
-        if (mob.pos[1] > groundY + 1) {
+        const bx = Math.floor(mob.pos[0]);
+        const bz = Math.floor(mob.pos[2]);
+
+        const hasGround = isSolid(bx, Math.floor(mob.pos[1] - 0.1), bz);
+
+        if (!hasGround) {
             mob.vel[1] += GRAVITY * delta;
             mob.pos[1] += mob.vel[1] * delta;
-            if (mob.pos[1] < groundY + 1) {
-                mob.pos[1] = groundY + 1;
+
+            // Ceiling Bonk
+            if (mob.vel[1] > 0 && isSolid(bx, Math.floor(mob.pos[1] + 1.8), bz)) {
+                mob.vel[1] = 0;
+            }
+            // Floor Snap
+            if (mob.vel[1] < 0 && isSolid(bx, Math.floor(mob.pos[1]), bz)) {
+                mob.pos[1] = Math.floor(mob.pos[1]) + 1;
                 mob.vel[1] = 0;
             }
         } else {
-            mob.pos[1] = groundY + 1;
-            mob.vel[1] = 0;
+            if (mob.vel[1] < 0) {
+                mob.vel[1] = 0;
+                mob.pos[1] = Math.floor(mob.pos[1] - 0.1) + 1;
+            } else if (mob.vel[1] > 0) {
+                // Currently jumping up
+                mob.pos[1] += mob.vel[1] * delta;
+                mob.vel[1] += GRAVITY * delta;
+            }
         }
 
         // Remove dead mobs

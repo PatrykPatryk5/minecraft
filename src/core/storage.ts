@@ -6,44 +6,11 @@
  * - File API: For exporting/importing .mcraft save files.
  */
 
-// ─── IndexedDB for World Chunks ─────────────────────────
-const DB_NAME = 'MuzykantCraftDB';
-const STORE_NAME = 'chunks';
-const DB_VERSION = 1;
-
-let dbPromise: Promise<IDBDatabase> | null = null;
-
-function getDB(): Promise<IDBDatabase> {
-    if (dbPromise) return dbPromise;
-
-    dbPromise = new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
-
-        request.onupgradeneeded = (e) => {
-            const db = (e.target as IDBOpenDBRequest).result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.createObjectStore(STORE_NAME);
-            }
-        };
-    });
-
-    return dbPromise;
-}
+import { get, set, clear, entries, setMany } from 'idb-keyval';
 
 export async function saveChunk(key: string, data: Uint16Array): Promise<void> {
     try {
-        const db = await getDB();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            const store = tx.objectStore(STORE_NAME);
-            const request = store.put(data, key);
-
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject(request.error);
-        });
+        await set(key, data);
     } catch (e) {
         console.error('Failed to save chunk to IndexedDB', e);
     }
@@ -51,15 +18,8 @@ export async function saveChunk(key: string, data: Uint16Array): Promise<void> {
 
 export async function loadChunk(key: string): Promise<Uint16Array | null> {
     try {
-        const db = await getDB();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readonly');
-            const store = tx.objectStore(STORE_NAME);
-            const request = store.get(key);
-
-            request.onsuccess = () => resolve(request.result ? (request.result as Uint16Array) : null);
-            request.onerror = () => reject(request.error);
-        });
+        const data = await get<Uint16Array>(key);
+        return data || null;
     } catch (e) {
         console.error('Failed to load chunk from IndexedDB', e);
         return null;
@@ -68,15 +28,7 @@ export async function loadChunk(key: string): Promise<Uint16Array | null> {
 
 export async function clearAllChunks(): Promise<void> {
     try {
-        const db = await getDB();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            const store = tx.objectStore(STORE_NAME);
-            const request = store.clear();
-
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject(request.error);
-        });
+        await clear();
     } catch (e) {
         console.error('Failed to clear chunks', e);
     }
@@ -84,27 +36,12 @@ export async function clearAllChunks(): Promise<void> {
 
 export async function getAllChunksData(): Promise<Record<string, number[]>> {
     try {
-        const db = await getDB();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readonly');
-            const store = tx.objectStore(STORE_NAME);
-            const request = store.getAllKeys();
-
-            request.onsuccess = async () => {
-                const keys = request.result as string[];
-                const allData: Record<string, number[]> = {};
-
-                for (const key of keys) {
-                    const chunkData = await loadChunk(key);
-                    if (chunkData) {
-                        // Convert Uint16Array to regular array for JSON serialization
-                        allData[key] = Array.from(chunkData);
-                    }
-                }
-                resolve(allData);
-            };
-            request.onerror = () => reject(request.error);
-        });
+        const allEntries = await entries<string, Uint16Array>();
+        const allData: Record<string, number[]> = {};
+        for (const [key, chunkData] of allEntries) {
+            allData[key] = Array.from(chunkData);
+        }
+        return allData;
     } catch (e) {
         console.error('Failed to get all chunks data', e);
         return {};
@@ -112,23 +49,14 @@ export async function getAllChunksData(): Promise<Record<string, number[]>> {
 }
 
 export async function importChunksData(chunksRecord: Record<string, number[]>): Promise<void> {
-    const db = await getDB();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-
-    // Using a promise array to wait for all puts to complete
-    const promises: Promise<void>[] = [];
-
-    for (const [key, numArray] of Object.entries(chunksRecord)) {
-        promises.push(new Promise((resolve, reject) => {
-            const data = new Uint16Array(numArray);
-            const req = store.put(data, key);
-            req.onsuccess = () => resolve();
-            req.onerror = () => reject(req.error);
-        }));
+    try {
+        const elements: [string, Uint16Array][] = Object.entries(chunksRecord).map(
+            ([k, v]) => [k, new Uint16Array(v)]
+        );
+        await setMany(elements);
+    } catch (e) {
+        console.error('Failed to import chunks data', e);
     }
-
-    await Promise.all(promises);
 }
 
 

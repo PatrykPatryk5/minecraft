@@ -7,6 +7,7 @@
  */
 
 import { createNoise2D, createNoise3D } from 'simplex-noise';
+import seedrandom from 'seedrandom';
 import { BlockType } from './blockTypes';
 
 // ─── Constants ───────────────────────────────────────────
@@ -15,24 +16,15 @@ export const MAX_HEIGHT = 256;
 export const SEA_LEVEL = 62;
 
 // ─── Deterministic RNG ───────────────────────────────────
-function mulberry32(a: number): () => number {
-    return () => {
-        let t = (a += 0x6d2b79f5);
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
 let currentSeed = Math.floor(Math.random() * 2147483647);
-let n2 = createNoise2D(mulberry32(currentSeed));
-let n3 = createNoise3D(mulberry32(currentSeed));
+let n2 = createNoise2D(seedrandom(currentSeed.toString()));
+let n3 = createNoise3D(seedrandom(currentSeed.toString()));
 
 /** Initialize terrain with a specific seed. Must be called before any chunks are generated. */
 export function initSeed(seed: number): void {
     currentSeed = seed;
-    n2 = createNoise2D(mulberry32(seed));
-    n3 = createNoise3D(mulberry32(seed));
+    n2 = createNoise2D(seedrandom(seed.toString()));
+    n3 = createNoise3D(seedrandom(seed.toString()));
 }
 
 /** Get the current world seed */

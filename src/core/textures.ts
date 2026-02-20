@@ -7,6 +7,7 @@
  */
 
 import * as THREE from 'three';
+import seedrandom from 'seedrandom';
 import { BLOCK_DATA, BlockType } from './blockTypes';
 
 const TEX_SIZE = 16;
@@ -15,8 +16,7 @@ const materialCache = new Map<string, THREE.MeshStandardMaterial>();
 
 // ─── Deterministic RNG ───────────────────────────────────
 function sRng(seed: number): () => number {
-    let s = seed;
-    return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; };
+    return seedrandom(seed.toString());
 }
 
 type RGB = [number, number, number];
@@ -77,6 +77,8 @@ function drawStone(ctx: CanvasRenderingContext2D, seed: number) {
         }
     }
 }
+
+
 
 function drawCobble(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
@@ -647,6 +649,16 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.FENCE_OAK: drawFence(ctx, seed); return;
 
         case BlockType.STONE: drawStone(ctx, seed); return;
+        case BlockType.COAL_ORE:
+        case BlockType.IRON_ORE:
+        case BlockType.GOLD_ORE:
+        case BlockType.DIAMOND:
+        case BlockType.EMERALD_ORE:
+        case BlockType.LAPIS_ORE:
+        case BlockType.REDSTONE_ORE:
+            drawOre(ctx, hex(data.ore || '#ffffff'), seed);
+            return;
+
         case BlockType.COBBLE: drawCobble(ctx, seed); return;
         case BlockType.MOSSY_COBBLE: drawCobble(ctx, seed); // add moss
             for (let i = 0; i < 18; i++) { const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0; px(ctx, sx, sy, 60 + (rng() * 25 | 0), 110 + (rng() * 20 | 0), 40); } return;

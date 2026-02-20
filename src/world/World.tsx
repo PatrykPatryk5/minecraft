@@ -250,7 +250,7 @@ const World: React.FC = () => {
     return (
         <>
             {visibleChunks.map((c) => (
-                <Chunk key={c.key} cx={c.cx} cz={c.cz} lod={c.lod} />
+                <Chunk key={c.key} cx={c.cx} cz={c.cz} lod={c.lod} dist={c.dist} />
             ))}
             {dimension === 'end' && !useGameStore.getState().dragonDefeated && <EnderDragon />}
             <fog attach="fog" args={[

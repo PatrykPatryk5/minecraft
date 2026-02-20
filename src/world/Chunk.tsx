@@ -99,9 +99,10 @@ interface ChunkProps {
     cx: number;
     cz: number;
     lod?: 0 | 1 | 2; // 0=full, 1=no AO, 2=simplified
+    dist?: number;
 }
 
-const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
+const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, dist = 0 }) => {
     const key = chunkKey(cx, cz);
     const prevGeoRef = useRef<THREE.BufferGeometry[]>([]);
 
@@ -207,18 +208,42 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                             if (nc) nbt = nc[blockIndex(nlx, ny, nlz)];
                         }
 
-                        if (!isTransparent(nbt)) continue;
-                        if (bt === nbt && bt !== BlockType.LEAVES) continue;
-
-                        const atlasUV = getAtlasUV(bt, face.name);
-
                         let liquidHeight = 1.0;
+                        let neighborLiquidHeight = 1.0;
+
                         if (isLiquidBlock) {
                             let up = 0;
                             if (y < MAX_HEIGHT - 1) up = chunkData[blockIndex(lx, y + 1, lz)];
                             if (up !== bt) liquidHeight = 0.88;
+
+                            if (nbt === bt) {
+                                let n_up = 0;
+                                if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
+                                    n_up = chunkData[blockIndex(nx, ny + 1, nz)];
+                                } else if (ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
+                                    let nc: ChunkData | undefined;
+                                    let nlx = nx, nlz = nz;
+                                    if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
+                                    else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
+                                    else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
+                                    else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
+                                    if (nc) n_up = nc[blockIndex(nlx, ny + 1, nlz)];
+                                }
+                                if (n_up !== nbt) neighborLiquidHeight = 0.88;
+                            }
                         }
 
+                        if (!isTransparent(nbt)) continue;
+
+                        if (bt === nbt && bt !== BlockType.LEAVES) {
+                            if (isLiquidBlock && liquidHeight > neighborLiquidHeight) {
+                                // Draw the connecting face because we are taller!
+                            } else {
+                                continue;
+                            }
+                        }
+
+                        const atlasUV = getAtlasUV(bt, face.name);
                         const baseIdx = isWater ? waterIdx : solidIdx;
 
                         for (let i = 0; i < 4; i++) {
@@ -265,26 +290,21 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                                 target.color.push(1.0, 1.0, 1.0);
                             }
 
-                            if (!isWater) {
-                                const isFloraBlock =
-                                    bt === BlockType.LEAVES ||
-                                    bt === BlockType.TALL_GRASS ||
-                                    bt === BlockType.FLOWER_RED ||
-                                    bt === BlockType.FLOWER_YELLOW ||
-                                    (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7);
+                            const isFloraBlock =
+                                bt === BlockType.LEAVES ||
+                                bt === BlockType.TALL_GRASS ||
+                                bt === BlockType.FLOWER_RED ||
+                                bt === BlockType.FLOWER_YELLOW ||
+                                (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7);
 
-                                // Only top vertices of flora move (y=1 or full block offsets), bottom stays anchored.
-                                // For leaves, we can move everything a bit.
-                                const isTopVert = corner[1] > 0;
-                                const swayLevel = isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0;
-                                solid.isFlora.push(swayLevel);
-                                target.isLiquid.push(0.0);
-                            }
+                            const isTopVert = corner[1] > 0;
+                            const swayLevel = isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0;
 
-                            // Add Liquid attributes
-                            if (isLiquidBlock && corner[1] > 0 && liquidHeight < 1.0) {
+                            target.isFlora.push(swayLevel);
+
+                            if (isLiquidBlock && isTopVert && liquidHeight < 1.0) {
                                 target.isLiquid.push(1.0); // Only animate top face if it's open
-                            } else if (isWater) {
+                            } else {
                                 target.isLiquid.push(0.0);
                             }
                         }
@@ -340,57 +360,67 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
 
     if (!meshData) return null;
 
+    const renderSolidMesh = () => (
+        <mesh geometry={meshData.solidGeo!} frustumCulled castShadow={useShadows} receiveShadow={useShadows}>
+            <meshStandardMaterial
+                map={meshData.atlas}
+                vertexColors
+                alphaTest={0.1}
+                transparent={false}
+                roughness={0.9}
+                metalness={0.05}
+                onBeforeCompile={(shader) => {
+                    shader.uniforms.uTime = { value: 0 };
+                    shader.uniforms.uChunkOffset = { value: new THREE.Vector2(cx * CHUNK_SIZE, cz * CHUNK_SIZE) };
+                    // Add attribute and uniform
+                    shader.vertexShader = shader.vertexShader.replace(
+                        '#include <common>',
+                        `
+                        #include <common>
+                        attribute float isFlora;
+                        attribute float isLiquid;
+                        uniform float uTime;
+                        uniform vec2 uChunkOffset;
+                        `
+                    );
+
+                    // Add displacement math
+                    shader.vertexShader = shader.vertexShader.replace(
+                        '#include <begin_vertex>',
+                        `
+                        #include <begin_vertex>
+                        float worldX = position.x + uChunkOffset.x;
+                        float worldZ = position.z + uChunkOffset.y;
+                        if (isFlora > 0.0) {
+                            float speed = uTime * 2.0;
+                            float swayX = sin(worldX * 2.0 + position.y * 3.0 + speed) * 0.08 * isFlora;
+                            float swayZ = cos(worldZ * 2.0 + position.y * 3.0 + (speed * 1.2)) * 0.08 * isFlora;
+                            transformed.x += swayX;
+                            transformed.z += swayZ;
+                        }
+                        if (isLiquid > 0.0) {
+                            float speed = uTime * 1.5;
+                            float wave = sin(worldX * 2.0 + worldZ * 2.0 + speed) * 0.06 * isLiquid;
+                            transformed.y += wave;
+                        }
+                        `
+                    );
+                    if (meshData.solidGeo) {
+                        meshData.solidGeo.userData.shader = shader;
+                    }
+                }}
+            />
+        </mesh>
+    );
+
     return (
         <group position={[cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE]}>
             {meshData.solidGeo && (
-                <RigidBody type="fixed" colliders="trimesh">
-                    <mesh geometry={meshData.solidGeo} frustumCulled castShadow={useShadows} receiveShadow={useShadows}>
-                        <meshStandardMaterial
-                            map={meshData.atlas}
-                            vertexColors
-                            alphaTest={0.1}
-                            transparent={false}
-                            roughness={0.9}
-                            metalness={0.05}
-                            onBeforeCompile={(shader) => {
-                                shader.uniforms.uTime = { value: 0 };
-                                // Add attribute and uniform
-                                shader.vertexShader = shader.vertexShader.replace(
-                                    '#include <common>',
-                                    `
-                                    #include <common>
-                                    attribute float isFlora;
-                                    attribute float isLiquid;
-                                    uniform float uTime;
-                                    `
-                                );
-
-                                // Add displacement math
-                                shader.vertexShader = shader.vertexShader.replace(
-                                    '#include <begin_vertex>',
-                                    `
-                                    #include <begin_vertex>
-                                    if (isFlora > 0.0) {
-                                        float speed = uTime * 2.0;
-                                        float swayX = sin(position.x * 2.0 + position.y * 3.0 + speed) * 0.08 * isFlora;
-                                        float swayZ = cos(position.z * 2.0 + position.y * 3.0 + (speed * 1.2)) * 0.08 * isFlora;
-                                        transformed.x += swayX;
-                                        transformed.z += swayZ;
-                                    }
-                                    if (isLiquid > 0.0) {
-                                        float speed = uTime * 1.5;
-                                        float wave = sin(position.x * 2.0 + position.z * 2.0 + speed) * 0.06 * isLiquid;
-                                        transformed.y += wave;
-                                    }
-                                    `
-                                );
-                                if (meshData.solidGeo) {
-                                    meshData.solidGeo.userData.shader = shader;
-                                }
-                            }}
-                        />
-                    </mesh>
-                </RigidBody>
+                dist <= 16 ? (
+                    <RigidBody type="fixed" colliders="trimesh">
+                        {renderSolidMesh()}
+                    </RigidBody>
+                ) : renderSolidMesh()
             )}
             {meshData.waterGeo && (
                 <mesh geometry={meshData.waterGeo} frustumCulled renderOrder={1} receiveShadow={useShadows}>
@@ -405,12 +435,14 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                         metalness={0.1}
                         onBeforeCompile={(shader) => {
                             shader.uniforms.uTime = { value: 0 };
+                            shader.uniforms.uChunkOffset = { value: new THREE.Vector2(cx * CHUNK_SIZE, cz * CHUNK_SIZE) };
                             shader.vertexShader = shader.vertexShader.replace(
                                 '#include <common>',
                                 `
                                 #include <common>
                                 attribute float isLiquid;
                                 uniform float uTime;
+                                uniform vec2 uChunkOffset;
                                 `
                             );
 
@@ -418,9 +450,11 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0 }) => {
                                 '#include <begin_vertex>',
                                 `
                                 #include <begin_vertex>
+                                float worldX = position.x + uChunkOffset.x;
+                                float worldZ = position.z + uChunkOffset.y;
                                 if (isLiquid > 0.0) {
                                     float speed = uTime * 1.5;
-                                    float wave = sin(position.x * 2.0 + position.z * 2.0 + speed) * 0.06 * isLiquid;
+                                    float wave = sin(worldX * 2.0 + worldZ * 2.0 + speed) * 0.06 * isLiquid;
                                     transformed.y += wave;
                                 }
                                 `

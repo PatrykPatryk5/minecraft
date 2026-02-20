@@ -1,36 +1,25 @@
+import * as Comlink from 'comlink';
 import { generateChunk, initSeed } from './terrainGen';
 import { generateEndChunk, generateNetherChunk } from './dimensionGen';
 
-// Helper to handle messages
-const ctx: Worker = self as any;
-
-ctx.onmessage = (e: MessageEvent) => {
-    const { type, cx, cz, id, seed, dimension } = e.data;
-
-    if (type === 'init') {
-        if (typeof seed === 'number') {
-            initSeed(seed);
-        }
-        ctx.postMessage({ type: 'ready' });
-        return;
+export class TerrainWorker {
+    initSeed(seed: number) {
+        initSeed(seed);
     }
 
-    if (cx !== undefined && cz !== undefined) {
-        // Generate chunk data
-        let data;
+    generate(cx: number, cz: number, dimension: string) {
+        let data: Uint16Array;
         if (dimension === 'end') {
             data = generateEndChunk(cx, cz);
         } else if (dimension === 'nether') {
             data = generateNetherChunk(cx, cz);
         } else {
-            // Default overworld
             data = generateChunk(cx, cz);
         }
 
-        // Send back (transfer buffer for performance)
-        ctx.postMessage(
-            { cx, cz, id, data, dimension },
-            [data.buffer] // Zero-copy transfer
-        );
+        // Return the data and mark the buffer as transferable for zero-copy performance
+        return Comlink.transfer(data, [data.buffer]);
     }
-};
+}
+
+Comlink.expose(new TerrainWorker());
