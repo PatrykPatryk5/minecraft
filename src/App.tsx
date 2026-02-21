@@ -86,9 +86,9 @@ const SceneContent: React.FC = () => {
             <BlockParticles />
 
             {usePostProcessing && isFabulous && (
-                <EffectComposer multisampling={0}>
-                    <N8AO aoRadius={2} intensity={1} color="black" />
-                    <SMAA />
+                <EffectComposer multisampling={graphics === 'fabulous' ? 4 : 0}>
+                    <N8AO aoRadius={2} intensity={0.8} color="black" />
+                    <SMAA edgeDetectionMode={1} />
                     <Vignette eskil={false} offset={0.1} darkness={0.2} />
                 </EffectComposer>
             )}

@@ -60,7 +60,8 @@ const ChatBox: React.FC = () => {
                 addMessage('/gamemode <survival|creative|spectator>', 'info');
                 addMessage('/tp <x> <y> <z> — teleportuj', 'info');
                 addMessage('/give <blockId> [ilość] — daj przedmioty', 'info');
-                addMessage('/time set <0-1> — ustaw czas (0.5=południe)', 'info');
+                addMessage('/time set <day|night|ticks> — ustaw czas', 'info');
+                addMessage('/weather <clear|rain|thunder> — ustaw pogodę', 'info');
                 addMessage('/kill — zabij gracza', 'info');
                 addMessage('/heal — ulecz i nakarm', 'info');
                 addMessage('/clear — wyczyść ekwipunek', 'info');
@@ -133,14 +134,38 @@ const ChatBox: React.FC = () => {
                 break;
             }
 
+            case '/set': {
+                if (parts[1] === 'time') {
+                    const val = parts[2];
+                    if (val === 'day') { s.setDayTime(0.35); addMessage('Czas: dzień', 'success'); }
+                    else if (val === 'night') { s.setDayTime(0.85); addMessage('Czas: noc', 'success'); }
+                    else {
+                        const t = parseFloat(val);
+                        if (!isNaN(t)) {
+                            const finalT = t > 1 ? (t % 24000) / 24000 : t;
+                            s.setDayTime(finalT);
+                            addMessage(`Czas ustawiony na: ${(finalT * 24000).toFixed(0)}`, 'success');
+                        } else {
+                            addMessage('Użyj: /set time <day|night|ticks>', 'error');
+                        }
+                    }
+                }
+                break;
+            }
             case '/time': {
                 if (parts[1] === 'set') {
-                    const t = parseFloat(parts[2]);
-                    if (!isNaN(t) && t >= 0 && t <= 1) {
-                        s.setDayTime(t);
-                        addMessage(`Czas ustawiony na: ${(t * 24000).toFixed(0)} (${t.toFixed(2)})`, 'success');
-                    } else {
-                        addMessage('Użyj: /time set <0-1> (0=północ, 0.25=wschód, 0.5=południe)', 'error');
+                    const val = parts[2];
+                    if (val === 'day') { s.setDayTime(0.35); addMessage('Czas: dzień', 'success'); }
+                    else if (val === 'night') { s.setDayTime(0.85); addMessage('Czas: noc', 'success'); }
+                    else {
+                        const t = parseFloat(val);
+                        if (!isNaN(t)) {
+                            const finalT = t > 1 ? (t % 24000) / 24000 : t;
+                            s.setDayTime(finalT);
+                            addMessage(`Czas ustawiony na: ${(finalT * 24000).toFixed(0)}`, 'success');
+                        } else {
+                            addMessage('Użyj: /time set <day|night|ticks>', 'error');
+                        }
                     }
                 } else if (parts[1] === 'day') {
                     s.setDayTime(0.35);
@@ -149,7 +174,7 @@ const ChatBox: React.FC = () => {
                     s.setDayTime(0.85);
                     addMessage('Czas: noc', 'success');
                 } else {
-                    addMessage('Użyj: /time <set|day|night> [wartość]', 'error');
+                    addMessage('Użyj: /time set <day|night|ticks>', 'error');
                 }
                 break;
             }

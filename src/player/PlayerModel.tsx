@@ -51,11 +51,15 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
         }
 
         // Handle walk animation based on distance moved THIS frame
+        // Use a small epsilon to avoid jittering
         const moveDist = prevPos.current.distanceTo(currentPos.current);
-        if (moveDist > 0.01) {
-            walkTime.current += moveDist * 10; // Animation speed
+        const isUnderwater = playerState.isUnderwater;
+
+        if (moveDist > 0.005) {
+            const animSpeed = isUnderwater ? 4 : 10;
+            walkTime.current += moveDist * animSpeed;
         } else {
-            walkTime.current *= 0.8; // Idle decay
+            walkTime.current *= 0.85; // Faster decay for smoother stop
         }
         prevPos.current.copy(currentPos.current);
 
@@ -70,10 +74,17 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
             }
 
             // Limb swing animations
-            const swingX = Math.sin(walkTime.current) * 0.8;
+            const swingX = Math.sin(walkTime.current) * (isUnderwater ? 0.4 : 0.8);
+            const swingY = isUnderwater ? Math.cos(walkTime.current * 0.5) * 0.1 : 0; // Subtle floating bob in water
 
-            if (leftArmRef.current) leftArmRef.current.rotation.x = -swingX;
-            if (rightArmRef.current) rightArmRef.current.rotation.x = swingX;
+            if (leftArmRef.current) {
+                leftArmRef.current.rotation.x = -swingX;
+                leftArmRef.current.position.y = 1.5 + swingY;
+            }
+            if (rightArmRef.current) {
+                rightArmRef.current.rotation.x = swingX;
+                rightArmRef.current.position.y = 1.5 + swingY;
+            }
             if (leftLegRef.current) leftLegRef.current.rotation.x = swingX;
             if (rightLegRef.current) rightLegRef.current.rotation.x = -swingX;
         }

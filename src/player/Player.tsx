@@ -37,7 +37,7 @@ import { buildNetherPortalSafe } from '../core/portalSystem';
 
 // ─── Constants ───────────────────────────────────────────
 const GRAVITY = -28;
-const JUMP_FORCE = 9.5;
+const JUMP_FORCE = 8.5; // Adjusted for ~1.25 block height
 const TERMINAL_VEL = -50;
 const WALK_SPEED = 4.317;
 const SPRINT_SPEED = 5.612;
@@ -62,7 +62,7 @@ const AIR_FRICTION = 1.8;
 const WATER_FRICTION = 4;
 const COYOTE_TIME = 0.12;
 const JUMP_BUFFER_TIME = 0.12;
-const JUMP_RELEASE_MULT = 0.45;
+const JUMP_RELEASE_MULT = 1.0; // Minecraft has constant jump velocity until gravity takes over
 const PLACE_REPEAT_INTERVAL = 0.15;
 const FALL_DAMAGE_THRESHOLD = 3;
 const SPRINT_HUNGER_RATE = 0.15; // hunger/sec while sprinting
@@ -99,6 +99,9 @@ const Player: React.FC = () => {
     const bowCharge = useRef(0);
     const isChargingBow = useRef(false);
     const rayDirRef = useRef(new THREE.Vector3());
+    const forwardVec = useRef(new THREE.Vector3());
+    const rightVec = useRef(new THREE.Vector3());
+    const flatForwardVec = useRef(new THREE.Vector3());
     const coyoteTimer = useRef(0);
     const jumpBufferTimer = useRef(0);
     const jumpHeldLast = useRef(false);
@@ -532,11 +535,13 @@ const Player: React.FC = () => {
             const vel = velocity.current;
             const p = pos.current;
             const mode = s.gameMode;
+            const forward = forwardVec.current;
+            const right = rightVec.current;
+            const flatForward = flatForwardVec.current;
 
-            const forward = new THREE.Vector3();
             camera.getWorldDirection(forward);
-            const flatForward = forward.clone(); flatForward.y = 0; flatForward.normalize();
-            const right = new THREE.Vector3().crossVectors(flatForward, new THREE.Vector3(0, 1, 0)).normalize();
+            flatForward.copy(forward); flatForward.y = 0; flatForward.normalize();
+            right.crossVectors(flatForward, new THREE.Vector3(0, 1, 0)).normalize();
 
             const k = keys.current ?? {};
             const jumpHeld = !!k.Space;
@@ -626,6 +631,8 @@ const Player: React.FC = () => {
                 p.add(move.multiplyScalar(dt));
                 camera.position.copy(p);
                 s.setPlayerPos([p.x, p.y, p.z]);
+                s.setPlayerVel([move.x, move.y, move.z]); // Spectator use move vector as vel
+                s.setPlayerRot([camera.rotation.y, camera.rotation.x]);
                 if (highlightRef.current) highlightRef.current.visible = false;
                 continue;
             }
@@ -707,7 +714,7 @@ const Player: React.FC = () => {
                     swimTimer.current = 0;
                 }
             } else {
-                if (jumpBufferTimer.current > 0 && coyoteTimer.current > 0) {
+                if ((jumpBufferTimer.current > 0 || jumpHeld) && coyoteTimer.current > 0) {
                     vel.y = JUMP_FORCE;
                     onGround.current = false;
                     fallStart.current = p.y;
@@ -1175,6 +1182,8 @@ const Player: React.FC = () => {
 
         const pp = s.playerPos;
         pp[0] = pos.current.x; pp[1] = pos.current.y; pp[2] = pos.current.z;
+        const pv = s.playerVel;
+        pv[0] = velocity.current.x; pv[1] = velocity.current.y; pv[2] = velocity.current.z;
         const pr = s.playerRot;
         pr[0] = camera.rotation.y; pr[1] = camera.rotation.x;
 
@@ -1192,7 +1201,11 @@ const Player: React.FC = () => {
             if (hit && s.gameMode !== 'spectator') {
                 highlightRef.current.position.set(hit.block[0] + 0.5, hit.block[1] + 0.5, hit.block[2] + 0.5);
                 highlightRef.current.visible = true;
-            } else { highlightRef.current.visible = false; }
+                s.setLookingAt(hit.block);
+            } else {
+                highlightRef.current.visible = false;
+                s.setLookingAt(null);
+            }
         }
 
         // ─── Audio Listener ──────────────────────────────────

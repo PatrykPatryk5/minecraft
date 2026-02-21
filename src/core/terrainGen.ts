@@ -47,7 +47,7 @@ function octave2D(x: number, z: number, octaves: number, persistence: number, sc
 // ─── Biomes ──────────────────────────────────────────────
 export type Biome = 'plains' | 'forest' | 'desert' | 'mountains' | 'snowy' | 'swamp' | 'jungle' | 'taiga';
 
-function getBiome(x: number, z: number): Biome {
+export function getBiome(x: number, z: number): Biome {
     const temp = octave2D(x + 5000, z + 5000, 2, 0.5, 0.003);
     const moist = octave2D(x + 10000, z + 10000, 2, 0.5, 0.004);
     const cont = octave2D(x + 20000, z + 20000, 2, 0.5, 0.002);

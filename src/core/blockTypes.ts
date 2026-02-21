@@ -73,6 +73,7 @@ export enum BlockType {
     MOSSY_STONE_BRICKS = 56,
     GLOWSTONE = 57,
     NETHERRACK = 58,
+    NETHER_QUARTZ_ORE = 79,
     // ─── Utility Blocks ─────────────────────────────────
     CHEST = 59,
     TRAPDOOR = 60,
@@ -199,6 +200,7 @@ export enum BlockType {
     EMERALD = 204,
     LAPIS = 205,
     REDSTONE = 206,
+    QUARTZ = 227,
     STRING = 207,
     FEATHER = 208,
     GUNPOWDER = 209,
@@ -255,6 +257,10 @@ export enum BlockType {
     IRON_CHESTPLATE = 411,
     IRON_LEGGINGS = 412,
     IRON_BOOTS = 413,
+    GOLD_HELMET = 414,
+    GOLD_CHESTPLATE = 415,
+    GOLD_LEGGINGS = 416,
+    GOLD_BOOTS = 417,
     DIAMOND_HELMET = 420,
     DIAMOND_CHESTPLATE = 421,
     DIAMOND_LEGGINGS = 422,
@@ -402,6 +408,7 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.MOSSY_COBBLE]: { name: 'Omszony Bruk', color: '#6a7a5a', transparent: false, solid: true, breakTime: 2.0, tool: 'pickaxe' },
     [BlockType.COBBLE_SLAB]: { name: 'Płyta Brukowa', color: '#777777', transparent: false, solid: true, breakTime: 2.0, tool: 'pickaxe' },
     [BlockType.NETHERRACK]: { name: 'Netherrak', color: '#6a2020', transparent: false, solid: true, breakTime: 0.4, tool: 'pickaxe' },
+    [BlockType.NETHER_QUARTZ_ORE]: { name: 'Ruda Kwarcu', color: '#6a2020', ore: '#f0ece4', transparent: false, solid: true, breakTime: 2.0, tool: 'pickaxe' },
     // ─── Metal & Gem Blocks ─────────────────────────────
     [BlockType.IRON_BLOCK]: { name: 'Blok Żelaza', color: '#d8d8d8', transparent: false, solid: true, breakTime: 5.0, tool: 'pickaxe' },
     [BlockType.GOLD_BLOCK]: { name: 'Blok Złota', color: '#ffd700', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
@@ -478,6 +485,7 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.EMERALD]: { name: 'Szmaragd', color: '#22cc44', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.LAPIS]: { name: 'Lapis Lazuli', color: '#2244aa', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.REDSTONE]: { name: 'Redstone', color: '#cc2222', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.QUARTZ]: { name: 'Kwarc', color: '#f0ece4', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.STRING]: { name: 'Nić', color: '#eeeeee', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.FEATHER]: { name: 'Pióro', color: '#e8e8e8', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.GUNPOWDER]: { name: 'Proch', color: '#555555', transparent: false, solid: false, breakTime: 0, isItem: true },
@@ -546,6 +554,10 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.IRON_CHESTPLATE]: { name: 'Żelazny Napierśnik', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 6, maxDurability: 240 },
     [BlockType.IRON_LEGGINGS]: { name: 'Żelazne Spodnie', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 5, maxDurability: 225 },
     [BlockType.IRON_BOOTS]: { name: 'Żelazne Buty', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 2, maxDurability: 195 },
+    [BlockType.GOLD_HELMET]: { name: 'Złoty Hełm', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 2, maxDurability: 77 },
+    [BlockType.GOLD_CHESTPLATE]: { name: 'Złoty Napierśnik', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 5, maxDurability: 112 },
+    [BlockType.GOLD_LEGGINGS]: { name: 'Złote Spodnie', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 3, maxDurability: 105 },
+    [BlockType.GOLD_BOOTS]: { name: 'Złote Buty', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 1, maxDurability: 91 },
     [BlockType.DIAMOND_HELMET]: { name: 'Diamentowy Hełm', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 3, maxDurability: 363 },
     [BlockType.DIAMOND_CHESTPLATE]: { name: 'Diamentowy Napierśnik', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 8, maxDurability: 528 },
     [BlockType.DIAMOND_LEGGINGS]: { name: 'Diamentowe Spodnie', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 6, maxDurability: 495 },
@@ -761,6 +773,7 @@ export function getBlockDrop(type: number): number {
         case BlockType.EMERALD_ORE: return BlockType.EMERALD;
         case BlockType.LAPIS_ORE: return BlockType.LAPIS;
         case BlockType.REDSTONE_ORE: return BlockType.REDSTONE;
+        case BlockType.NETHER_QUARTZ_ORE: return BlockType.QUARTZ;
         case BlockType.GLOWSTONE: return BlockType.GLOWSTONE_DUST;
         case BlockType.CLAY: return BlockType.CLAY_BALL;
         case BlockType.MELON: return BlockType.MELON_SLICE;

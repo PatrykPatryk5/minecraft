@@ -5,6 +5,8 @@ import { FACES, isTransparent, getAtlasUV, initWorkerUVs, AtlasUV } from './mesh
 import { BLOCK_DATA, BlockType } from './blockTypes';
 
 export class TerrainWorker {
+    private padded: Uint16Array = new Uint16Array(18 * 270 * 18); // Slightly larger for safety
+
     initSeed(seed: number) {
         initSeed(seed);
     }
@@ -32,7 +34,8 @@ export class TerrainWorker {
         // Padded buffer for AO (18x258x18)
         const PH = MAX_HEIGHT + 2;
         const PD = CHUNK_SIZE + 2;
-        const padded = new Uint16Array((CHUNK_SIZE + 2) * PH * PD);
+        const padded = this.padded;
+        padded.fill(0);
 
         for (let lx = -1; lx <= CHUNK_SIZE; lx++) {
             for (let lz = -1; lz <= CHUNK_SIZE; lz++) {
@@ -40,15 +43,15 @@ export class TerrainWorker {
                 if (!targetChunk) continue;
                 const nlx = (lx + 16) % 16;
                 const nlz = (lz + 16) % 16;
+                const baseIdx = (lx + 1) * PH * PD + (lz + 1);
                 for (let y = 0; y < MAX_HEIGHT; y++) {
-                    padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)] = targetChunk[blockIndex(nlx, y, nlz)];
+                    padded[baseIdx + (y + 1) * PD] = targetChunk[blockIndex(nlx, y, nlz)];
                 }
             }
         }
 
         const isSolidAt = (lx: number, y: number, lz: number): boolean => {
-            const raw = padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)];
-            const id = raw & 0x0FFF;
+            const id = padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)] & 0x0FFF;
             return id > 0 && (BLOCK_DATA[id]?.solid ?? false);
         };
 

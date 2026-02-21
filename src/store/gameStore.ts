@@ -177,6 +177,8 @@ export interface GameState {
     // ── Player ────────────────────────────────────────────
     playerPos: [number, number, number];
     setPlayerPos: (p: [number, number, number]) => void;
+    playerVel: [number, number, number];
+    setPlayerVel: (v: [number, number, number]) => void;
     playerRot: [number, number];
     setPlayerRot: (r: [number, number]) => void;
 
@@ -242,6 +244,8 @@ export interface GameState {
     // ── Mining Progress ────────────────────────────────────
     miningProgressValue: number;
     setMiningProgress: (p: number) => void;
+    lookingAt: [number, number, number] | null;
+    setLookingAt: (pos: [number, number, number] | null) => void;
 
     // ── Day/Night ─────────────────────────────────────────
     dayTime: number;
@@ -285,8 +289,8 @@ export interface GameState {
     setPlayerName: (n: string) => void;
     isMultiplayer: boolean;
     setIsMultiplayer: (v: boolean) => void;
-    connectedPlayers: Record<string, { name: string; pos: [number, number, number]; rot?: [number, number]; dimension?: string }>;
-    addConnectedPlayer: (id: string, name: string, pos: [number, number, number], rot?: [number, number], dimension?: string) => void;
+    connectedPlayers: Record<string, { name: string; pos: [number, number, number]; rot?: [number, number]; dimension?: string; isUnderwater?: boolean }>;
+    addConnectedPlayer: (id: string, name: string, pos: [number, number, number], rot?: [number, number], dimension?: string, isUnderwater?: boolean) => void;
     removeConnectedPlayer: (id: string) => void;
     clearConnectedPlayers: () => void;
     chatMessages: { sender: string; text: string; time: number; type?: 'info' | 'error' | 'success' | 'system' | 'player' }[];
@@ -520,9 +524,9 @@ const useGameStore = create<GameState>((set, get) => ({
         }
     },
 
-    weather: 'clear',
+    weather: 'clear' as 'clear' | 'rain' | 'thunder',
     weatherIntensity: 0,
-    setWeather: (w, intensity = 1) => set({ weather: w, weatherIntensity: intensity }),
+    setWeather: (type, intensity) => set({ weather: type, weatherIntensity: intensity }),
 
     arrows: {},
     addArrow: (pos, velocity) => {
@@ -704,8 +708,10 @@ const useGameStore = create<GameState>((set, get) => ({
     setWorldSeed: (seed) => set({ worldSeed: seed }),
 
     // ── Player ────────────────────────────────────────────
-    playerPos: [0, 80, 0] as [number, number, number],
+    playerPos: [8, 80, 8] as [number, number, number],
     setPlayerPos: (p) => set({ playerPos: p }),
+    playerVel: [0, 0, 0] as [number, number, number],
+    setPlayerVel: (v) => set({ playerVel: v }),
     playerRot: [0, 0] as [number, number],
     setPlayerRot: (r) => set({ playerRot: r }),
 
@@ -1054,7 +1060,9 @@ const useGameStore = create<GameState>((set, get) => ({
 
     // ── Mining Progress ──────────────────────────────────
     miningProgressValue: 0,
-    setMiningProgress: (p) => set({ miningProgressValue: p }),
+    setMiningProgress: (p: number) => set({ miningProgressValue: p }),
+    lookingAt: null,
+    setLookingAt: (pos) => set({ lookingAt: pos }),
 
     // ── Multiplayer ───────────────────────────────────────
     // Provide a Math.random fallback since crypto.randomUUID() is unavailable on non-HTTPS LAN connections
@@ -1065,8 +1073,8 @@ const useGameStore = create<GameState>((set, get) => ({
     isMultiplayer: false,
     setIsMultiplayer: (v) => set({ isMultiplayer: v }),
     connectedPlayers: {},
-    addConnectedPlayer: (id, name, pos, rot, dimension) => set((s) => ({
-        connectedPlayers: { ...s.connectedPlayers, [id]: { name, pos, rot, dimension } },
+    addConnectedPlayer: (id, name, pos, rot, dimension, isUnderwater) => set((s) => ({
+        connectedPlayers: { ...s.connectedPlayers, [id]: { name, pos, rot, dimension, isUnderwater } },
     })),
     removeConnectedPlayer: (id) => set((s) => {
         const { [id]: _, ...rest } = s.connectedPlayers;

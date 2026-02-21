@@ -166,40 +166,39 @@ function drawGrassSide(ctx: CanvasRenderingContext2D, seed: number) {
 
 function drawGrassTop(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
-    // 1. Solid base
-    ctx.fillStyle = '#5fae3c';
+    // 1. Solid base - use a slightly more vibrant green
+    ctx.fillStyle = '#71bc4c';
     ctx.fillRect(0, 0, 16, 16);
 
-    // 2. Soft tonal variation (kept in bright range, no near-black pixels)
+    // 2. Soft tonal variation (strictly NO near-black pixels)
+    // The previous implementation might have had issues with rounding or range
     for (let y = 0; y < 16; y++) {
         for (let x = 0; x < 16; x++) {
-            const v = (rng() * 18 - 9);
-            const r = Math.max(86, Math.min(126, Math.round(96 + v * 0.35)));
-            const g = Math.max(142, Math.min(182, Math.round(164 + v)));
-            const b = Math.max(34, Math.min(64, Math.round(44 + v * 0.25)));
+            const v = (rng() * 20 - 10);
+            // Ensure R, G, B are always in healthy green ranges
+            const r = Math.max(100, Math.min(130, Math.round(115 + v * 0.4)));
+            const g = Math.max(160, Math.min(200, Math.round(180 + v)));
+            const b = Math.max(40, Math.min(70, Math.round(55 + v * 0.3)));
             px(ctx, x, y, r, g, b);
         }
     }
 
-    // 3. Add brighter micro-flecks only (no dark "black square" dots)
-    for (let i = 0; i < 28; i++) {
+    // 3. Add brighter micro-flecks (highlights)
+    for (let i = 0; i < 35; i++) {
         const sx = (rng() * 16) | 0;
         const sy = (rng() * 16) | 0;
-        const boost = 8 + ((rng() * 10) | 0);
-        const r = 98 + ((rng() * 10) | 0);
-        const g = Math.min(195, 168 + boost);
-        const b = 46 + ((rng() * 8) | 0);
+        const boost = 5 + ((rng() * 15) | 0);
+        const r = 120 + ((rng() * 10) | 0);
+        const g = Math.min(215, 185 + boost);
+        const b = 50 + ((rng() * 10) | 0);
         px(ctx, sx, sy, r, g, b);
     }
 
-    // 4. Stabilize border/corners to avoid edge artifacts
-    const edge: RGB = [94, 162, 44];
-    for (let i = 0; i < 16; i++) {
-        px(ctx, i, 0, edge[0], edge[1], edge[2]);
-        px(ctx, i, 15, edge[0], edge[1], edge[2]);
-        px(ctx, 0, i, edge[0], edge[1], edge[2]);
-        px(ctx, 15, i, edge[0], edge[1], edge[2]);
-    }
+    // 4. Stabilize border/corners with explicit colors
+    // This helps with mipmapping and texture filtration artifacts
+    ctx.strokeStyle = '#7cbd52';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, 15, 15);
 }
 
 function drawSand(ctx: CanvasRenderingContext2D, seed: number) {

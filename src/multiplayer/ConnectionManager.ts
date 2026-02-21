@@ -146,7 +146,8 @@ export class ConnectionManager {
                     const dim = state.dimension;
                     const pos = state.playerPos;
                     const rot = state.playerRot;
-                    this.sendToHost({ type: 'join', payload: { name: playerName, dimension: dim, pos, rot } });
+                    const sub = state.isUnderwater;
+                    this.sendToHost({ type: 'join', payload: { name: playerName, dimension: dim, pos, rot, isUnderwater: sub } });
 
                     this.startPositionSync();
                     resolve();
@@ -222,7 +223,7 @@ export class ConnectionManager {
                 const startPos: [number, number, number] = packet.payload.pos || [0, 80, 0];
 
                 // Add to local state (Host's view of the world)
-                state.addConnectedPlayer(peerId, name, startPos, [0, 0], dim);
+                state.addConnectedPlayer(peerId, name, startPos, [0, 0], dim, packet.payload.isUnderwater);
                 state.addChatMessage('System', `${name} joined the game.`, 'system');
 
                 // Tell the new client about existing players
@@ -234,13 +235,14 @@ export class ConnectionManager {
                     name: state.playerName,
                     pos: state.playerPos,
                     rot: state.playerRot,
-                    dimension: state.dimension
+                    dimension: state.dimension,
+                    isUnderwater: state.isUnderwater
                 });
                 // 2. Other clients
                 for (const [id, p] of Object.entries(state.connectedPlayers)) {
                     if (id !== peerId) {
                         playersObj.push({
-                            id, name: p.name, pos: p.pos, rot: p.rot, dimension: p.dimension
+                            id, name: p.name, pos: p.pos, rot: p.rot, dimension: p.dimension, isUnderwater: p.isUnderwater
                         });
                     }
                 }
@@ -255,20 +257,20 @@ export class ConnectionManager {
                 // Broadcast join to others
                 const joinPkt: ServerPacket = {
                     type: 'player_join',
-                    payload: { id: peerId, name, pos: startPos, rot: [0, 0], dimension: dim }
+                    payload: { id: peerId, name, pos: startPos, rot: [0, 0], dimension: dim, isUnderwater: packet.payload.isUnderwater }
                 };
                 this.broadcast(joinPkt, peerId);
                 break;
             }
 
             case 'move': {
-                const { pos, rot, dimension } = packet.payload;
-                state.addConnectedPlayer(peerId, state.connectedPlayers[peerId]?.name || 'Unknown', pos, rot, dimension);
+                const { pos, rot, dimension, isUnderwater } = packet.payload;
+                state.addConnectedPlayer(peerId, state.connectedPlayers[peerId]?.name || 'Unknown', pos, rot, dimension, isUnderwater);
 
                 // Relay
                 this.broadcast({
                     type: 'player_move',
-                    payload: { id: peerId, pos, rot, dimension }
+                    payload: { id: peerId, pos, rot, dimension, isUnderwater: packet.payload.isUnderwater }
                 }, peerId);
                 break;
             }
@@ -316,7 +318,7 @@ export class ConnectionManager {
                 case 'move':
                     this.broadcast({
                         type: 'player_move',
-                        payload: { id: 'host', pos: packet.payload.pos, rot: packet.payload.rot, dimension: packet.payload.dimension }
+                        payload: { id: 'host', pos: packet.payload.pos, rot: packet.payload.rot, dimension: packet.payload.dimension, isUnderwater: packet.payload.isUnderwater }
                     });
                     break;
                 case 'block_place':
@@ -339,8 +341,10 @@ export class ConnectionManager {
     }
 
     sendMove(pos: [number, number, number], rot: [number, number]): void {
-        const dim = useGameStore.getState().dimension;
-        this.sendToHost({ type: 'move', payload: { pos, rot, dimension: dim } });
+        const state = useGameStore.getState();
+        const dim = state.dimension;
+        const sub = state.isUnderwater;
+        this.sendToHost({ type: 'move', payload: { pos, rot, dimension: dim, isUnderwater: sub } });
     }
 
     sendBlockPlace(x: number, y: number, z: number, blockType: number): void {
@@ -374,7 +378,7 @@ export class ConnectionManager {
                 }
                 console.log(`[MP] Welcome! ID: ${packet.payload.playerId}, ${packet.payload.players.length} players online`);
                 for (const p of packet.payload.players) {
-                    store.addConnectedPlayer(p.id, p.name, p.pos, p.rot, p.dimension);
+                    store.addConnectedPlayer(p.id, p.name, p.pos, p.rot, p.dimension, p.isUnderwater);
                 }
                 break;
 
@@ -384,7 +388,8 @@ export class ConnectionManager {
                     packet.payload.name,
                     packet.payload.pos,
                     packet.payload.rot,
-                    packet.payload.dimension
+                    packet.payload.dimension,
+                    packet.payload.isUnderwater
                 );
                 store.addChatMessage('System', `${packet.payload.name} joined!`, 'system');
                 break;
@@ -398,7 +403,7 @@ export class ConnectionManager {
                 const { id, pos, rot, dimension } = packet.payload;
                 if (store.connectedPlayers[id]) {
                     const prev = store.connectedPlayers[id];
-                    store.addConnectedPlayer(id, prev.name, pos, rot ?? prev.rot, dimension ?? prev.dimension);
+                    store.addConnectedPlayer(id, prev.name, pos, rot ?? prev.rot, dimension ?? prev.dimension, packet.payload.isUnderwater);
                 }
                 break;
 
