@@ -67,6 +67,7 @@ export interface GameSettings {
     particles: 'all' | 'decreased' | 'minimal';
     smoothLighting: boolean;
     fullscreen: boolean;
+    brightness: number; // 0.01 to 1.0
     keybinds: Keybinds;
 }
 
@@ -92,6 +93,13 @@ export interface FallingBlock {
     id: string;
     type: number;
     pos: [number, number, number];
+}
+
+export interface ArrowEntity {
+    id: string;
+    pos: [number, number, number];
+    velocity: [number, number, number];
+    ownerId?: string;
 }
 
 export interface FurnaceState {
@@ -133,6 +141,10 @@ export interface GameState {
     worldSeed: number;
     worldName: string;
 
+    arrows: Record<string, ArrowEntity>;
+    addArrow: (pos: [number, number, number], velocity: [number, number, number]) => void;
+    removeArrow: (id: string) => void;
+
     setChunkData: (cx: number, cz: number, dimension: string, data: Uint16Array) => void;
     getBlock: (x: number, y: number, z: number) => number;
     addBlock: (x: number, y: number, z: number, typeId: number, fromNetwork?: boolean) => void;
@@ -143,6 +155,11 @@ export interface GameState {
     unloadChunkData: (keys: string[]) => void;
     getBlockPower: (x: number, y: number, z: number) => number;
     setBlockPower: (x: number, y: number, z: number, power: number) => void;
+
+    // ── Weather ───────────────────────────────────────────
+    weather: 'clear' | 'rain' | 'thunder';
+    weatherIntensity: number; // 0..1 for transitions
+    setWeather: (w: 'clear' | 'rain' | 'thunder', intensity?: number) => void;
 
     // ── Player ────────────────────────────────────────────
     playerPos: [number, number, number];
@@ -155,7 +172,10 @@ export interface GameState {
     hunger: number;
     maxHunger: number;
     setHealth: (h: number) => void;
+    takeDamage: (amount: number, options?: { ignoreArmor?: boolean }) => void;
     setHunger: (h: number) => void;
+
+    // ── Settings ──────────────────────────────────────────
 
     // ── XP System ──────────────────────────────────────────
     xp: number;
@@ -333,6 +353,7 @@ const defaultSettings: GameSettings = {
     particles: 'all',
     smoothLighting: true,
     fullscreen: false,
+    brightness: 0.5,
     keybinds: { ...defaultKeybinds },
 };
 
@@ -456,6 +477,11 @@ const useGameStore = create<GameState>((set, get) => ({
         // Generally, replacing a block resets power to 0.
         chunk[blockIndex(lx, y, lz)] = typeId & 0x0FFF;
 
+        // Trigger Redstone update
+        import('../core/redstoneSystem').then(({ updateRedstone }) => {
+            updateRedstone(x, y, z);
+        });
+
         // Save to IndexedDB
         saveChunk(`${state.dimension}:${cx},${cz}`, chunk);
 
@@ -465,6 +491,25 @@ const useGameStore = create<GameState>((set, get) => ({
                 getConnection().sendBlockPlace(x, y, z, typeId);
             });
         }
+    },
+
+    weather: 'clear',
+    weatherIntensity: 0,
+    setWeather: (w, intensity = 1) => set({ weather: w, weatherIntensity: intensity }),
+
+    arrows: {},
+    addArrow: (pos, velocity) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        set((s) => ({
+            arrows: { ...s.arrows, [id]: { id, pos, velocity } }
+        }));
+    },
+    removeArrow: (id) => {
+        set((s) => {
+            const next = { ...s.arrows };
+            delete next[id];
+            return { arrows: next };
+        });
     },
 
     setBlockPower: (x, y, z, power) => {
@@ -480,9 +525,17 @@ const useGameStore = create<GameState>((set, get) => ({
         const idx = blockIndex(lx, y, lz);
         const raw = chunk[idx];
         const id = raw & 0x0FFF;
+        const currentPower = (raw >> 12) & 0x0F;
+
         // Apply 4-bit power (capped 0-15)
         const p = Math.max(0, Math.min(15, power));
+        if (p === currentPower) return; // Skip if no change
+
         chunk[idx] = id | (p << 12);
+
+        set((s) => ({
+            chunkVersions: { ...s.chunkVersions, [key]: (s.chunkVersions[key] ?? 0) + 1 },
+        }));
 
         // No need to save to DB for every power change if it's frequent?
         // Actually, redstone state SHOULD persist.
@@ -498,7 +551,15 @@ const useGameStore = create<GameState>((set, get) => ({
         const lz = ((z % 16) + 16) % 16;
         const chunk = get().chunks[key];
         if (!chunk) return;
-        chunk[blockIndex(lx, y, lz)] = 0; // Reset ID and power to 0
+        const idx = blockIndex(lx, y, lz);
+        if (chunk[idx] === 0) return; // Already air
+
+        chunk[idx] = 0; // Reset ID and power to 0
+
+        // Trigger Redstone update
+        import('../core/redstoneSystem').then(({ updateRedstone }) => {
+            updateRedstone(x, y, z);
+        });
 
         // Save to IndexedDB
         saveChunk(`${get().dimension}:${cx},${cz}`, chunk);
@@ -545,6 +606,45 @@ const useGameStore = create<GameState>((set, get) => ({
         const clamped = Math.max(0, Math.min(get().maxHealth, h));
         set({ health: clamped });
         if (clamped <= 0 && !get().isDead) set({ isDead: true });
+    },
+    takeDamage: (amount, options = {}) => {
+        if (get().gameMode === 'creative' || get().isDead) return;
+
+        const armor = get().armor;
+        let armorPoints = 0;
+
+        if (!options.ignoreArmor) {
+            if (armor.helmet.id) armorPoints += BLOCK_DATA[armor.helmet.id]?.armorPoints || 0;
+            if (armor.chestplate.id) armorPoints += BLOCK_DATA[armor.chestplate.id]?.armorPoints || 0;
+            if (armor.leggings.id) armorPoints += BLOCK_DATA[armor.leggings.id]?.armorPoints || 0;
+            if (armor.boots.id) armorPoints += BLOCK_DATA[armor.boots.id]?.armorPoints || 0;
+        }
+
+        const reduction = options.ignoreArmor ? 1 : (1 - (armorPoints * 0.04));
+        const finalDamage = Math.max(options.ignoreArmor ? 0.5 : 1, amount * reduction);
+
+        const currentHealth = get().health;
+        get().setHealth(currentHealth - finalDamage);
+
+        // Damage armor durability
+        if (armorPoints > 0 && !options.ignoreArmor) {
+            const nextArmor = { ...armor };
+            let changed = false;
+            ['helmet', 'chestplate', 'leggings', 'boots'].forEach((slot) => {
+                const s = (nextArmor as any)[slot];
+                if (s.id && s.durability !== undefined) {
+                    s.durability -= 1;
+                    changed = true;
+                    if (s.durability <= 0) {
+                        s.id = 0;
+                        s.count = 0;
+                    }
+                }
+            });
+            if (changed) set({ armor: nextArmor });
+        }
+
+        import('../audio/sounds').then(({ playSound }) => playSound('hurt'));
     },
     setHunger: (h) => set({ hunger: Math.max(0, Math.min(get().maxHunger, h)) }),
 

@@ -90,7 +90,7 @@ function explodeAt(x: number, y: number, z: number): void {
     const playerDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (playerDist < EXPLOSION_RADIUS * 2) {
         const dmg = Math.max(0, EXPLOSION_DAMAGE * (1 - playerDist / (EXPLOSION_RADIUS * 2)));
-        s.setHealth(s.health - Math.round(dmg));
+        s.takeDamage(Math.round(dmg));
         playSound('hurt');
     }
 }
@@ -190,6 +190,31 @@ export function handleBlockAction(
             playSound('open');
             document.exitPointerLock();
             return true;
+        case BlockType.LEVER: {
+            import('./redstoneSystem').then(({ toggleLever }) => {
+                toggleLever(blockX, blockY, blockZ);
+            });
+            playSound('click');
+            return true;
+        }
+        case BlockType.BUTTON: {
+            import('./redstoneSystem').then(({ updateRedstone }) => {
+                const s = useGameStore.getState();
+                s.setBlockPower(blockX, blockY, blockZ, 15);
+                updateRedstone(blockX, blockY, blockZ);
+
+                // Reset button after 1s
+                setTimeout(() => {
+                    const innerState = useGameStore.getState();
+                    if (innerState.getBlock(blockX, blockY, blockZ) === BlockType.BUTTON) {
+                        innerState.setBlockPower(blockX, blockY, blockZ, 0);
+                        updateRedstone(blockX, blockY, blockZ);
+                    }
+                }, 1000);
+            });
+            playSound('click');
+            return true;
+        }
         default:
             return false;
     }

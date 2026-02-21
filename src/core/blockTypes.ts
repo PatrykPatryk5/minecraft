@@ -86,6 +86,7 @@ export enum BlockType {
     REDSTONE_TORCH = 67,
     REDSTONE_LAMP = 68,
     REDSTONE_WIRE = 69,
+    REDSTONE_BLOCK = 70,
     // ─── Nether & End Blocks ────────────────────────────
     END_STONE = 71,
     NETHER_BRICKS = 72,
@@ -237,11 +238,12 @@ export interface BlockInfo {
     readonly transparent: boolean;
     readonly solid: boolean;
     readonly breakTime: number;    // seconds to break (0 = instant)
-    readonly tool?: 'pickaxe' | 'axe' | 'shovel' | 'sword' | 'hand';
+    readonly tool?: 'pickaxe' | 'axe' | 'shovel' | 'hoe' | 'sword' | 'hand';
     readonly isItem?: boolean;     // not a placeable block, just an item
     readonly stackSize?: number;   // max per stack (default 64)
     readonly light?: number;       // emits light 0-15
     readonly foodRestore?: number; // hunger points restored
+    readonly armorPoints?: number; // armor points provided
     readonly emissive?: boolean;   // emits light (visual glow)
     readonly maxDurability?: number; // amount of uses before tool breaks
 }
@@ -420,18 +422,18 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.WHEAT_6]: { name: 'Pszenica (etap 6)', color: '#cccc00', transparent: true, solid: false, breakTime: 0 },
     [BlockType.WHEAT_7]: { name: 'Pszenica (gotowa)', color: '#dccfa0', transparent: true, solid: false, breakTime: 0 },
     // ─── Armor ───────────────────────────────────────────
-    [BlockType.LEATHER_HELMET]: { name: 'Skórzany Hełm', color: '#8B4513', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.LEATHER_CHESTPLATE]: { name: 'Skórzany Napierśnik', color: '#8B4513', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.LEATHER_LEGGINGS]: { name: 'Skórzane Spodnie', color: '#8B4513', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.LEATHER_BOOTS]: { name: 'Skórzane Buty', color: '#8B4513', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.IRON_HELMET]: { name: 'Żelazny Hełm', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.IRON_CHESTPLATE]: { name: 'Żelazny Napierśnik', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.IRON_LEGGINGS]: { name: 'Żelazne Spodnie', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.IRON_BOOTS]: { name: 'Żelazne Buty', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.DIAMOND_HELMET]: { name: 'Diamentowy Hełm', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.DIAMOND_CHESTPLATE]: { name: 'Diamentowy Napierśnik', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.DIAMOND_LEGGINGS]: { name: 'Diamentowe Spodnie', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.DIAMOND_BOOTS]: { name: 'Diamentowe Buty', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.LEATHER_HELMET]: { name: 'Skórzany Hełm', color: '#8B4513', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 1, maxDurability: 55 },
+    [BlockType.LEATHER_CHESTPLATE]: { name: 'Skórzany Napierśnik', color: '#8B4513', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 3, maxDurability: 80 },
+    [BlockType.LEATHER_LEGGINGS]: { name: 'Skórzane Spodnie', color: '#8B4513', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 2, maxDurability: 75 },
+    [BlockType.LEATHER_BOOTS]: { name: 'Skórzane Buty', color: '#8B4513', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 1, maxDurability: 65 },
+    [BlockType.IRON_HELMET]: { name: 'Żelazny Hełm', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 2, maxDurability: 165 },
+    [BlockType.IRON_CHESTPLATE]: { name: 'Żelazny Napierśnik', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 6, maxDurability: 240 },
+    [BlockType.IRON_LEGGINGS]: { name: 'Żelazne Spodnie', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 5, maxDurability: 225 },
+    [BlockType.IRON_BOOTS]: { name: 'Żelazne Buty', color: '#c0c0c0', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 2, maxDurability: 195 },
+    [BlockType.DIAMOND_HELMET]: { name: 'Diamentowy Hełm', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 3, maxDurability: 363 },
+    [BlockType.DIAMOND_CHESTPLATE]: { name: 'Diamentowy Napierśnik', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 8, maxDurability: 528 },
+    [BlockType.DIAMOND_LEGGINGS]: { name: 'Diamentowe Spodnie', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 6, maxDurability: 495 },
+    [BlockType.DIAMOND_BOOTS]: { name: 'Diamentowe Buty', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 3, maxDurability: 429 },
     // ─── Progression Items ───────────────────────────────
     [BlockType.ENDER_PEARL]: { name: 'Perła Endera', color: '#1a7a5e', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.BLAZE_ROD]: { name: 'Pręt Blaze', color: '#ffaa00', transparent: false, solid: false, breakTime: 0, isItem: true },
@@ -448,7 +450,9 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.LEVER]: { name: 'Dźwignia', color: '#8b7355', top: '#666666', transparent: true, solid: false, breakTime: 0.3, tool: 'hand' },
     [BlockType.REDSTONE_TORCH]: { name: 'Pochodnia Redstone', color: '#cc0000', transparent: true, solid: false, breakTime: 0, tool: 'hand', emissive: true },
     [BlockType.REDSTONE_LAMP]: { name: 'Lampa Redstone', color: '#8b6914', top: '#aa8833', transparent: false, solid: true, breakTime: 0.3, tool: 'pickaxe' },
-    [BlockType.REDSTONE_WIRE]: { name: 'Redstone', color: '#cc0000', transparent: true, solid: false, breakTime: 0, tool: 'hand' },
+    [BlockType.REDSTONE_WIRE]: { name: 'Czerwony Proszek', color: '#cc2222', transparent: true, solid: false, breakTime: 0 },
+    [BlockType.REDSTONE_BLOCK]: { name: 'Blok Redstone', color: '#ee1111', transparent: false, solid: true, breakTime: 1.0, tool: 'pickaxe' },
+    [BlockType.BUTTON]: { name: 'Przycisk', color: '#888888', transparent: true, solid: false, breakTime: 0.1 },
     // ─── Nether & End Blocks ────────────────────────────
     [BlockType.END_STONE]: { name: 'Kamień Endu', color: '#e8e8aa', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
     [BlockType.NETHER_BRICKS]: { name: 'Cegły Netheru', color: '#44222a', transparent: false, solid: true, breakTime: 2.0, tool: 'pickaxe' },

@@ -36,8 +36,9 @@ const FACES: FaceDef[] = [
 ];
 
 function isTransparent(bt: number): boolean {
-    if (!bt) return true;
-    return BLOCK_DATA[bt]?.transparent ?? true;
+    const id = bt & 0x0FFF;
+    if (!id) return true;
+    return BLOCK_DATA[id]?.transparent ?? true;
 }
 
 // ─── Geometry Pool ───────────────────────────────────────
@@ -165,9 +166,9 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
             const isSolidAt = (lx: number, y: number, lz: number): boolean => {
                 if (y < 0) return true;
                 if (y >= MAX_HEIGHT) return false;
-                let type = 0;
+                let raw = 0;
                 if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
-                    type = chunkData[blockIndex(lx, y, lz)];
+                    raw = chunkData[blockIndex(lx, y, lz)];
                 } else {
                     let nc: ChunkData | undefined;
                     let nlx = lx, nlz = lz;
@@ -175,9 +176,10 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                     else if (lx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
                     else if (lz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
                     else if (lz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                    if (nc) type = nc[blockIndex(nlx, y, nlz)];
+                    if (nc) raw = nc[blockIndex(nlx, y, nlz)];
                 }
-                return type > 0 && (BLOCK_DATA[type]?.solid ?? false);
+                const id = raw & 0x0FFF;
+                return id > 0 && (BLOCK_DATA[id]?.solid ?? false);
             };
 
             let maxChunkHeight = 0;
@@ -192,7 +194,10 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
             for (let lx = 0; lx < CHUNK_SIZE; lx++) {
                 for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                     for (let y = 0; y <= maxChunkHeight; y++) {
-                        const bt = chunkData[blockIndex(lx, y, lz)];
+                        const raw = chunkData[blockIndex(lx, y, lz)];
+                        const bt = raw & 0x0FFF;
+                        const power = (raw & 0xF000) >> 12;
+
                         if (!bt) continue;
 
                         const isLiquidBlock = bt === BlockType.WATER || bt === BlockType.LAVA;
@@ -205,9 +210,9 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                             const ny = y + face.dir[1];
                             const nz = lz + face.dir[2];
 
-                            let nbt = 0;
+                            let nbt_raw = 0;
                             if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0 && ny < MAX_HEIGHT) {
-                                nbt = chunkData[blockIndex(nx, ny, nz)];
+                                nbt_raw = chunkData[blockIndex(nx, ny, nz)];
                             } else if (ny >= 0 && ny < MAX_HEIGHT) {
                                 let nc: ChunkData | undefined;
                                 let nlx = nx, nlz = nz;
@@ -215,21 +220,22 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                                 else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
                                 else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
                                 else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                                if (nc) nbt = nc[blockIndex(nlx, ny, nlz)];
+                                if (nc) nbt_raw = nc[blockIndex(nlx, ny, nlz)];
                             }
+                            const nbt = nbt_raw & 0x0FFF;
 
                             let liquidHeight = 1.0;
                             let neighborLiquidHeight = 1.0;
 
                             if (isLiquidBlock) {
-                                let up = 0;
-                                if (y < MAX_HEIGHT - 1) up = chunkData[blockIndex(lx, y + 1, lz)];
-                                if (up !== bt) liquidHeight = 0.88;
+                                let up_raw = 0;
+                                if (y < MAX_HEIGHT - 1) up_raw = chunkData[blockIndex(lx, y + 1, lz)];
+                                if ((up_raw & 0x0FFF) !== bt) liquidHeight = 0.88;
 
                                 if (nbt === bt) {
-                                    let n_up = 0;
+                                    let n_up_raw = 0;
                                     if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
-                                        n_up = chunkData[blockIndex(nx, ny + 1, nz)];
+                                        n_up_raw = chunkData[blockIndex(nx, ny + 1, nz)];
                                     } else if (ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
                                         let nc: ChunkData | undefined;
                                         let nlx = nx, nlz = nz;
@@ -237,9 +243,9 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                                         else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
                                         else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
                                         else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                                        if (nc) n_up = nc[blockIndex(nlx, ny + 1, nlz)];
+                                        if (nc) n_up_raw = nc[blockIndex(nlx, ny + 1, nlz)];
                                     }
-                                    if (n_up !== nbt) neighborLiquidHeight = 0.88;
+                                    if ((n_up_raw & 0x0FFF) !== nbt) neighborLiquidHeight = 0.88;
                                 }
                             }
 
@@ -303,10 +309,33 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                                         const c = isSolidAt(lx + ox, y + oy, lz + dz);
                                         aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
                                     }
-                                    const br = 1.0 - aoLevel * 0.24; // Increased AO intensity for better block connections
-                                    target.colors.push(br, br, br);
+                                    const br = 1.0 - aoLevel * 0.24;
+                                    let r = br, g = br, b = br;
+
+                                    // Colorize Redstone Wire
+                                    if (bt === BlockType.REDSTONE_WIRE) {
+                                        const intensity = 0.3 + (power / 15) * 0.7;
+                                        r *= intensity;
+                                        g *= (intensity * 0.1);
+                                        b *= (intensity * 0.1);
+                                    } else if (bt === BlockType.REDSTONE_LAMP && power > 0) {
+                                        r *= 1.4; g *= 1.2; b *= 0.8; // Warm glow
+                                    } else if (bt === BlockType.REDSTONE_TORCH && power > 0) {
+                                        r *= 1.5; g *= 0.3; b *= 0.3; // Intense red glow
+                                    }
+
+                                    target.colors.push(r, g, b);
                                 } else {
-                                    target.colors.push(1.0, 1.0, 1.0);
+                                    let r = 1, g = 1, b = 1;
+                                    if (bt === BlockType.REDSTONE_WIRE) {
+                                        const intensity = 0.3 + (power / 15) * 0.7;
+                                        r = intensity; g = intensity * 0.1; b = intensity * 0.1;
+                                    } else if (bt === BlockType.REDSTONE_LAMP && power > 0) {
+                                        r = 1.4; g = 1.2; b = 0.8;
+                                    } else if (bt === BlockType.REDSTONE_TORCH && power > 0) {
+                                        r = 1.5; g = 0.3; b = 0.3;
+                                    }
+                                    target.colors.push(r, g, b);
                                 }
 
                                 const isFloraBlock =

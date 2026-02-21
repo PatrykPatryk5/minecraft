@@ -11,7 +11,10 @@
  *   - Combat: hurt, eat, burp
  *   - Ambient: wind, cave, birds (looping)
  *   - Music: gentle procedural ambient pads
+ *   - Weather: rain loop, thunder crashes
  */
+
+import useGameStore from '../store/gameStore';
 
 let audioCtx: AudioContext | null = null;
 let masterGain: GainNode | null = null;
@@ -550,6 +553,85 @@ export function playSound(type: SoundType, pos?: [number, number, number]): void
 // ─── Ambient Sound System ────────────────────────────────
 let ambienceActive = false;
 let ambienceTimer: ReturnType<typeof setInterval> | null = null;
+let rainSource: AudioBufferSourceNode | null = null;
+let rainGain: GainNode | null = null;
+
+export function updateWeatherAudio(type: 'clear' | 'rain' | 'thunder', intensity: number): void {
+    try {
+        const ctx = getCtx();
+        if (!ambienceGain) return;
+
+        if (type === 'clear' || intensity <= 0) {
+            if (rainGain) rainGain.gain.setTargetAtTime(0, ctx.currentTime, 0.5);
+            return;
+        }
+
+        if (!rainSource) {
+            const sr = ctx.sampleRate;
+            const buf = ctx.createBuffer(1, sr * 2, sr);
+            const data = buf.getChannelData(0);
+            for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+
+            rainSource = ctx.createBufferSource();
+            rainSource.buffer = buf;
+            rainSource.loop = true;
+
+            rainGain = ctx.createGain();
+            rainGain.gain.value = 0;
+
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 800;
+
+            rainSource.connect(filter).connect(rainGain).connect(ambienceGain);
+            rainSource.start();
+        }
+
+        if (rainGain) {
+            const targetVol = type === 'thunder' ? intensity * 0.35 : intensity * 0.2;
+            rainGain.gain.setTargetAtTime(targetVol, ctx.currentTime, 0.5);
+        }
+    } catch { /* ignore */ }
+}
+
+let windSource: AudioBufferSourceNode | null = null;
+let windGain: GainNode | null = null;
+
+export function updateWindAudio(altitude: number, weatherIntensity: number): void {
+    try {
+        const ctx = getCtx();
+        if (!ambienceGain) return;
+
+        if (!windSource) {
+            const sr = ctx.sampleRate;
+            const buf = ctx.createBuffer(1, sr * 3, sr);
+            const data = buf.getChannelData(0);
+            for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+
+            windSource = ctx.createBufferSource();
+            windSource.buffer = buf;
+            windSource.loop = true;
+
+            windGain = ctx.createGain();
+            windGain.gain.value = 0;
+
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.value = 400;
+            filter.Q.value = 0.5;
+
+            windSource.connect(filter).connect(windGain).connect(ambienceGain);
+            windSource.start();
+        }
+
+        if (windGain) {
+            // Wind is louder at high altitude and during storms
+            const altFactor = Math.max(0, (altitude - 80) / 100);
+            const targetVol = 0.02 + (altFactor * 0.08) + (weatherIntensity * 0.1);
+            windGain.gain.setTargetAtTime(targetVol, ctx.currentTime, 1.0);
+        }
+    } catch { /* ignore */ }
+}
 
 export function startAmbience(): void {
     if (ambienceActive) return;
@@ -560,41 +642,57 @@ export function startAmbience(): void {
             const ctx = getCtx();
             if (!ambienceGain) return;
 
-            // Random ambient sounds
+            const s = useGameStore.getState();
+            const weather = s.weather;
+            const intensity = s.weatherIntensity;
+            const playerPos = s.playerPos;
+            const time = s.dayTime;
+
+            updateWeatherAudio(weather, intensity);
+            updateWindAudio(playerPos[1], intensity);
+
+            const isNight = time > 0.75 || time < 0.25;
+            const isUnderground = playerPos[1] < 40;
+
             const r = Math.random();
-            if (r < 0.05) {
-                // Cave drip
-                const osc = createTone(ctx, 2000 + Math.random() * 2000, 0.1, 'sine');
-                const env = ctx.createGain();
-                env.gain.setValueAtTime(0.03, ctx.currentTime);
-                env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
-                osc.connect(env).connect(ambienceGain);
-                osc.start(); osc.stop(ctx.currentTime + 0.1);
-            } else if (r < 0.08) {
-                // Bird chirp
-                const osc = createTone(ctx, 1500 + Math.random() * 1500, 0.15, 'sine');
-                osc.frequency.exponentialRampToValueAtTime(2000 + Math.random() * 1000, ctx.currentTime + 0.1);
-                const env = ctx.createGain();
-                env.gain.setValueAtTime(0.04, ctx.currentTime);
-                env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-                osc.connect(env).connect(ambienceGain);
-                osc.start(); osc.stop(ctx.currentTime + 0.15);
-            } else if (r < 0.1) {
-                // Wind gust
-                const noise = createNoise(ctx, 1.5);
-                const filter = ctx.createBiquadFilter();
-                filter.type = 'bandpass';
-                filter.frequency.value = 200 + Math.random() * 200;
-                filter.Q.value = 1;
+            if (weather === 'thunder' && Math.random() < 0.25) {
+                // Thunder crash
+                playSound('explode', [
+                    (Math.random() - 0.5) * 400,
+                    150,
+                    (Math.random() - 0.5) * 400
+                ]);
+            } else if (isUnderground && r < 0.1) {
+                // Cave eerie sound
+                const freq = 100 + Math.random() * 100;
+                const osc = createTone(ctx, freq, 2, 'sine');
                 const env = ctx.createGain();
                 env.gain.setValueAtTime(0, ctx.currentTime);
-                env.gain.linearRampToValueAtTime(0.05, ctx.currentTime + 0.5);
-                env.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.3);
-                noise.connect(filter).connect(env).connect(ambienceGain);
-                noise.start(); noise.stop(ctx.currentTime + 1.5);
+                env.gain.linearRampToValueAtTime(0.04, ctx.currentTime + 1);
+                env.gain.linearRampToValueAtTime(0, ctx.currentTime + 2);
+                osc.connect(env).connect(ambienceGain);
+                osc.start(); osc.stop(ctx.currentTime + 2);
+            } else if (!isUnderground && !isNight && weather === 'clear' && r < 0.12) {
+                // Bird chirp (Only day, clear sky, surface)
+                const base = 1200 + Math.random() * 1000;
+                const osc = createTone(ctx, base, 0.2, 'sine');
+                osc.frequency.exponentialRampToValueAtTime(base + 500, ctx.currentTime + 0.1);
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.03, ctx.currentTime);
+                env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+                osc.connect(env).connect(ambienceGain);
+                osc.start(); osc.stop(ctx.currentTime + 0.2);
+            } else if (isUnderground && r < 0.05) {
+                // Drip
+                const osc = createTone(ctx, 3000 + Math.random() * 1000, 0.05, 'sine');
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.02, ctx.currentTime);
+                env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+                osc.connect(env).connect(ambienceGain);
+                osc.start(); osc.stop(ctx.currentTime + 0.06);
             }
         } catch { /* ignore */ }
-    }, 3000);
+    }, 2000);
 }
 
 export function stopAmbience(): void {

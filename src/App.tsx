@@ -29,11 +29,13 @@ import KeybindScreen from './ui/KeybindScreen';
 import MultiplayerScreen from './ui/MultiplayerScreen';
 import MobRenderer from './mobs/MobRenderer';
 import { MultiplayerRenderer } from './multiplayer/MultiplayerRenderer';
+import Weather from './environment/Weather';
 import useGameStore from './store/gameStore';
 import { getRendererCaps, type RendererCapabilities } from './core/renderer';
 import { preloadAllTextures } from './core/textures';
 import DroppedItemsManager from './entities/DroppedItems';
 import FallingBlocksManager from './entities/FallingBlocks';
+import ArrowsManager from './entities/Arrows';
 
 const LoadingScreen: React.FC<{ caps: RendererCapabilities | null; progress: string }> = ({ caps, progress }) => (
     <div className="loading-screen">
@@ -68,8 +70,10 @@ const SceneContent: React.FC = () => {
                 <MultiplayerRenderer />
                 <DroppedItemsManager />
                 <FallingBlocksManager />
+                <ArrowsManager />
             </Physics>
             <Clouds />
+            <Weather />
             <TorchLights />
             <BlockParticles />
 

@@ -189,7 +189,7 @@ export function updateMobs(delta: number): void {
             // Blaze special behavior (ranged attack) - simplified for now
             if (mob.type === 'blaze' && dist < 15 && now - mob.lastAttackTime > 2000) {
                 // Simulate ranged attack (direct damage if line of sight)
-                s.setHealth(s.health - stats.damage);
+                s.takeDamage(stats.damage);
                 mob.lastAttackTime = now;
                 playSound('fireball');
             }
@@ -198,7 +198,7 @@ export function updateMobs(delta: number): void {
             if (mob.type !== 'creeper' && mob.type !== 'blaze' && dist < ATTACK_RANGE && now - mob.lastAttackTime > ATTACK_COOLDOWN) {
                 mob.state = 'attack';
                 mob.lastAttackTime = now;
-                s.setHealth(s.health - stats.damage);
+                s.takeDamage(stats.damage);
                 playSound('hurt');
             }
         } else {
@@ -208,7 +208,7 @@ export function updateMobs(delta: number): void {
                 mob.target = [...playerPos];
                 mob.state = 'chase';
                 if (dist < ATTACK_RANGE && now - mob.lastAttackTime > ATTACK_COOLDOWN) {
-                    s.setHealth(s.health - stats.damage);
+                    s.takeDamage(stats.damage);
                     mob.lastAttackTime = now;
                     playSound('hurt');
                 }

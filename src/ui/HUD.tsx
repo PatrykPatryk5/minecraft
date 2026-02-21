@@ -24,6 +24,16 @@ const HUD: React.FC = () => {
     const isChatOpen = useGameStore((s) => s.isChatOpen);
     const miningProg = useGameStore((s) => s.miningProgressValue);
     const isUnderwater = useGameStore((s) => s.isUnderwater);
+    const armorSlots = useGameStore((s) => s.armor);
+
+    const armorPoints = React.useMemo(() => {
+        let total = 0;
+        if (armorSlots.helmet.id) total += BLOCK_DATA[armorSlots.helmet.id]?.armorPoints || 0;
+        if (armorSlots.chestplate.id) total += BLOCK_DATA[armorSlots.chestplate.id]?.armorPoints || 0;
+        if (armorSlots.leggings.id) total += BLOCK_DATA[armorSlots.leggings.id]?.armorPoints || 0;
+        if (armorSlots.boots.id) total += BLOCK_DATA[armorSlots.boots.id]?.armorPoints || 0;
+        return total;
+    }, [armorSlots]);
 
     // Number keys 1-9
     useEffect(() => {
@@ -142,6 +152,19 @@ const HUD: React.FC = () => {
             {/* Health + Hunger (survival only) */}
             {showBars && (
                 <div className="status-bars">
+                    {armorPoints > 0 && (
+                        <div className="armor-bar">
+                            {Array.from({ length: 10 }, (_, i) => {
+                                const filled = armorPoints >= (i + 1) * 2;
+                                const partial = !filled && armorPoints >= (i * 2) + 1;
+                                return (
+                                    <span key={i} className={`armor-icon${filled ? '' : partial ? ' partial' : ' empty'}`}>
+                                        {filled ? '🛡️' : partial ? '🛡️' /* simplified */ : '🕳️'}
+                                    </span>
+                                );
+                            })}
+                        </div>
+                    )}
                     <div className="bar-row">
                         <div className="hearts">
                             {Array.from({ length: 10 }, (_, i) => (

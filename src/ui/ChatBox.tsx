@@ -154,6 +154,17 @@ const ChatBox: React.FC = () => {
                 break;
             }
 
+            case '/weather': {
+                const w = parts[1] as 'clear' | 'rain' | 'thunder';
+                if (w === 'clear' || w === 'rain' || w === 'thunder') {
+                    s.setWeather(w, 1.0);
+                    addMessage(`Pogoda ustawiona na: ${w}`, 'success');
+                } else {
+                    addMessage('Użyj: /weather <clear|rain|thunder>', 'error');
+                }
+                break;
+            }
+
             case '/kill':
                 s.setHealth(0);
                 addMessage('Gracz zabity!', 'error');

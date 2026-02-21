@@ -28,6 +28,8 @@ function lerpColor(a: THREE.Color, b: THREE.Color, t: number): THREE.Color {
 const DayNightCycle: React.FC = () => {
     const graphics = useGameStore((s) => s.settings.graphics);
     const renderDist = useGameStore((s) => s.settings.renderDistance);
+    const brightness = useGameStore((s) => s.settings.brightness || 0.5);
+    const brightnessMultiplier = brightness * 2;
     const useShadows = graphics !== 'fast';
     const shadowMapSize = graphics === 'fabulous' ? 4096 : 2048;
     const dirLightRef = useRef<THREE.DirectionalLight>(null);
@@ -53,7 +55,11 @@ const DayNightCycle: React.FC = () => {
         day: new THREE.Color('#356296'), // Darker, less blinding sky blue
         dawn: new THREE.Color('#884422'),
         night: new THREE.Color('#080812'),
+        storm: new THREE.Color('#444a55'),
     }), []);
+
+    const weather = useGameStore((s) => s.weather);
+    const weatherIntensity = useGameStore((s) => s.weatherIntensity);
 
     useFrame((_, delta) => {
         // Prevent massive time jumps on lag spikes
@@ -110,12 +116,14 @@ const DayNightCycle: React.FC = () => {
             }
 
             dirLightRef.current.color.copy(color);
-            dirLightRef.current.intensity = intensity;
+            // Darken world during rain
+            const weatherFactor = 1.0 - (weatherIntensity * 0.5);
+            dirLightRef.current.intensity = intensity * weatherFactor * brightnessMultiplier;
         }
 
         // ─── Ambient Light ───────────────────────────────
         if (ambLightRef.current) {
-            ambLightRef.current.intensity = isNight ? 0.4 : lerp(0.7, 1.0, sunFactor);
+            ambLightRef.current.intensity = (isNight ? 0.4 : lerp(0.7, 1.0, sunFactor)) * brightnessMultiplier;
             ambLightRef.current.color.copy(isNight ? skyColors.night : skyColors.day);
         }
 
@@ -124,11 +132,11 @@ const DayNightCycle: React.FC = () => {
             if (isNight) {
                 hemiRef.current.color.set('#0a0a2a');
                 hemiRef.current.groundColor.set('#221111');
-                hemiRef.current.intensity = 0.02;
+                hemiRef.current.intensity = 0.02 * brightnessMultiplier;
             } else {
                 hemiRef.current.color.copy(isDawn ? skyColors.dawn : skyColors.day);
                 hemiRef.current.groundColor.set('#553322');
-                hemiRef.current.intensity = 0.05 + sunFactor * 0.1;
+                hemiRef.current.intensity = (0.05 + sunFactor * 0.1) * brightnessMultiplier;
             }
         }
 
@@ -140,10 +148,14 @@ const DayNightCycle: React.FC = () => {
                 scene.fog.near = 1;
                 scene.fog.far = 25;
             } else {
-                const fogColor = isNight ? skyColors.night :
+                let fogColor = isNight ? skyColors.night :
                     isDawn ? lerpColor(skyColors.night, skyColors.dawn, ((t - 0.2) / 0.15)) :
                         isDusk ? lerpColor(skyColors.day, skyColors.night, ((t - 0.65) / 0.15)) :
                             skyColors.day;
+
+                if (weather !== 'clear') {
+                    fogColor = lerpColor(fogColor, skyColors.storm, weatherIntensity);
+                }
                 scene.fog.color.copy(fogColor);
 
                 const maxFog = renderDist * 16;

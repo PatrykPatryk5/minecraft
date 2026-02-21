@@ -78,6 +78,8 @@ const Player: React.FC = () => {
     const oxygenTimer = useRef(0);
     const drowningTimer = useRef(0);
     const portalCooldown = useRef(0);
+    const bowCharge = useRef(0);
+    const isChargingBow = useRef(false);
 
     const storeRef = useRef(useGameStore.getState());
     useEffect(() => {
@@ -176,13 +178,13 @@ const Player: React.FC = () => {
             const s = storeRef.current;
             if (!s.isLocked || s.activeOverlay !== 'none' || s.screen !== 'playing') return;
 
+            const selected = s.getSelectedBlock();
             const hit = raycastBlock();
 
             if (e.button === 0) {
                 // ── Break Block or Attack Mob ──
                 const dir = camera.getWorldDirection(new THREE.Vector3());
                 let damage = 2; // Base fist damage
-                const selected = s.getSelectedBlock();
                 if (selected) {
                     const toolName = BLOCK_DATA[selected]?.name?.toLowerCase() || '';
                     if (toolName.includes('miecz')) {
@@ -256,8 +258,20 @@ const Player: React.FC = () => {
                 }
             } else if (e.button === 2) {
                 // ── Right Click: Interact or Place Block ──
-                if (!hit) return;
+                if (!hit) {
+                    if (selected === BlockType.BOW && s.gameMode !== 'spectator') {
+                        isChargingBow.current = true;
+                        bowCharge.current = 0;
+                    }
+                    return;
+                }
                 if (s.gameMode === 'spectator') return;
+
+                if (selected === BlockType.BOW) {
+                    isChargingBow.current = true;
+                    bowCharge.current = 0;
+                    return;
+                }
 
                 // Check if we right-clicked a functional block
                 const [bx2, by2, bz2] = hit.block;
@@ -279,7 +293,6 @@ const Player: React.FC = () => {
                 }
 
                 // Check block actions (TNT, trapdoor, chest, etc.)
-                const selected = s.getSelectedBlock();
                 if (handleBlockAction(bx2, by2, bz2, clickedType, selected)) {
                     return;
                 }
@@ -398,6 +411,24 @@ const Player: React.FC = () => {
                 miningHeld.current = false;
                 miningTarget.current = null;
                 miningProgress.current = 0;
+            } else if (e.button === 2) {
+                if (isChargingBow.current) {
+                    const s = storeRef.current;
+                    const power = Math.min(1.0, bowCharge.current);
+                    if (power > 0.1) {
+                        const dir = camera.getWorldDirection(new THREE.Vector3());
+                        const velocity: [number, number, number] = [
+                            dir.x * 30 * power,
+                            dir.y * 30 * power,
+                            dir.z * 30 * power
+                        ];
+                        const origin: [number, number, number] = [camera.position.x, camera.position.y - 0.2, camera.position.z];
+                        s.addArrow(origin, velocity);
+                        playSound('bow');
+                    }
+                    isChargingBow.current = false;
+                    bowCharge.current = 0;
+                }
             }
         };
 
@@ -460,6 +491,10 @@ const Player: React.FC = () => {
     useFrame((_, rawDelta) => {
         const s = storeRef.current;
         if (s.activeOverlay !== 'none' || !s.isLocked || s.screen !== 'playing') return;
+
+        if (isChargingBow.current) {
+            bowCharge.current += rawDelta;
+        }
 
         accumulator.current += Math.min(rawDelta, 0.25);
 
@@ -635,18 +670,18 @@ const Player: React.FC = () => {
                     p.y = Math.floor(ny - PLAYER_HEIGHT) + 1 + PLAYER_HEIGHT;
 
                     // ─── Fall Damage ───────────────────────────
+                    const fallDist = fallStart.current - p.y;
                     if (wasInAir && mode === 'survival' && !inWater) {
-                        const fallDist = fallStart.current - p.y;
                         if (fallDist > FALL_DAMAGE_THRESHOLD) {
                             const damage = Math.floor(fallDist - FALL_DAMAGE_THRESHOLD);
                             if (damage > 0) {
-                                s.setHealth(s.health - damage);
+                                s.takeDamage(damage, { ignoreArmor: true });
                                 playSound('hurt', [p.x, p.y, p.z]);
-                                playSound('land', [p.x, p.y - PLAYER_HEIGHT, p.z]);
                             }
-                        } else if (fallDist > 1) {
-                            playSound('land', [p.x, p.y - PLAYER_HEIGHT, p.z]);
                         }
+                        playSound('land', [p.x, p.y - PLAYER_HEIGHT, p.z]);
+                    } else if (fallDist > 1) {
+                        playSound('land', [p.x, p.y - PLAYER_HEIGHT, p.z]);
                     }
 
                     vel.y = 0;
@@ -687,9 +722,8 @@ const Player: React.FC = () => {
             if (mode === 'survival' && s.hunger <= 0) {
                 hungerTimer.current += dt;
                 if (hungerTimer.current > 4) {
-                    s.setHealth(s.health - 1);
-                    playSound('hurt');
                     hungerTimer.current = 0;
+                    s.takeDamage(1, { ignoreArmor: true });
                 }
             }
 
@@ -698,9 +732,9 @@ const Player: React.FC = () => {
             if (mode === 'survival' && inLava) {
                 lavaTimer.current += dt;
                 if (lavaTimer.current >= LAVA_DAMAGE_INTERVAL) {
-                    s.setHealth(s.health - LAVA_DAMAGE_RATE);
-                    playSound('hurt');
                     lavaTimer.current = 0;
+                    s.takeDamage(LAVA_DAMAGE_RATE, { ignoreArmor: true });
+                    playSound('hurt');
                 }
                 // Slow movement in lava
                 vel.x *= 0.4;
@@ -733,7 +767,7 @@ const Player: React.FC = () => {
                             // Drowning damage
                             drowningTimer.current += dt; // Accumulate separate timer for damage
                             if (drowningTimer.current >= 1.0) {
-                                s.setHealth(s.health - 2);
+                                s.takeDamage(2, { ignoreArmor: true });
                                 playSound('hurt');
                                 drowningTimer.current = 0;
                             }
@@ -742,7 +776,7 @@ const Player: React.FC = () => {
                         // Only accumulate damage timer if O2 is empty
                         drowningTimer.current += dt;
                         if (drowningTimer.current >= 1.0) {
-                            s.setHealth(s.health - 2);
+                            s.takeDamage(2, { ignoreArmor: true });
                             playSound('hurt');
                             drowningTimer.current = 0;
                         }
