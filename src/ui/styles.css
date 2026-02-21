@@ -96,6 +96,27 @@
     color: #666;
 }
 
+.loading-credits {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    font-size: 8px;
+    color: #d6d6d6;
+    text-align: center;
+    line-height: 1.6;
+}
+
+.loading-credits a {
+    color: #8cc8ff;
+    text-decoration: none;
+}
+
+.loading-credits a:hover {
+    text-decoration: underline;
+}
+
 /* ================================================================
    MAIN MENU
    ================================================================ */
@@ -266,6 +287,24 @@
     width: calc(100% - 80px);
     font-size: 7px;
     color: #666;
+}
+
+.menu-credits {
+    margin-top: 18px;
+    text-align: center;
+    font-size: 8px;
+    line-height: 1.7;
+    color: #d6d6d6;
+    text-shadow: 1px 1px 0 #000;
+}
+
+.menu-credits a {
+    color: #8cc8ff;
+    text-decoration: none;
+}
+
+.menu-credits a:hover {
+    text-decoration: underline;
 }
 
 /* ─── Screen Title ────────────────────────────────── */

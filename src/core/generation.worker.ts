@@ -137,10 +137,12 @@ export class TerrainWorker {
                             target.uvs.push(atlasUV.u + face.uv[i][0] * atlasUV.su, atlasUV.v + face.uv[i][1] * atlasUV.sv);
                             let br = 1.0;
                             if (lod === 0 && !isWater) {
-                                br = 1.0 - cornerAO[i] * 0.2;
-                                // Prevent very dark corner artifacts on grass tops.
-                                if (bt === BlockType.GRASS && face.name === 'top') br = Math.max(br, 0.78);
-                                else br = Math.max(br, 0.42);
+                                // Keep grass fully bright to eliminate black corner artifacts.
+                                if (bt === BlockType.GRASS) {
+                                    br = face.name === 'top' ? 1.0 : 0.9;
+                                } else {
+                                    br = Math.max(1.0 - cornerAO[i] * 0.2, 0.42);
+                                }
                             }
                             let r = br, g = br, b = br;
                             if (bt === BlockType.REDSTONE_WIRE) {

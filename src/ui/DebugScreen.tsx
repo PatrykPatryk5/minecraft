@@ -78,7 +78,7 @@ const DebugScreen: React.FC = () => {
     return (
         <div className="debug-screen">
             <div className="debug-left">
-                <p><strong>Minecraft R3F</strong> v2.0 (React 19 + Three.js)</p>
+                <p><strong>Minecraft R3F</strong> v4.0 (React 19 + Three.js)</p>
                 <p><strong ref={fpsRef}>0</strong> FPS | {rendererLabel}</p>
                 <p>GPU: {gpuName}</p>
                 <p>Max Texture: {maxTex}px</p>

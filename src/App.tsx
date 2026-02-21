@@ -44,6 +44,12 @@ const LoadingScreen: React.FC<{ caps: RendererCapabilities | null; progress: str
         <div className="loading-text">{progress}</div>
         <div className="loading-bar"><div className="loading-fill" /></div>
         {caps && <div className="loading-gpu">{caps.label} | {caps.gpuName}</div>}
+        <div className="loading-credits">
+            <div>MADE BY: MUZYKANT TEAM</div>
+            <div>MAIN DEVELOPER: Patryk_Patryk_5</div>
+            <a href="https://muzykant.xyz" target="_blank" rel="noreferrer">https://muzykant.xyz</a>
+            <div>ALL RIGHTS RESERVED!</div>
+        </div>
     </div>
 );
 

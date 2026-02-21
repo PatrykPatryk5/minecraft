@@ -106,8 +106,14 @@ const MenuHome: React.FC = () => {
             </div>
 
             <div className="menu-footer">
-                <span>Minecraft R3F v3.0</span>
+                <span>Minecraft R3F v4.0</span>
                 <span>React 19 + Three.js + Zustand</span>
+            </div>
+            <div className="menu-credits">
+                <div>MADE BY: MUZYKANT TEAM</div>
+                <div>MAIN DEVELOPER: Patryk_Patryk_5</div>
+                <a href="https://muzykant.xyz" target="_blank" rel="noreferrer">https://muzykant.xyz</a>
+                <div>ALL RIGHTS RESERVED!</div>
             </div>
         </div>
     );

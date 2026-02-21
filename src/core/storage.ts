@@ -121,7 +121,7 @@ export async function exportWorldToFile(): Promise<void> {
     const chunks = await getAllChunksData();
 
     const saveFile: FullSaveFile = {
-        version: 1,
+        version: 4,
         player: playerState,
         chunks: chunks
     };

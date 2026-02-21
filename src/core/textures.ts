@@ -166,39 +166,40 @@ function drawGrassSide(ctx: CanvasRenderingContext2D, seed: number) {
 
 function drawGrassTop(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
-    // 1. Solid fill with a 1px overlap to ensure no edge transparency
-    ctx.fillStyle = '#5da83a';
-    ctx.fillRect(-1, -1, 18, 18);
+    // 1. Solid base
+    ctx.fillStyle = '#5fae3c';
+    ctx.fillRect(0, 0, 16, 16);
 
-    // 2. Base noise over the fill
+    // 2. Soft tonal variation (kept in bright range, no near-black pixels)
     for (let y = 0; y < 16; y++) {
         for (let x = 0; x < 16; x++) {
-            const v = (rng() * 40 - 20) | 0;
-            const r = 90 + (v * 0.4) | 0;
-            const g = 160 + v | 0;
-            const b = 40 + (v * 0.2) | 0;
-            ctx.fillStyle = `rgb(${r},${g},${b})`;
-            ctx.fillRect(x, y, 1, 1);
+            const v = (rng() * 18 - 9);
+            const r = Math.max(86, Math.min(126, Math.round(96 + v * 0.35)));
+            const g = Math.max(142, Math.min(182, Math.round(164 + v)));
+            const b = Math.max(34, Math.min(64, Math.round(44 + v * 0.25)));
+            px(ctx, x, y, r, g, b);
         }
     }
 
-    // 3. Small grass blades
-    for (let i = 0; i < 40; i++) {
+    // 3. Add brighter micro-flecks only (no dark "black square" dots)
+    for (let i = 0; i < 28; i++) {
         const sx = (rng() * 16) | 0;
         const sy = (rng() * 16) | 0;
-        const v = (rng() * 40 - 20) | 0;
-        const r = 70 + (v * 0.4) | 0;
-        const g = 130 + v | 0;
-        const b = 30 + (v * 0.2) | 0;
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(sx, sy, 1, 1);
+        const boost = 8 + ((rng() * 10) | 0);
+        const r = 98 + ((rng() * 10) | 0);
+        const g = Math.min(195, 168 + boost);
+        const b = 46 + ((rng() * 8) | 0);
+        px(ctx, sx, sy, r, g, b);
     }
 
-    // Clamp the four corners to a valid grass tone to avoid rare dark atlas artifacts.
-    px(ctx, 0, 0, 88, 156, 42);
-    px(ctx, 15, 0, 88, 156, 42);
-    px(ctx, 0, 15, 88, 156, 42);
-    px(ctx, 15, 15, 88, 156, 42);
+    // 4. Stabilize border/corners to avoid edge artifacts
+    const edge: RGB = [94, 162, 44];
+    for (let i = 0; i < 16; i++) {
+        px(ctx, i, 0, edge[0], edge[1], edge[2]);
+        px(ctx, i, 15, edge[0], edge[1], edge[2]);
+        px(ctx, 0, i, edge[0], edge[1], edge[2]);
+        px(ctx, 15, i, edge[0], edge[1], edge[2]);
+    }
 }
 
 function drawSand(ctx: CanvasRenderingContext2D, seed: number) {
@@ -2175,12 +2176,13 @@ export function getAtlasTexture(): THREE.CanvasTexture {
 
         for (const face of faces) {
             const cacheKey = `${id}_${face}`;
+            const disableOverlay = id === BlockType.GRASS;
             assignSlot(
                 cacheKey,
                 (c) => drawBlockTexture(c, id, face, id),
                 {
                     transparentSlot: isTransparentBlock,
-                    addOverlay: !isTransparentBlock,
+                    addOverlay: !isTransparentBlock && !disableOverlay,
                 }
             );
         }

@@ -21,7 +21,6 @@ const EXPLOSION_REMOVE_BATCH = 256;
 /** Ignite TNT at position — creates delayed explosion */
 export function igniteTNT(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
-    if (s.primedTNT.length > 300) return;
     // Remove the TNT block immediately and spawn entity
     // Spawn entity first so it renders in the same frame the block disappears
     s.spawnTNT([x + 0.5, y + 0.5, z + 0.5], 80); // 80 ticks = 4 seconds
@@ -58,9 +57,7 @@ export function explodeAt(x: number, y: number, z: number): void {
                 if (type === BlockType.TNT) {
                     s.removeBlock(bx, by, bz);
                     // Spawn primed TNT with short random fuse for chaining effect
-                    if (s.primedTNT.length < 400) {
-                        s.spawnTNT([bx + 0.5, by + 0.5, bz + 0.5], 5 + Math.floor(Math.random() * 10));
-                    }
+                    s.spawnTNT([bx + 0.5, by + 0.5, bz + 0.5], 5 + Math.floor(Math.random() * 10));
                     continue;
                 }
 
