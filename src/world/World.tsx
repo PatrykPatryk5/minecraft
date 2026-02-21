@@ -171,8 +171,8 @@ const World: React.FC = () => {
                 // Vector to chunk (dx, dz) - normalize it
                 const dot = (-dx * dirX + -dz * dirZ) / chunkDist;
 
-                // Prioritize chunks in front
-                const fovWeight = dot > 0 ? (1 - dot * 0.7) : (1 - dot * 0.2);
+                // Prioritize chunks in front, except for immediate vicinity (3x3 area)
+                const fovWeight = distSq < 9 ? 1 : (dot > 0 ? (0.5 + (1 - dot) * 0.5) : (1.5 - dot * 0.5));
                 const priorityDist = chunkDist * fovWeight;
 
                 const cx = pcx + dx;
@@ -259,6 +259,33 @@ const World: React.FC = () => {
                 lastRecalcTime.current = now;
                 recalculate();
             }
+        }
+
+        // Periodic queue re-sort (every ~60 frames) to keep priorities fresh even within same chunk
+        if (loadQueueRef.current.length > 1 && Math.floor(clock.elapsedTime * 60) % 60 === 0) {
+            const pcx = Math.floor(pos[0] / CHUNK_SIZE);
+            const pcz = Math.floor(pos[2] / CHUNK_SIZE);
+
+            // Re-calculate dist for current orientation
+            const cameraDir = new THREE.Vector3();
+            camera.getWorldDirection(cameraDir);
+            const dirX = cameraDir.x;
+            const dirZ = cameraDir.z;
+
+            loadQueueRef.current.sort((a, b) => {
+                const adx = a.cx - pcx, adz = a.cz - pcz;
+                const bdx = b.cx - pcx, bdz = b.cz - pcz;
+                const adistSq = adx * adx + adz * adz;
+                const bdistSq = bdx * bdx + bdz * bdz;
+
+                const adot = (-adx * dirX + -adz * dirZ) / (Math.sqrt(adistSq) || 0.1);
+                const bdot = (-bdx * dirX + -bdz * dirZ) / (Math.sqrt(bdistSq) || 0.1);
+
+                const aw = adistSq < 9 ? 1 : (adot > 0 ? (0.5 + (1 - adot) * 0.5) : (1.5 - adot * 0.5));
+                const bw = bdistSq < 9 ? 1 : (bdot > 0 ? (0.5 + (1 - bdot) * 0.5) : (1.5 - bdot * 0.5));
+
+                return (Math.sqrt(adistSq) * aw) - (Math.sqrt(bdistSq) * bw);
+            });
         }
 
         // Throttled re-render: only when chunks arrived or list changed

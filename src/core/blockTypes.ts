@@ -152,6 +152,45 @@ export enum BlockType {
     DIAMOND_SHOVEL = 143,
     DIAMOND_SWORD = 144,
     DIAMOND_HOE = 145,
+
+    // ─── 1.17+ Stone & World ────────────────────────────
+    GRANITE = 150,
+    POLISHED_GRANITE = 151,
+    DIORITE = 152,
+    POLISHED_DIORITE = 153,
+    ANDESITE = 154,
+    POLISHED_ANDESITE = 155,
+    DEEPSLATE = 156,
+    COBBLED_DEEPSLATE = 157,
+    POLISHED_DEEP_SLATE = 158,
+    DEEPSLATE_BRICKS = 159,
+    TUFF = 170,
+    CALCITE = 171,
+    AMETHYST_BLOCK = 172,
+    BUDDING_AMETHYST = 173,
+    AMETHYST_CLUSTER = 174,
+    TINTED_GLASS = 175,
+
+    // ─── Copper & Raw Ores ──────────────────────────────
+    COPPER_ORE = 176,
+    DEEPSLATE_COPPER_ORE = 177,
+    RAW_COPPER_BLOCK = 178,
+    COPPER_BLOCK = 179,
+    CUT_COPPER = 180,
+    RAW_IRON_BLOCK = 181,
+    RAW_GOLD_BLOCK = 182,
+
+    // ─── Nether Expansion ───────────────────────────────
+    BLACKSTONE = 183,
+    POLISHED_BLACKSTONE = 184,
+    BASALT = 185,
+    POLISHED_BASALT = 186,
+    CRIMSON_STEM = 187,
+    WARPED_STEM = 188,
+    CRIMSON_PLANKS = 189,
+    WARPED_PLANKS = 190,
+    NETHER_WART_BLOCK = 191,
+
     // ─── Materials ───────────────────────────────────────
     COAL = 200,
     IRON_INGOT = 201,
@@ -226,6 +265,78 @@ export enum BlockType {
     BLAZE_POWDER = 502,
     EYE_OF_ENDER = 503,
     NETHER_STAR = 504,
+    // ─── Modern Items ───────────────────────────────────
+    RAW_IRON = 510,
+    RAW_GOLD = 511,
+    RAW_COPPER = 512,
+    AMETHYST_SHARD = 513,
+    COPPER_INGOT = 514,
+
+    // ─── Netherite & Advanced Materials ──────────────────
+    ANCIENT_DEBRIS = 520,
+    NETHERITE_BLOCK = 521,
+    GILDED_BLACKSTONE = 522,
+    CHISELED_POLISHED_BLACKSTONE = 523,
+    SOUL_TORCH = 524,
+    LANTERN = 525,
+    SOUL_LANTERN = 526,
+    CHAIN = 527,
+
+    // ─── New Wood & Mud ──────────────────────────────────
+    MUD = 530,
+    MUD_BRICKS = 531,
+    CHERRY_LOG = 532,
+    CHERRY_PLANKS = 533,
+    CHERRY_LEAVES = 534,
+    MANGROVE_LOG = 535,
+    MANGROVE_PLANKS = 536,
+    MANGROVE_LEAVES = 537,
+
+    // ─── Netherite Items ─────────────────────────────────
+    NETHERITE_SCRAP = 600,
+    NETHERITE_INGOT = 601,
+    NETHERITE_PICKAXE = 602,
+    NETHERITE_AXE = 603,
+    NETHERITE_SHOVEL = 604,
+    NETHERITE_SWORD = 605,
+    NETHERITE_HOE = 606,
+    NETHERITE_HELMET = 610,
+    NETHERITE_CHESTPLATE = 611,
+    NETHERITE_LEGGINGS = 612,
+    NETHERITE_BOOTS = 613,
+
+    // ─── Deep Dark & Lush ──────────────────────────────
+    SCULK = 700,
+    SCULK_SENSOR = 701,
+    SCULK_CATALYST = 702,
+    SCULK_SHRIEKER = 703,
+    SCULK_VEIN = 704,
+    MOSS_BLOCK = 710,
+    MOSS_CARPET = 711,
+    AZALEA = 712,
+    FLOWERING_AZALEA = 713,
+    SPORE_BLOSSOM = 714,
+    DRIPSTONE_BLOCK = 720,
+    POINTED_DRIPSTONE = 721,
+    REINFORCED_DEEPSLATE = 722,
+    // ─── Froglights & Sea ──────────────────────────────
+    OCHRE_FROGLIGHT = 740,
+    VERDANT_FROGLIGHT = 741,
+    PEARLESCENT_FROGLIGHT = 742,
+    SEA_LANTERN = 743,
+    // ─── Tiles & Construction ──────────────────────────
+    DEEPSLATE_TILES = 750,
+    CHISELED_DEEPSLATE = 751,
+    END_STONE_BRICKS = 752,
+
+    // ─── Quartz & Bamboo ───────────────────────────────
+    QUARTZ_BLOCK = 760,
+    SMOOTH_QUARTZ = 761,
+    QUARTZ_BRICKS = 762,
+    CHISELED_QUARTZ = 763,
+    BAMBOO_BLOCK = 770,
+    BAMBOO_PLANKS = 771,
+    BAMBOO_MOSAIC = 772,
 }
 
 // ─── Block Data Interface ────────────────────────────────
@@ -475,6 +586,124 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.ANVIL]: { name: 'Kowadło', color: '#444444', top: '#555555', transparent: true, solid: true, breakTime: 5.0, tool: 'pickaxe' },
     [BlockType.BEACON]: { name: 'Latarnia', color: '#7ae9e9', transparent: true, solid: true, breakTime: 3.0, emissive: true, light: 15 },
     [BlockType.NOTEBLOCK]: { name: 'Blok Nutowy', color: '#6b4226', top: '#8b5a2b', transparent: false, solid: true, breakTime: 0.8, tool: 'axe' },
+
+    // ─── 1.17+ Stone & World ────────────────────────────
+    [BlockType.GRANITE]: { name: 'Granit', color: '#b27464', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.POLISHED_GRANITE]: { name: 'Gładki Granit', color: '#b27464', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.DIORITE]: { name: 'Dioryt', color: '#cfcfcf', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.POLISHED_DIORITE]: { name: 'Gładki Dioryt', color: '#cfcfcf', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.ANDESITE]: { name: 'Andezyt', color: '#8b8b8b', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.POLISHED_ANDESITE]: { name: 'Gładki Andezyt', color: '#8b8b8b', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.DEEPSLATE]: { name: 'Łupek', color: '#4d4d50', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+    [BlockType.COBBLED_DEEPSLATE]: { name: 'Bruk Łupkowy', color: '#4d4d50', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+    [BlockType.POLISHED_DEEP_SLATE]: { name: 'Gładki Łupek', color: '#4d4d50', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+    [BlockType.DEEPSLATE_BRICKS]: { name: 'Cegły Łupkowe', color: '#4d4d50', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+    [BlockType.TUFF]: { name: 'Tuf', color: '#6d6d6e', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.CALCITE]: { name: 'Kalcyt', color: '#e3e3e3', transparent: false, solid: true, breakTime: 0.75, tool: 'pickaxe' },
+    [BlockType.AMETHYST_BLOCK]: { name: 'Blok Amethystu', color: '#9a5cc6', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.BUDDING_AMETHYST]: { name: 'Pączkujący Amethyst', color: '#9a5cc6', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.AMETHYST_CLUSTER]: { name: 'Gromada Amethystu', color: '#9a5cc6', transparent: true, solid: false, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.TINTED_GLASS]: { name: 'Przyciemniane Szkło', color: '#332345', transparent: true, solid: true, breakTime: 0.3 },
+
+    // ─── Copper & Raw Ores ──────────────────────────────
+    [BlockType.COPPER_ORE]: { name: 'Ruda Miedzi', color: '#888888', ore: '#d1725b', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+    [BlockType.DEEPSLATE_COPPER_ORE]: { name: 'Głęboka Ruda Miedzi', color: '#4d4d50', ore: '#d1725b', transparent: false, solid: true, breakTime: 4.5, tool: 'pickaxe' },
+    [BlockType.RAW_COPPER_BLOCK]: { name: 'Blok Surowej Miedzi', color: '#d1725b', transparent: false, solid: true, breakTime: 5.0, tool: 'pickaxe' },
+    [BlockType.COPPER_BLOCK]: { name: 'Blok Miedzi', color: '#d1725b', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+    [BlockType.CUT_COPPER]: { name: 'Wycinana Miedź', color: '#d1725b', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+    [BlockType.RAW_IRON_BLOCK]: { name: 'Blok Surowego Żelaza', color: '#d8af93', transparent: false, solid: true, breakTime: 5.0, tool: 'pickaxe' },
+    [BlockType.RAW_GOLD_BLOCK]: { name: 'Blok Surowego Złota', color: '#f0d12d', transparent: false, solid: true, breakTime: 5.0, tool: 'pickaxe' },
+
+    // ─── Nether Expansion ───────────────────────────────
+    [BlockType.BLACKSTONE]: { name: 'Czernit', color: '#272223', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.POLISHED_BLACKSTONE]: { name: 'Gładki Czernit', color: '#272223', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.BASALT]: { name: 'Bazalt', color: '#505151', top: '#3f3f40', transparent: false, solid: true, breakTime: 1.25, tool: 'pickaxe' },
+    [BlockType.POLISHED_BASALT]: { name: 'Gładki Bazalt', color: '#505151', top: '#3f3f40', transparent: false, solid: true, breakTime: 1.25, tool: 'pickaxe' },
+    [BlockType.CRIMSON_STEM]: { name: 'Szkarłatny Trzon', color: '#5a191d', top: '#5a191d', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.WARPED_STEM]: { name: 'Wypaczony Trzon', color: '#3a8e8c', top: '#3a8e8c', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.CRIMSON_PLANKS]: { name: 'Szkarłatne Deski', color: '#7a2d48', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.WARPED_PLANKS]: { name: 'Wypaczone Deski', color: '#3a8e8c', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.NETHER_WART_BLOCK]: { name: 'Blok Brodawek', color: '#730b0b', transparent: false, solid: true, breakTime: 1.0, tool: 'axe' },
+
+    // ─── Modern Items ───────────────────────────────────
+    [BlockType.RAW_IRON]: { name: 'Surowe Żelazo', color: '#d8af93', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.RAW_GOLD]: { name: 'Surowe Złoto', color: '#f0d12d', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.RAW_COPPER]: { name: 'Surowa Miedź', color: '#d1725b', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.AMETHYST_SHARD]: { name: 'Odłamek Amethystu', color: '#9a5cc6', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.COPPER_INGOT]: { name: 'Sztabka Miedzi', color: '#d1725b', transparent: false, solid: false, breakTime: 0, isItem: true },
+
+    // ─── Netherite & Advanced ──────────────────────────
+    [BlockType.ANCIENT_DEBRIS]: { name: 'Starożytne Zgliszcza', color: '#4d3b3b', top: '#5d4b4b', transparent: false, solid: true, breakTime: 30.0, tool: 'pickaxe' },
+    [BlockType.NETHERITE_BLOCK]: { name: 'Blok Netheritu', color: '#312e2e', transparent: false, solid: true, breakTime: 50.0, tool: 'pickaxe' },
+    [BlockType.GILDED_BLACKSTONE]: { name: 'Pozłacany Czernit', color: '#272223', ore: '#ffd700', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.CHISELED_POLISHED_BLACKSTONE]: { name: 'Rzeźbiony Czernit', color: '#272223', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.SOUL_TORCH]: { name: 'Pochodnia Dusz', color: '#00ccff', transparent: true, solid: false, breakTime: 0, light: 10, emissive: true },
+    [BlockType.LANTERN]: { name: 'Latarnia', color: '#ffcc00', transparent: true, solid: false, breakTime: 0.2, light: 15, emissive: true },
+    [BlockType.SOUL_LANTERN]: { name: 'Latarnia Dusz', color: '#00ccff', transparent: true, solid: false, breakTime: 0.2, light: 10, emissive: true },
+    [BlockType.CHAIN]: { name: 'Łańcuch', color: '#444444', transparent: true, solid: false, breakTime: 0.1, tool: 'pickaxe' },
+
+    // ─── New Wood & Mud ───────────────────────────────
+    [BlockType.MUD]: { name: 'Błoto', color: '#3d342d', transparent: false, solid: true, breakTime: 0.5, tool: 'shovel' },
+    [BlockType.MUD_BRICKS]: { name: 'Cegły Błotne', color: '#4d453d', transparent: false, solid: true, breakTime: 0.8, tool: 'pickaxe' },
+    [BlockType.CHERRY_LOG]: { name: 'Wiśniowy Pień', color: '#4d3b3b', top: '#ee99aa', bottom: '#ee99aa', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.CHERRY_PLANKS]: { name: 'Wiśniowe Deski', color: '#eab0be', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.CHERRY_LEAVES]: { name: 'Liście Wiśni', color: '#ee99aa', transparent: true, solid: true, breakTime: 0.2 },
+    [BlockType.MANGROVE_LOG]: { name: 'Namorzynowy Pień', color: '#4a3d34', top: '#7a2d48', bottom: '#7a2d48', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.MANGROVE_PLANKS]: { name: 'Namorzynowe Deski', color: '#7a2d48', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.MANGROVE_LEAVES]: { name: 'Liście Namorzynu', color: '#3b5a22', transparent: true, solid: true, breakTime: 0.2 },
+
+    // ─── Food Fixes ──────────────────────────────────
+    [BlockType.CAKE]: { name: 'Ciasto', color: '#ffffff', top: '#cc2222', transparent: true, solid: true, breakTime: 0.1, foodRestore: 14 },
+
+    // ─── Netherite Items ──────────────────────────────
+    [BlockType.NETHERITE_SCRAP]: { name: 'Odłamek Netheritu', color: '#4d3b3b', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.NETHERITE_INGOT]: { name: 'Sztabka Netheritu', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.NETHERITE_PICKAXE]: { name: 'Netheritowy Kilof', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 2031 },
+    [BlockType.NETHERITE_AXE]: { name: 'Netheritowa Siekiera', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 2031 },
+    [BlockType.NETHERITE_SHOVEL]: { name: 'Netheritowa Łopata', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 2031 },
+    [BlockType.NETHERITE_SWORD]: { name: 'Netheritowy Miecz', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 2031 },
+    [BlockType.NETHERITE_HOE]: { name: 'Netheritowa Motyka', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 2031 },
+    [BlockType.NETHERITE_HELMET]: { name: 'Netheritowy Hełm', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 3, maxDurability: 407 },
+    [BlockType.NETHERITE_CHESTPLATE]: { name: 'Netheritowy Napierśnik', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 8, maxDurability: 592 },
+    [BlockType.NETHERITE_LEGGINGS]: { name: 'Netheritowe Spodnie', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 6, maxDurability: 555 },
+    [BlockType.NETHERITE_BOOTS]: { name: 'Netheritowe Buty', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 3, maxDurability: 481 },
+
+    // ─── Deep Dark ──────────────────────────────────────
+    [BlockType.SCULK]: { name: 'Szkulk', color: '#0b1d21', transparent: false, solid: true, breakTime: 0.6, tool: 'hoe' },
+    [BlockType.SCULK_SENSOR]: { name: 'Czujnik Szkulkowy', color: '#0b1d21', top: '#00ccff', transparent: true, solid: true, breakTime: 1.5, tool: 'hoe', light: 1 },
+    [BlockType.SCULK_CATALYST]: { name: 'Katalizator Szkulkowy', color: '#0b1d21', top: '#00ccff', transparent: false, solid: true, breakTime: 3.0, tool: 'hoe', light: 6 },
+    [BlockType.SCULK_SHRIEKER]: { name: 'Wrzeszczak Szkulkowy', color: '#0b1d21', top: '#ffffff', transparent: true, solid: true, breakTime: 3.0, tool: 'hoe' },
+    [BlockType.SCULK_VEIN]: { name: 'Żyła Szkulkowa', color: '#0b1d21', transparent: true, solid: false, breakTime: 0.2, tool: 'hoe' },
+
+    // ─── Lush Caves ────────────────────────────────────
+    [BlockType.MOSS_BLOCK]: { name: 'Blok Mchu', color: '#597d30', transparent: false, solid: true, breakTime: 0.1, tool: 'hoe' },
+    [BlockType.MOSS_CARPET]: { name: 'Dywan z Mchu', color: '#597d30', transparent: true, solid: false, breakTime: 0.1 },
+    [BlockType.AZALEA]: { name: 'Azalia', color: '#597d30', top: '#70922d', transparent: true, solid: false, breakTime: 0.0 },
+    [BlockType.FLOWERING_AZALEA]: { name: 'Kwitnąca Azalia', color: '#597d30', top: '#ff99cc', transparent: true, solid: false, breakTime: 0.0 },
+    [BlockType.SPORE_BLOSSOM]: { name: 'Zarodnikowiec', color: '#ffb3cc', transparent: true, solid: false, breakTime: 0.0 },
+    [BlockType.DRIPSTONE_BLOCK]: { name: 'Blok Naciekowiec', color: '#846752', transparent: false, solid: true, breakTime: 1.5, tool: 'pickaxe' },
+    [BlockType.POINTED_DRIPSTONE]: { name: 'Naciek', color: '#846752', transparent: true, solid: false, breakTime: 0.1, tool: 'pickaxe' },
+    [BlockType.REINFORCED_DEEPSLATE]: { name: 'Wzmocniony Łupek', color: '#4d4d50', transparent: false, solid: true, breakTime: 999, tool: 'pickaxe' },
+
+    // ─── Froglights & Sea ──────────────────────────────
+    [BlockType.OCHRE_FROGLIGHT]: { name: 'Żabi Blask (Ochra)', color: '#f7e39c', transparent: false, solid: true, breakTime: 0.3, light: 15, emissive: true },
+    [BlockType.VERDANT_FROGLIGHT]: { name: 'Żabi Blask (Zieleń)', color: '#e3f79c', transparent: false, solid: true, breakTime: 0.3, light: 15, emissive: true },
+    [BlockType.PEARLESCENT_FROGLIGHT]: { name: 'Żabi Blask (Perła)', color: '#f79ce3', transparent: false, solid: true, breakTime: 0.3, light: 15, emissive: true },
+    [BlockType.SEA_LANTERN]: { name: 'Morska Latarnia', color: '#b3d1d1', transparent: false, solid: true, breakTime: 0.3, light: 15, emissive: true },
+
+    // ─── Construction ──────────────────────────────────
+    [BlockType.DEEPSLATE_TILES]: { name: 'Płytki Łupkowe', color: '#3d3d40', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+    [BlockType.CHISELED_DEEPSLATE]: { name: 'Rzeźbiony Łupek', color: '#3d3d40', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+    [BlockType.END_STONE_BRICKS]: { name: 'Cegły Endu', color: '#e8e8aa', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
+
+    // ─── Quartz & Bamboo ───────────────────────────────
+    [BlockType.QUARTZ_BLOCK]: { name: 'Blok Kwarcu', color: '#f0ece4', transparent: false, solid: true, breakTime: 0.8, tool: 'pickaxe' },
+    [BlockType.SMOOTH_QUARTZ]: { name: 'Gładki Kwarc', color: '#f0ece4', transparent: false, solid: true, breakTime: 0.8, tool: 'pickaxe' },
+    [BlockType.QUARTZ_BRICKS]: { name: 'Cegły Kwarcowe', color: '#f0ece4', transparent: false, solid: true, breakTime: 0.8, tool: 'pickaxe' },
+    [BlockType.CHISELED_QUARTZ]: { name: 'Rzeźbiony Kwarc', color: '#f0ece4', top: '#e0dcd4', transparent: false, solid: true, breakTime: 0.8, tool: 'pickaxe' },
+    [BlockType.BAMBOO_BLOCK]: { name: 'Blok Bambusa', color: '#597d30', top: '#70922d', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.BAMBOO_PLANKS]: { name: 'Bambusowe Deski', color: '#978c4a', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.BAMBOO_MOSAIC]: { name: 'Mozaika Bambusowa', color: '#978c4a', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
 };
 
 /** Get block info safely */
@@ -533,9 +762,21 @@ export function getBlockDrop(type: number): number {
         case BlockType.TALL_GRASS: return Math.random() < 0.12 ? BlockType.WHEAT : 0;
         case BlockType.GLASS: return 0;
         case BlockType.GRAVEL: return Math.random() < 0.1 ? BlockType.FLINT : BlockType.GRAVEL;
-        // Iron & Gold ore drop themselves (need smelting)
-        case BlockType.IRON_ORE: return BlockType.IRON_ORE;
-        case BlockType.GOLD_ORE: return BlockType.GOLD_ORE;
+        // ─── Modern Ore Drops ───────────────────────────
+        case BlockType.IRON_ORE: return BlockType.RAW_IRON;
+        case BlockType.GOLD_ORE: return BlockType.RAW_GOLD;
+        case BlockType.COPPER_ORE:
+        case BlockType.DEEPSLATE_COPPER_ORE: return BlockType.RAW_COPPER;
+        // ─── 1.17+ Materials ───────────────────────────
+        case BlockType.AMETHYST_CLUSTER: return BlockType.AMETHYST_SHARD;
+        case BlockType.BUDDING_AMETHYST: return 0; // Does not drop itself
+        case BlockType.DEEPSLATE: return BlockType.COBBLED_DEEPSLATE;
+        case BlockType.ANCIENT_DEBRIS: return BlockType.ANCIENT_DEBRIS; // Drops itself
+        case BlockType.SCULK: return 0; // Does not drop without Silk Touch
+        case BlockType.SCULK_SENSOR:
+        case BlockType.SCULK_CATALYST:
+        case BlockType.SCULK_SHRIEKER:
+            return type; // Drops themselves
         default: return type;
     }
 }

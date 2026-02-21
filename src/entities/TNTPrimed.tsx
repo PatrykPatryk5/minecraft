@@ -45,11 +45,11 @@ const TNTPrimedNode: React.FC<{ id: string; initialPos: [number, number, number]
             exploded.current = true;
             const pos = rbRef.current?.translation() || { x: initialPos[0], y: initialPos[1], z: initialPos[2] };
 
-            // Trigger explosion logic IMMEDIATELY
-            explodeAt(Math.round(pos.x), Math.round(pos.y), Math.round(pos.z));
-
-            // Remove entity from store
+            // Remove entity from store FIRST so mesh disappears immediately
             useGameStore.getState().removeTNT(id);
+
+            // Trigger explosion logic
+            explodeAt(Math.round(pos.x), Math.round(pos.y), Math.round(pos.z));
             return;
         }
 

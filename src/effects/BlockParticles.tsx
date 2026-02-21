@@ -23,13 +23,33 @@ const BlockParticles: React.FC = () => {
                 continue;
             }
 
-            p.velocity.y -= 15 * delta;
+            // Physics with drag
+            if (p.type !== 'smoke') p.velocity.y -= 15 * delta; // Gravity
+            p.velocity.multiplyScalar(Math.pow(p.drag, delta * 60));
             p.position.addScaledVector(p.velocity, delta);
 
             dummy.position.copy(p.position);
-            // Shrink as it dies instead of fading opacity
-            const scale = Math.max(0, p.size * (p.life * 2));
-            dummy.scale.set(scale, scale, scale);
+
+            // Type-specific behavior
+            if (p.type === 'block') {
+                p.rotation += p.rotationVelocity * delta;
+                dummy.rotation.set(p.rotation, p.rotation * 0.5, p.rotation * 0.2);
+                const scale = Math.max(0, p.size * (Math.min(1, p.life * 4)));
+                dummy.scale.set(scale, scale, scale);
+            } else if (p.type === 'smoke') {
+                dummy.rotation.set(0, 0, 0);
+                // Smoke grows slightly then shrinks
+                const lifeAlpha = p.life / 1.5;
+                const scale = p.size * (1 + (1 - lifeAlpha) * 1.5) * Math.min(1, lifeAlpha * 5);
+                dummy.scale.set(scale, scale, scale);
+                // Darken smoke over time
+                p.color.setHSL(0, 0, 0.5 * lifeAlpha + 0.1);
+            } else if (p.type === 'spark') {
+                dummy.rotation.set(0, 0, 0);
+                const scale = p.size * Math.min(1, p.life * 10);
+                dummy.scale.set(scale, scale, scale);
+            }
+
             dummy.updateMatrix();
 
             mesh.setMatrixAt(drawCount, dummy.matrix);
@@ -47,7 +67,7 @@ const BlockParticles: React.FC = () => {
     return (
         <instancedMesh ref={meshRef} args={[undefined, undefined, MAX_PARTICLES]} frustumCulled={false}>
             <boxGeometry args={[1, 1, 1]} />
-            <meshBasicMaterial />
+            <meshLambertMaterial transparent={true} />
         </instancedMesh>
     );
 };

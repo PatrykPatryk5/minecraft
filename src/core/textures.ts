@@ -106,26 +106,51 @@ function drawCobble(ctx: CanvasRenderingContext2D, seed: number) {
 
 function drawDirt(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        const v = rng() * 45 - 22; // Increased variance
-        px(ctx, x, y, 134 + v, 96 + v * 0.7, 67 + v * 0.5);
-    }
+    const base: RGB = [134, 96, 67];
+    fillNoise(ctx, base, 15, seed);
+
     // High-frequency detail noise (pebbles and dirt clumps)
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 30; i++) {
         const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
-        const v = rng() > 0.5 ? 30 : -30;
-        px(ctx, sx, sy, 134 + v, 96 + v * 0.7, 67 + v * 0.5);
+        const v = rng() * 30 - 15;
+        px(ctx, sx, sy, base[0] + v, base[1] + v * 0.8, base[2] + v * 0.6);
     }
     // Real pebbles
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 5; i++) {
         const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
-        px(ctx, sx, sy, 105, 75, 50); // Darker
-        px(ctx, sx + 1, sy, 140, 100, 70); // Highlight
+        px(ctx, sx, sy, 100, 80, 60);
+    }
+}
+
+function drawStoneBricks(ctx: CanvasRenderingContext2D, mossy: boolean, seed: number, overlay = false) {
+    const rng = sRng(seed);
+    const base: RGB = [120, 120, 120];
+    if (!overlay) fillNoise(ctx, base, 10, seed);
+
+    // Mortar lines - use specific colors to ensure visibility
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.strokeRect(0, 0, 16, 16);
+    ctx.moveTo(0, 8); ctx.lineTo(16, 8);
+    ctx.moveTo(8, 0); ctx.lineTo(8, 8);
+    ctx.moveTo(4, 8); ctx.lineTo(4, 16);
+    ctx.moveTo(12, 8); ctx.lineTo(12, 16);
+    ctx.stroke();
+
+    if (mossy) {
+        for (let i = 0; i < 15; i++) {
+            const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
+            px(ctx, sx, sy, 50 + (rng() * 20 | 0), 80 + (rng() * 20 | 0), 40);
+        }
     }
 }
 
 function drawGrassSide(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
+    // Explicitly fill before calling drawDirt to ensure no transparent corners
+    ctx.fillStyle = '#8B6B3E';
+    ctx.fillRect(0, 0, 16, 16);
     // Dirt base
     drawDirt(ctx, seed);
     // Green top edge with grass hanging down
@@ -141,15 +166,32 @@ function drawGrassSide(ctx: CanvasRenderingContext2D, seed: number) {
 
 function drawGrassTop(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        const v = rng() * 40 - 20;
-        px(ctx, x, y, 80 + v * 0.4, 145 + v, 35 + v * 0.2);
+    // 1. Solid clear/fill to ensure no black leakage
+    ctx.fillStyle = '#5da83a';
+    ctx.fillRect(0, 0, 16, 16);
+
+    // 2. Base noise over the fill
+    for (let y = 0; y < 16; y++) {
+        for (let x = 0; x < 16; x++) {
+            const v = (rng() * 40 - 20) | 0;
+            const r = 90 + (v * 0.4) | 0;
+            const g = 160 + v | 0;
+            const b = 40 + (v * 0.2) | 0;
+            ctx.fillStyle = `rgb(${r},${g},${b})`;
+            ctx.fillRect(x, y, 1, 1);
+        }
     }
-    // Small grass blades
-    for (let i = 0; i < 25; i++) {
-        const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
-        const color = darken([80, 145, 35], 0.8 + rng() * 0.4);
-        px(ctx, sx, sy, color[0], color[1], color[2]);
+
+    // 3. Small grass blades
+    for (let i = 0; i < 40; i++) {
+        const sx = (rng() * 16) | 0;
+        const sy = (rng() * 16) | 0;
+        const v = (rng() * 40 - 20) | 0;
+        const r = 70 + (v * 0.4) | 0;
+        const g = 130 + v | 0;
+        const b = 30 + (v * 0.2) | 0;
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(sx, sy, 1, 1);
     }
 }
 
@@ -163,6 +205,150 @@ function drawSand(ctx: CanvasRenderingContext2D, seed: number) {
     for (let i = 0; i < 30; i++) {
         const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
         px(ctx, sx, sy, 190, 175, 130);
+    }
+}
+
+function drawGranite(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    const base: RGB = [178, 116, 100]; // Pinkish red
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const v = (rng() - 0.5) * 40;
+        px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
+    }
+    // Dark spots
+    for (let i = 0; i < 30; i++) {
+        px(ctx, (rng() * 16) | 0, (rng() * 16) | 0, 120, 80, 70);
+    }
+}
+
+function drawDiorite(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    const base: RGB = [207, 207, 207]; // Light gray
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const v = (rng() - 0.5) * 30;
+        px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
+    }
+    // Large dark "bird poop" splotches
+    for (let i = 0; i < 20; i++) {
+        const sx = (rng() * 15) | 0, sy = (rng() * 15) | 0;
+        px(ctx, sx, sy, 80, 80, 80);
+        if (rng() > 0.5) px(ctx, sx + 1, sy, 80, 80, 80);
+    }
+}
+
+function drawAndesite(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    const base: RGB = [139, 139, 139]; // Mid gray
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const v = (rng() - 0.5) * 20;
+        px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
+    }
+    // Smooth grain
+    for (let i = 0; i < 40; i++) {
+        px(ctx, (rng() * 16) | 0, (rng() * 16) | 0, 110, 110, 110);
+    }
+}
+
+function drawDeepslate(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    const base: RGB = [77, 77, 80];
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const v = (rng() - 0.5) * 15;
+        px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
+    }
+    // Deepslate horizontal grain
+    for (let y = 0; y < 16; y += 2) {
+        const dark = rng() > 0.5;
+        for (let x = 0; x < 16; x++) {
+            if (rng() > 0.2) {
+                const c = dark ? 60 : 85;
+                px(ctx, x, y, c, c, c + 5);
+            }
+        }
+    }
+}
+
+function drawBasalt(ctx: CanvasRenderingContext2D, seed: number, isTop: boolean) {
+    const rng = sRng(seed);
+    if (isTop) {
+        const base: RGB = [63, 63, 64];
+        for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+            const v = (rng() - 0.5) * 10;
+            px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
+        }
+        // Rings/circular noise
+        for (let i = 0; i < 4; i++) {
+            const rad = 2 + i * 2;
+            for (let a = 0; a < Math.PI * 2; a += 0.2) {
+                const px_x = (8 + Math.cos(a) * rad) | 0;
+                const px_y = (8 + Math.sin(a) * rad) | 0;
+                if (px_x >= 0 && px_x < 16 && px_y >= 0 && px_y < 16) {
+                    px(ctx, px_x, px_y, 50, 50, 51);
+                }
+            }
+        }
+    } else {
+        const base: RGB = [80, 81, 81];
+        for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+            const v = (rng() - 0.5) * 15;
+            px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
+        }
+        // Vertical pillar lines
+        for (let x = 0; x < 16; x += 4) {
+            for (let y = 0; y < 16; y++) px(ctx, x, y, 60, 60, 61);
+        }
+    }
+}
+
+function drawBlackstone(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    const base: RGB = [39, 34, 35];
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const v = (rng() - 0.5) * 20;
+        px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
+    }
+    // Rough gold/pyrite specks (subtle)
+    for (let i = 0; i < 5; i++) {
+        px(ctx, (rng() * 16) | 0, (rng() * 16) | 0, 80, 70, 40);
+    }
+}
+
+function drawAmethyst(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    const base: RGB = [154, 92, 198];
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const v = (rng() - 0.5) * 30;
+        px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
+    }
+    // Crystal highlights
+    for (let i = 0; i < 15; i++) {
+        const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
+        px(ctx, sx, sy, 200, 150, 255);
+    }
+}
+
+function drawCopper(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    const base: RGB = [209, 114, 91];
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const v = (rng() - 0.5) * 20;
+        px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
+    }
+    // Subtle oxide spots (cyan)
+    for (let i = 0; i < 5; i++) {
+        px(ctx, (rng() * 16) | 0, (rng() * 16) | 0, 78, 175, 147);
+    }
+}
+
+function drawRawOre(ctx: CanvasRenderingContext2D, color: RGB, seed: number) {
+    const rng = sRng(seed);
+    // Rough "lumpy" texture
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const dist = Math.sqrt((x - 8) ** 2 + (y - 8) ** 2);
+        if (dist < 6 + rng() * 2) {
+            const v = (rng() - 0.5) * 40;
+            px(ctx, x, y, color[0] + v, color[1] + v, color[2] + v);
+        }
     }
 }
 
@@ -466,28 +652,6 @@ function drawSandstone(ctx: CanvasRenderingContext2D, face: string, seed: number
     }
 }
 
-function drawStoneBricks(ctx: CanvasRenderingContext2D, mossy: boolean, seed: number) {
-    const rng = sRng(seed);
-    fillNoise(ctx, [120, 120, 120], 15, seed);
-    // Brick pattern: 4 rows of 2 bricks
-    for (let i = 0; i < 16; i++) {
-        px(ctx, i, 0, 95, 95, 95); px(ctx, i, 4, 95, 95, 95);
-        px(ctx, i, 8, 95, 95, 95); px(ctx, i, 12, 95, 95, 95);
-    }
-    for (let y = 0; y < 16; y++) {
-        const off = (Math.floor(y / 4) % 2 === 0) ? 0 : 8;
-        px(ctx, off, y, 95, 95, 95);
-        px(ctx, (off + 8) % 16, y, 95, 95, 95);
-    }
-    if (mossy) {
-        for (let i = 0; i < 20; i++) {
-            const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
-            px(ctx, sx, sy, 60 + (rng() * 20 | 0), 105 + (rng() * 20 | 0), 45);
-        }
-    }
-    drawInnerEdge(ctx, [90, 90, 90]);
-}
-
 function drawBookshelf(ctx: CanvasRenderingContext2D, face: string, seed: number) {
     if (face === 'top' || face === 'bottom') { drawPlanks(ctx, [184, 148, 95], seed); return; }
     const rng = sRng(seed);
@@ -699,6 +863,263 @@ function drawFence(ctx: CanvasRenderingContext2D, seed: number) {
     drawPlanks(ctx, [107, 84, 51], seed);
 }
 
+function drawAncientDebris(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    fillNoise(ctx, [77, 59, 59], 20, seed);
+    // Swirl pattern
+    for (let i = 0; i < 4; i++) {
+        ctx.strokeStyle = `rgba(100, 80, 80, ${0.4 + rng() * 0.4})`;
+        ctx.strokeRect(i * 1.5, i * 1.5, 16 - i * 3, 16 - i * 3);
+    }
+}
+
+function drawLantern(ctx: CanvasRenderingContext2D, soul: boolean, seed: number) {
+    const rng = sRng(seed);
+    ctx.fillStyle = '#444444'; // Frame
+    ctx.fillRect(0, 0, 16, 16);
+    // Glass/Light center
+    const light: RGB = soul ? [0, 204, 255] : [255, 204, 0];
+    ctx.fillStyle = `rgb(${light[0]},${light[1]},${light[2]})`;
+    ctx.fillRect(4, 4, 8, 10);
+    // Frame details
+    ctx.fillStyle = '#333333';
+    ctx.fillRect(0, 0, 16, 2); ctx.fillRect(0, 14, 16, 2);
+    ctx.fillRect(0, 0, 2, 16); ctx.fillRect(14, 0, 16, 16);
+}
+
+function drawCake(ctx: CanvasRenderingContext2D, face: string, seed: number) {
+    if (face === 'top') {
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 16, 16);
+        // Red spots
+        for (let i = 0; i < 6; i++) {
+            px(ctx, (sRng(seed + i)() * 14 + 1) | 0, (sRng(seed + i + 10)() * 14 + 1) | 0, 204, 34, 34);
+        }
+    } else if (face === 'bottom') {
+        fillNoise(ctx, [139, 115, 85], 10, seed);
+    } else {
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 16, 8); // Icing
+        fillNoise(ctx, [139, 115, 85], 12, seed + 1); // Bread
+        ctx.fillRect(0, 8, 16, 8);
+    }
+}
+
+function drawChain(ctx: CanvasRenderingContext2D, seed: number) {
+    ctx.clearRect(0, 0, 16, 16);
+    ctx.fillStyle = '#444444';
+    // Two links
+    ctx.fillRect(6, 2, 4, 4); ctx.fillRect(6, 10, 4, 4);
+    ctx.fillStyle = '#333333';
+    ctx.fillRect(7, 3, 2, 2); ctx.fillRect(7, 11, 2, 2);
+}
+
+function drawMud(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [61, 52, 45], 15, seed);
+    const rng = sRng(seed);
+    // Dark wet splotches
+    for (let i = 0; i < 15; i++) {
+        px(ctx, (rng() * 16) | 0, (rng() * 16) | 0, 45, 38, 33);
+    }
+}
+
+function drawMudBricks(ctx: CanvasRenderingContext2D, seed: number) {
+    drawBricks(ctx, seed);
+    // Recoloring bricks to mud colors
+    const imgData = ctx.getImageData(0, 0, 16, 16);
+    for (let i = 0; i < imgData.data.length; i += 4) {
+        // Simple brown tint
+        imgData.data[i] = (imgData.data[i] * 0.5) | 0;
+        imgData.data[i + 1] = (imgData.data[i + 1] * 0.45) | 0;
+        imgData.data[i + 2] = (imgData.data[i + 2] * 0.4) | 0;
+    }
+    ctx.putImageData(imgData, 0, 0);
+}
+
+function drawNetheriteBlock(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [49, 46, 46], 10, seed);
+    drawInnerEdge(ctx, [35, 33, 33]);
+    // Subtle metallic highlights
+    const rng = sRng(seed);
+    for (let i = 0; i < 8; i++) {
+        px(ctx, (rng() * 16) | 0, (rng() * 16) | 0, 70, 68, 68);
+    }
+}
+
+function drawEndStone(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [232, 232, 170], 15, seed);
+    const rng = sRng(seed);
+    for (let i = 0; i < 8; i++) {
+        px(ctx, (rng() * 14 + 1) | 0, (rng() * 14 + 1) | 0, 210, 210, 145);
+    }
+}
+
+function drawNetherBricks(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [44, 22, 26], 12, seed);
+    for (let i = 0; i < 16; i++) {
+        px(ctx, i, 0, 35, 15, 18); px(ctx, i, 4, 35, 15, 18);
+        px(ctx, i, 8, 35, 15, 18); px(ctx, i, 12, 35, 15, 18);
+    }
+    const rng = sRng(seed);
+    for (let y = 0; y < 16; y++) {
+        const off = (Math.floor(y / 4) % 2 === 0) ? 0 : 8;
+        px(ctx, off, y, 35, 15, 18);
+        px(ctx, (off + 8) % 16, y, 35, 15, 18);
+    }
+}
+
+function drawCryingObsidian(ctx: CanvasRenderingContext2D, seed: number) {
+    drawObsidian(ctx, seed);
+    const rng = sRng(seed);
+    for (let i = 0; i < 6; i++) {
+        const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
+        px(ctx, sx, sy, 120, 40, 200);
+    }
+}
+
+function drawEndPortalFrame(ctx: CanvasRenderingContext2D, face: string, seed: number) {
+    const rng = sRng(seed);
+    if (face === 'top') {
+        fillNoise(ctx, [26, 74, 74], 12, seed);
+        // Eye socket
+        ctx.fillStyle = '#153232'; ctx.fillRect(5, 5, 6, 6);
+        ctx.fillStyle = '#0ae0e0'; ctx.fillRect(7, 7, 2, 2);
+    } else {
+        fillNoise(ctx, [59, 107, 75], 15, seed);
+        for (let x = 0; x < 16; x++) { px(ctx, x, 0, 45, 88, 58); px(ctx, x, 15, 45, 88, 58); }
+    }
+}
+
+function drawEndPortalBlock(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const star = rng() < 0.05;
+        if (star) px(ctx, x, y, 255, 255, 255);
+        else px(ctx, x, y, 0, 10, 25);
+    }
+}
+
+function drawDragonEgg(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [13, 0, 22], 8, seed);
+    const rng = sRng(seed);
+    for (let i = 0; i < 4; i++) px(ctx, (rng() * 14 + 1) | 0, (rng() * 14 + 1) | 0, 80, 20, 120);
+}
+
+function drawNetherPortalBlock(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const v = rng() * 40 - 20;
+        px(ctx, x, y, 100 + v, 0, 160 + v);
+    }
+}
+
+function drawSoulSand(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [91, 69, 56], 18, seed);
+    const rng = sRng(seed);
+    for (let i = 0; i < 12; i++) {
+        const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
+        px(ctx, sx, sy, 50, 35, 25);
+    }
+}
+
+function drawSculk(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [11, 29, 33], 15, seed);
+    const rng = sRng(seed);
+    for (let i = 0; i < 12; i++) {
+        const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
+        px(ctx, sx, sy, 0, 204, 255); // Glowing blue speckles
+    }
+}
+
+function drawMoss(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [89, 125, 48], 25, seed);
+    const rng = sRng(seed);
+    for (let i = 0; i < 20; i++) {
+        const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
+        px(ctx, sx, sy, 70, 100, 35);
+    }
+}
+
+function drawAzalea(ctx: CanvasRenderingContext2D, flowering: boolean, seed: number) {
+    drawMoss(ctx, seed);
+    const rng = sRng(seed);
+    if (flowering) {
+        for (let i = 0; i < 8; i++) {
+            const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
+            px(ctx, sx, sy, 255, 153, 204); // Pink flowers
+        }
+    }
+}
+
+function drawDripstone(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [132, 103, 82], 15, seed);
+    const rng = sRng(seed);
+    for (let x = 0; x < 16; x += 4) {
+        for (let y = 0; y < 16; y++) {
+            if (rng() < 0.3) px(ctx, x + (rng() > 0.5 ? 1 : 0), y, 100, 75, 55);
+        }
+    }
+}
+
+function drawFroglight(ctx: CanvasRenderingContext2D, baseColor: [number, number, number], seed: number) {
+    fillNoise(ctx, baseColor, 10, seed);
+    drawInnerEdge(ctx, [Math.min(255, baseColor[0] + 30), Math.min(255, baseColor[1] + 30), Math.min(255, baseColor[2] + 30)]);
+}
+
+function drawSeaLantern(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [179, 209, 209], 10, seed);
+    drawInnerEdge(ctx, [220, 255, 255]);
+    ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+    ctx.strokeRect(4, 4, 8, 8);
+}
+
+function drawQuartz(ctx: CanvasRenderingContext2D, chiseled: boolean, seed: number) {
+    fillNoise(ctx, [240, 236, 228], 5, seed);
+    drawInnerEdge(ctx, [255, 255, 255]);
+    if (chiseled) {
+        ctx.strokeStyle = '#e0dcd4';
+        ctx.strokeRect(3, 3, 10, 10);
+        ctx.strokeRect(5, 5, 6, 6);
+    }
+}
+
+function drawQuartzBricks(ctx: CanvasRenderingContext2D, seed: number) {
+    drawQuartz(ctx, false, seed);
+    drawStoneBricks(ctx, false, seed);
+}
+
+function drawBamboo(ctx: CanvasRenderingContext2D, planks: boolean, seed: number) {
+    const color: RGB = planks ? [151, 140, 74] : [89, 125, 48];
+    fillNoise(ctx, color, 15, seed);
+    const rng = sRng(seed);
+    for (let x = 0; x < 16; x += 4) {
+        ctx.fillStyle = `rgba(0,0,0,${rng() * 0.2})`;
+        ctx.fillRect(x, 0, 1, 16);
+    }
+}
+
+function drawBambooMosaic(ctx: CanvasRenderingContext2D, seed: number) {
+    fillNoise(ctx, [151, 140, 74], 15, seed);
+    for (let i = 0; i < 16; i += 4) {
+        for (let j = 0; j < 16; j += 4) {
+            ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+            ctx.strokeRect(i, j, 4, 4);
+        }
+    }
+}
+
+function drawButton(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    ctx.clearRect(0, 0, 16, 16);
+    // Button is a small 6x4 or so block in center
+    const base: RGB = [120, 120, 120];
+    for (let y = 6; y < 10; y++) for (let x = 5; x < 11; x++) {
+        const v = rng() * 10 - 5;
+        px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
+    }
+    // Edge
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.strokeRect(5, 6, 6, 4);
+}
+
 // ─── Main Texture Creation (MC-Accurate) ──────────────────
 
 function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right', seed: number): void {
@@ -714,6 +1135,18 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.FENCE_OAK: drawFence(ctx, seed); return;
 
         case BlockType.STONE: drawStone(ctx, seed); return;
+        // ─── 1.17+ Stones ──────────────────────────────
+        case BlockType.GRANITE: drawGranite(ctx, seed); return;
+        case BlockType.POLISHED_GRANITE: drawGranite(ctx, seed); drawInnerEdge(ctx, [140, 90, 80]); return;
+        case BlockType.DIORITE: drawDiorite(ctx, seed); return;
+        case BlockType.POLISHED_DIORITE: drawDiorite(ctx, seed); drawInnerEdge(ctx, [180, 180, 180]); return;
+        case BlockType.ANDESITE: drawAndesite(ctx, seed); return;
+        case BlockType.POLISHED_ANDESITE: drawAndesite(ctx, seed); drawInnerEdge(ctx, [110, 110, 110]); return;
+        case BlockType.DEEPSLATE: drawDeepslate(ctx, seed); return;
+        case BlockType.COBBLED_DEEPSLATE: drawDeepslate(ctx, seed); return; // add cobble texture later
+        case BlockType.POLISHED_DEEP_SLATE: drawDeepslate(ctx, seed); drawInnerEdge(ctx, [50, 50, 55]); return;
+        case BlockType.DEEPSLATE_BRICKS: drawDeepslate(ctx, seed); drawStoneBricks(ctx, false, seed); return;
+
         case BlockType.COAL_ORE:
         case BlockType.IRON_ORE:
         case BlockType.GOLD_ORE:
@@ -721,6 +1154,11 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.EMERALD_ORE:
         case BlockType.LAPIS_ORE:
         case BlockType.REDSTONE_ORE:
+        case BlockType.COPPER_ORE:
+            drawOre(ctx, hex(data.ore || '#ffffff'), seed);
+            return;
+        case BlockType.DEEPSLATE_COPPER_ORE:
+            drawDeepslate(ctx, seed);
             drawOre(ctx, hex(data.ore || '#ffffff'), seed);
             return;
 
@@ -767,11 +1205,35 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.WATER: drawWater(ctx, seed); return;
         case BlockType.BEDROCK: fillNoise(ctx, [55, 55, 55], 25, seed); return;
         case BlockType.OBSIDIAN: drawObsidian(ctx, seed); return;
+        case BlockType.CRYING_OBSIDIAN: drawCryingObsidian(ctx, seed); return;
         case BlockType.SANDSTONE: drawSandstone(ctx, face, seed); return;
         case BlockType.STONE_BRICKS: drawStoneBricks(ctx, false, seed); return;
         case BlockType.MOSSY_STONE_BRICKS: drawStoneBricks(ctx, true, seed); return;
         case BlockType.NETHERRACK: drawNetherrack(ctx, seed); return;
+        case BlockType.SOUL_SAND: drawSoulSand(ctx, seed); return;
+        case BlockType.END_STONE: drawEndStone(ctx, seed); return;
         case BlockType.GLOWSTONE: drawGlowstone(ctx, seed); return;
+        case BlockType.NETHER_BRICKS: drawNetherBricks(ctx, seed); return;
+        case BlockType.ANCIENT_DEBRIS: drawAncientDebris(ctx, seed); return;
+        case BlockType.NETHERITE_BLOCK: drawNetheriteBlock(ctx, seed); return;
+        case BlockType.GILDED_BLACKSTONE:
+            drawBlackstone(ctx, seed);
+            drawOre(ctx, [255, 215, 0], seed + 1);
+            return;
+        case BlockType.CHISELED_POLISHED_BLACKSTONE:
+            drawBlackstone(ctx, seed);
+            drawInnerEdge(ctx, [30, 30, 35]);
+            ctx.strokeStyle = '#000'; ctx.strokeRect(4, 4, 8, 8);
+            return;
+        case BlockType.SOUL_TORCH:
+            fillNoise(ctx, [20, 20, 20], 5, seed);
+            for (let y = 4; y < 14; y++) px(ctx, 7, y, 90, 70, 45);
+            for (let y = 2; y < 5; y++) for (let x = 6; x < 10; x++) px(ctx, x, y, 0, 200, 255);
+            return;
+        case BlockType.LANTERN: drawLantern(ctx, false, seed); return;
+        case BlockType.SOUL_LANTERN: drawLantern(ctx, true, seed); return;
+        case BlockType.CHAIN: drawChain(ctx, seed); return;
+        case BlockType.CAKE: drawCake(ctx, face, seed); return;
         case BlockType.TNT: drawTNT(ctx, face, seed); return;
         case BlockType.BOOKSHELF: drawBookshelf(ctx, face, seed); return;
         case BlockType.CRAFTING:
@@ -843,67 +1305,130 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
             }
             return;
         }
+        case BlockType.TUFF: drawAndesite(ctx, seed); return; // Tuff is similar enough to andesite for now
+        case BlockType.CALCITE: fillNoise(ctx, [227, 227, 227], 10, seed); return;
+        case BlockType.AMETHYST_BLOCK:
+        case BlockType.BUDDING_AMETHYST:
+            drawAmethyst(ctx, seed); return;
+        case BlockType.AMETHYST_CLUSTER:
+            ctx.clearRect(0, 0, 16, 16);
+            drawAmethyst(ctx, seed); return;
+        case BlockType.TINTED_GLASS:
+            ctx.fillStyle = 'rgba(51, 35, 69, 0.8)';
+            ctx.fillRect(0, 0, 16, 16);
+            drawInnerEdge(ctx, [60, 40, 80]);
+            return;
+
+        case BlockType.RAW_COPPER_BLOCK: drawRawOre(ctx, [209, 114, 91], seed); return;
+        case BlockType.COPPER_BLOCK:
+        case BlockType.CUT_COPPER:
+            drawCopper(ctx, seed);
+            if (blockId === BlockType.CUT_COPPER) drawInnerEdge(ctx, [180, 100, 80]);
+            return;
+        case BlockType.RAW_IRON_BLOCK: drawRawOre(ctx, [216, 175, 147], seed); return;
+        case BlockType.RAW_GOLD_BLOCK: drawRawOre(ctx, [240, 209, 45], seed); return;
+
+        case BlockType.BLACKSTONE: drawBlackstone(ctx, seed); return;
+        case BlockType.POLISHED_BLACKSTONE: drawBlackstone(ctx, seed); drawInnerEdge(ctx, [30, 30, 35]); return;
+        case BlockType.BASALT: drawBasalt(ctx, seed, face === 'top' || face === 'bottom'); return;
+        case BlockType.POLISHED_BASALT: drawBasalt(ctx, seed, face === 'top' || face === 'bottom'); drawInnerEdge(ctx, [70, 71, 71]); return;
+        case BlockType.CRIMSON_STEM:
+            if (face === 'top' || face === 'bottom') fillNoise(ctx, [90, 25, 29], 15, seed);
+            else fillNoise(ctx, [139, 45, 72], 20, seed);
+            return;
+        case BlockType.WARPED_STEM:
+            if (face === 'top' || face === 'bottom') fillNoise(ctx, [58, 142, 140], 15, seed);
+            else fillNoise(ctx, [58, 142, 140], 20, seed);
+            return;
+        case BlockType.CRIMSON_PLANKS: drawPlanks(ctx, [122, 45, 72], seed); return;
+        case BlockType.WARPED_PLANKS: drawPlanks(ctx, [58, 142, 140], seed); return;
+        case BlockType.NETHER_WART_BLOCK: fillNoise(ctx, [115, 11, 11], 20, seed); return;
+
+        case BlockType.MUD: drawMud(ctx, seed); return;
+        case BlockType.MUD_BRICKS: drawMudBricks(ctx, seed); return;
+        case BlockType.CHERRY_LOG:
+            if (face === 'top' || face === 'bottom') drawLogTop(ctx, [77, 59, 59], [234, 176, 190], seed);
+            else drawOakLogSide(ctx, seed);
+            return;
+        case BlockType.CHERRY_PLANKS: drawPlanks(ctx, [234, 176, 190], seed); return;
+        case BlockType.CHERRY_LEAVES: fillNoise(ctx, [234, 176, 190], 30, seed); return;
+        case BlockType.MANGROVE_LOG:
+            if (face === 'top' || face === 'bottom') drawLogTop(ctx, [74, 61, 52], [122, 45, 72], seed);
+            else drawOakLogSide(ctx, seed);
+            return;
+        case BlockType.MANGROVE_PLANKS: drawPlanks(ctx, [122, 45, 72], seed); return;
+        case BlockType.MANGROVE_LEAVES: drawLeaves(ctx, seed); return;
+
+        // ─── Deep Dark ──────────────────────────────────
+        case BlockType.SCULK: drawSculk(ctx, seed); return;
+        case BlockType.SCULK_SENSOR:
+            drawSculk(ctx, seed);
+            if (face === 'top') { ctx.fillStyle = '#00ccff'; ctx.fillRect(4, 4, 8, 8); }
+            return;
+        case BlockType.SCULK_CATALYST:
+            drawSculk(ctx, seed);
+            if (face === 'top') drawInnerEdge(ctx, [0, 204, 255]);
+            return;
+        case BlockType.SCULK_SHRIEKER:
+            drawSculk(ctx, seed);
+            if (face === 'top') { ctx.fillStyle = '#fff'; ctx.fillRect(5, 5, 6, 6); }
+            return;
+        case BlockType.SCULK_VEIN: drawSculk(ctx, seed); return;
+
+        // ─── Lush Caves ──────────────────────────────────
+        case BlockType.MOSS_BLOCK: drawMoss(ctx, seed); return;
+        case BlockType.MOSS_CARPET: drawMoss(ctx, seed); return;
+        case BlockType.AZALEA: drawAzalea(ctx, false, seed); return;
+        case BlockType.FLOWERING_AZALEA: drawAzalea(ctx, true, seed); return;
+        case BlockType.SPORE_BLOSSOM:
+            ctx.clearRect(0, 0, 16, 16);
+            ctx.fillStyle = '#ffb3cc'; ctx.fillRect(4, 4, 8, 8);
+            return;
+        case BlockType.DRIPSTONE_BLOCK: drawDripstone(ctx, seed); return;
+        case BlockType.POINTED_DRIPSTONE: drawDripstone(ctx, seed); return;
+        case BlockType.REINFORCED_DEEPSLATE:
+            drawDeepslate(ctx, seed);
+            drawInnerEdge(ctx, [100, 100, 105]);
+            return;
+
+        // ─── Froglights & Sea ────────────────────────────
+        case BlockType.OCHRE_FROGLIGHT: drawFroglight(ctx, [247, 227, 156], seed); return;
+        case BlockType.VERDANT_FROGLIGHT: drawFroglight(ctx, [227, 247, 156], seed); return;
+        case BlockType.PEARLESCENT_FROGLIGHT: drawFroglight(ctx, [247, 156, 227], seed); return;
+        case BlockType.SEA_LANTERN: drawSeaLantern(ctx, seed); return;
+
+        // ─── Construction ────────────────────────────────
+        case BlockType.DEEPSLATE_TILES:
+            drawDeepslate(ctx, seed);
+            drawInnerEdge(ctx, [40, 40, 45]);
+            ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.strokeRect(4, 4, 8, 8);
+            return;
+        case BlockType.CHISELED_DEEPSLATE:
+            drawDeepslate(ctx, seed);
+            ctx.strokeStyle = '#000'; ctx.strokeRect(3, 3, 10, 10);
+            return;
+        case BlockType.END_STONE_BRICKS:
+            drawEndStone(ctx, seed);
+            drawStoneBricks(ctx, false, seed);
+            return;
+
+        // ─── Quartz & Bamboo ────────────────────────────
+        case BlockType.QUARTZ_BLOCK:
+        case BlockType.SMOOTH_QUARTZ:
+            drawQuartz(ctx, false, seed); return;
+        case BlockType.QUARTZ_BRICKS:
+            drawQuartzBricks(ctx, seed); return;
+        case BlockType.CHISELED_QUARTZ:
+            drawQuartz(ctx, true, seed); return;
+        case BlockType.BAMBOO_BLOCK:
+            drawBamboo(ctx, false, seed); return;
+        case BlockType.BAMBOO_PLANKS:
+            drawBamboo(ctx, true, seed); return;
+        case BlockType.BAMBOO_MOSAIC:
+            drawBambooMosaic(ctx, seed); return;
+
         case BlockType.LAVA: drawLava(ctx, seed); return;
 
-        case BlockType.END_STONE: {
-            // Inverted/Negative cobble look
-            ctx.fillStyle = '#dfdfaa';
-            ctx.fillRect(0, 0, 16, 16);
-            for (let i = 0; i < 40; i++) {
-                ctx.fillStyle = Math.random() > 0.5 ? '#dcdc99' : '#e6e6bb';
-                ctx.fillRect(Math.random() * 16, Math.random() * 16, 1, 1);
-            }
-            break;
-        }
-        case BlockType.OBSIDIAN: {
-            ctx.fillStyle = '#140e1e';
-            ctx.fillRect(0, 0, 16, 16);
-            // Purple specks
-            for (let i = 0; i < 15; i++) {
-                ctx.fillStyle = '#3c3056';
-                ctx.fillRect(Math.random() * 16, Math.random() * 16, 2, 2);
-            }
-            break;
-        }
-        case BlockType.END_PORTAL_FRAME: {
-            ctx.fillStyle = '#556655'; // End stone color ish
-            ctx.fillRect(0, 0, 16, 16);
-            // Top eye socket
-            if (face === 'top') {
-                ctx.fillStyle = '#1a4a4a';
-                ctx.fillRect(4, 4, 8, 8);
-                // Eye
-                ctx.fillStyle = '#00cc77';
-                ctx.fillRect(6, 6, 4, 4);
-                ctx.fillStyle = '#000000';
-                ctx.fillRect(7, 7, 2, 2);
-            } else {
-                // Side detail
-                ctx.fillStyle = '#445544';
-                ctx.fillRect(2, 2, 12, 12);
-            }
-            break;
-        }
-        case BlockType.END_PORTAL_BLOCK: {
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, 16, 16);
-            // Stars
-            for (let i = 0; i < 30; i++) {
-                ctx.fillStyle = Math.random() > 0.5 ? '#204060' : '#102030';
-                ctx.fillRect(Math.random() * 16, Math.random() * 16, 1, 1);
-            }
-            break;
-        }
-        case BlockType.DRAGON_EGG: {
-            ctx.fillStyle = '#0d0016';
-            ctx.fillRect(0, 0, 16, 16);
-            // Purple scales
-            for (let i = 0; i < 50; i++) {
-                ctx.fillStyle = '#32006b';
-                ctx.fillRect(Math.random() * 16, Math.random() * 16, 1, 1);
-            }
-            break;
-        }
         default:
             // Missing texture (Magenta/Black checkerboard)
             if (seed === 0) { // Only log once or for one seed variant?
@@ -918,82 +1443,42 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
             return;
 
         // ─── Nether & End Blocks ────────────────────────
-        case BlockType.SOUL_SAND:
-            fillNoise(ctx, [91, 69, 56], 18, seed);
-            // Dark porous holes
-            for (let i = 0; i < 12; i++) {
-                const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
-                px(ctx, sx, sy, 50, 35, 25);
-                if (rng() > 0.5) px(ctx, (sx + 1) & 15, sy, 55, 40, 28);
-            }
-            return;
-        case BlockType.END_STONE:
-            fillNoise(ctx, [232, 232, 170], 15, seed);
-            for (let i = 0; i < 8; i++) {
-                const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
-                px(ctx, sx, sy, 210, 210, 145);
-            }
-            return;
-        case BlockType.NETHER_BRICKS:
-            fillNoise(ctx, [44, 22, 26], 12, seed);
-            // Brick mortar pattern
-            for (let i = 0; i < 16; i++) {
-                px(ctx, i, 0, 35, 15, 18); px(ctx, i, 4, 35, 15, 18);
-                px(ctx, i, 8, 35, 15, 18); px(ctx, i, 12, 35, 15, 18);
-            }
-            for (let y = 0; y < 16; y++) {
-                const off = (Math.floor(y / 4) % 2 === 0) ? 0 : 8;
-                px(ctx, off, y, 35, 15, 18);
-                px(ctx, (off + 8) % 16, y, 35, 15, 18);
-            }
-            return;
-        case BlockType.CRYING_OBSIDIAN:
-            drawObsidian(ctx, seed);
-            // Purple glowing tears
-            for (let i = 0; i < 6; i++) {
-                const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
-                px(ctx, sx, sy, 120, 40, 200);
-                px(ctx, sx, (sy + 1) & 15, 100, 30, 180);
-                px(ctx, sx, (sy + 2) & 15, 80, 20, 160);
-            }
-            return;
+        case BlockType.END_STONE: drawEndStone(ctx, seed); return;
         case BlockType.END_PORTAL_FRAME:
+            drawEndStone(ctx, seed);
             if (face === 'top') {
-                fillNoise(ctx, [26, 74, 74], 12, seed);
-                // Eye socket
-                for (let y = 5; y < 11; y++) for (let x = 5; x < 11; x++) {
-                    px(ctx, x, y, 15, 50, 50);
-                }
-                px(ctx, 7, 7, 10, 180, 180); px(ctx, 8, 7, 10, 180, 180);
-                px(ctx, 7, 8, 10, 180, 180); px(ctx, 8, 8, 10, 180, 180);
+                ctx.fillStyle = '#0a2e1f'; ctx.fillRect(4, 4, 8, 8); // Eye slot
+                ctx.strokeStyle = '#2d8c6b'; ctx.strokeRect(4, 4, 8, 8);
             } else {
-                fillNoise(ctx, [59, 107, 75], 15, seed);
-                // Side decorative pattern
-                for (let x = 0; x < 16; x++) px(ctx, x, 0, 45, 88, 58);
-                for (let x = 0; x < 16; x++) px(ctx, x, 15, 45, 88, 58);
-            }
-            return;
-        case BlockType.DRAGON_EGG:
-            fillNoise(ctx, [13, 0, 22], 8, seed);
-            // Purple sparkle highlights
-            for (let i = 0; i < 4; i++) {
-                const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
-                px(ctx, sx, sy, 60, 10, 100);
-            }
-            return;
-        case BlockType.NETHER_PORTAL_BLOCK:
-            for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-                const v = rng() * 40 - 20;
-                const swirl = Math.sin(x * 0.5 + y * 0.3) * 30;
-                px(ctx, x, y, 100 + v + swirl, 0, 160 + v + swirl * 0.5);
+                drawInnerEdge(ctx, [160, 160, 120]);
             }
             return;
         case BlockType.END_PORTAL_BLOCK:
-            for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-                const starfield = rng() < 0.1;
-                if (starfield) px(ctx, x, y, 100 + (rng() * 155 | 0), 180 + (rng() * 75 | 0), 200 + (rng() * 55 | 0));
-                else px(ctx, x, y, 0, 8 + (rng() * 15 | 0), 20 + (rng() * 15 | 0));
+            ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 16, 16);
+            for (let i = 0; i < 5; i++) {
+                const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
+                px(ctx, sx, sy, 200, 100, 255); // Stars
             }
+            return;
+        case BlockType.DRAGON_EGG:
+            fillNoise(ctx, [20, 15, 25], 5, seed);
+            for (let i = 0; i < 12; i++) {
+                const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
+                px(ctx, sx, sy, 60, 40, 80);
+            }
+            return;
+        case BlockType.ENDER_CHEST:
+            fillNoise(ctx, [30, 45, 45], 10, seed);
+            drawInnerEdge(ctx, [60, 120, 120]);
+            if (face === 'front') {
+                ctx.fillStyle = '#ffcc00'; ctx.fillRect(7, 6, 2, 4); // Lock
+            }
+            return;
+        case BlockType.NETHER_PORTAL_BLOCK:
+            drawNetherPortalBlock(ctx, seed);
+            return;
+        case BlockType.BUTTON:
+            drawButton(ctx, seed);
             return;
 
         // ─── Redstone Devices ───────────────────────────
@@ -1348,28 +1833,58 @@ export function getBlockIcon(blockId: number): string {
     const ctx = canvas.getContext('2d')!;
 
     if (data.isItem) {
-        // Item rendering: sword/tool shape
         const rgb = hex(data.color);
-        const grd = ctx.createLinearGradient(size * 0.4, 0, size * 0.6, size);
-        grd.addColorStop(0, `rgb(${Math.min(255, rgb[0] + 50)},${Math.min(255, rgb[1] + 50)},${Math.min(255, rgb[2] + 50)})`);
-        grd.addColorStop(1, `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`);
-        ctx.fillStyle = grd;
-        // Blade
-        ctx.beginPath();
-        ctx.moveTo(size * 0.42, size * 0.05);
-        ctx.lineTo(size * 0.58, size * 0.05);
-        ctx.lineTo(size * 0.56, size * 0.5);
-        ctx.lineTo(size * 0.44, size * 0.5);
-        ctx.closePath(); ctx.fill();
-        // Guard
-        ctx.fillStyle = '#888';
-        ctx.fillRect(size * 0.35, size * 0.48, size * 0.3, size * 0.06);
-        // Handle
-        ctx.fillStyle = '#8B6B3E';
-        ctx.fillRect(size * 0.44, size * 0.54, size * 0.12, size * 0.35);
-        // Outline
-        ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1;
-        ctx.strokeRect(size * 0.42, size * 0.05, size * 0.16, size * 0.45);
+        const isOre = blockId === BlockType.RAW_IRON || blockId === BlockType.RAW_GOLD || blockId === BlockType.RAW_COPPER;
+        const isShard = blockId === BlockType.AMETHYST_SHARD;
+        const isIngot = blockId === BlockType.IRON_INGOT || blockId === BlockType.GOLD_INGOT || blockId === BlockType.COPPER_INGOT || blockId === BlockType.NETHERITE_INGOT;
+        const isArmor = blockId >= 400 && blockId <= 423 || (blockId >= 610 && blockId <= 613);
+
+        if (isOre || blockId === BlockType.NETHERITE_SCRAP) {
+            // Lumpy raw ore/scrap shape
+            ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+            ctx.beginPath();
+            ctx.arc(size * 0.45, size * 0.5, size * 0.25, 0, Math.PI * 2);
+            ctx.arc(size * 0.6, size * 0.45, size * 0.2, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (isShard) {
+            // Crystal shard shape
+            ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+            ctx.beginPath();
+            ctx.moveTo(size * 0.5, size * 0.2);
+            ctx.lineTo(size * 0.7, size * 0.8);
+            ctx.lineTo(size * 0.5, size * 0.7);
+            ctx.lineTo(size * 0.3, size * 0.8);
+            ctx.closePath(); ctx.fill();
+        } else if (isIngot) {
+            // Rounded rectangle ingot
+            ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+            ctx.fillRect(size * 0.25, size * 0.35, size * 0.5, size * 0.3);
+            drawInnerEdge(ctx, darken(rgb, 0.8));
+        } else if (isArmor) {
+            // Simple armor piece representation
+            ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+            ctx.fillRect(size * 0.3, size * 0.3, size * 0.4, size * 0.4);
+            drawInnerEdge(ctx, lighten(rgb, 30));
+        } else {
+            // Existing Tool rendering shape
+            const grd = ctx.createLinearGradient(size * 0.4, 0, size * 0.6, size);
+            grd.addColorStop(0, `rgb(${Math.min(255, rgb[0] + 50)},${Math.min(255, rgb[1] + 50)},${Math.min(255, rgb[2] + 50)})`);
+            grd.addColorStop(1, `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`);
+            ctx.fillStyle = grd;
+            // Blade
+            ctx.beginPath();
+            ctx.moveTo(size * 0.42, size * 0.05);
+            ctx.lineTo(size * 0.58, size * 0.05);
+            ctx.lineTo(size * 0.56, size * 0.5);
+            ctx.lineTo(size * 0.44, size * 0.5);
+            ctx.closePath(); ctx.fill();
+            // Guard
+            ctx.fillStyle = '#888';
+            ctx.fillRect(size * 0.35, size * 0.48, size * 0.3, size * 0.06);
+            // Handle
+            ctx.fillStyle = '#8B6B3E';
+            ctx.fillRect(size * 0.44, size * 0.54, size * 0.12, size * 0.35);
+        }
     } else {
         // Create mini 16x16 textures for each face
         const topTex = document.createElement('canvas');

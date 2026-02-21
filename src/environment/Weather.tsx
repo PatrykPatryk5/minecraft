@@ -10,9 +10,9 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import useGameStore from '../store/gameStore';
 
-const PARTICLE_COUNT = 4000;
-const RADIUS = 40; // Bubble radius around player
-const HEIGHT = 50;
+const PARTICLE_COUNT = 15000;
+const RADIUS = 120; // Expanded bubble radius around player
+const HEIGHT = 60;
 
 const Weather: React.FC = () => {
     const meshRef = useRef<THREE.InstancedMesh>(null);

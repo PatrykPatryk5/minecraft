@@ -495,6 +495,13 @@ const useGameStore = create<GameState>((set, get) => ({
             updateRedstone(x, y, z);
         });
 
+        // Bump version for self and neighbors
+        state.bumpVersion(cx, cz);
+        if (lx === 0) state.bumpVersion(cx - 1, cz);
+        if (lx === 15) state.bumpVersion(cx + 1, cz);
+        if (lz === 0) state.bumpVersion(cx, cz - 1);
+        if (lz === 15) state.bumpVersion(cx, cz + 1);
+
         // Save to IndexedDB
         saveChunk(`${state.dimension}:${cx},${cz}`, chunk);
 
@@ -580,11 +587,19 @@ const useGameStore = create<GameState>((set, get) => ({
             updateRedstone(x, y, z);
         });
 
+        // Bump version for self and neighbors
+        const s = get();
+        s.bumpVersion(cx, cz);
+        if (lx === 0) s.bumpVersion(cx - 1, cz);
+        if (lx === 15) s.bumpVersion(cx + 1, cz);
+        if (lz === 0) s.bumpVersion(cx, cz - 1);
+        if (lz === 15) s.bumpVersion(cx, cz + 1);
+
         // Save to IndexedDB
-        saveChunk(`${get().dimension}:${cx},${cz}`, chunk);
+        saveChunk(`${s.dimension}:${cx},${cz}`, chunk);
 
         // Broadcast if local multiplayer
-        if (!fromNetwork && get().isMultiplayer) {
+        if (!fromNetwork && s.isMultiplayer) {
             import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
                 getConnection().sendBlockBreak(x, y, z);
             });
@@ -623,6 +638,11 @@ const useGameStore = create<GameState>((set, get) => ({
             const cx = parseInt(parts[0]), cz = parseInt(parts[1]);
             saveChunk(`${s.dimension}:${cx},${cz}`, chunk);
             s.bumpVersion(cx, cz);
+            // neighbors
+            s.bumpVersion(cx + 1, cz);
+            s.bumpVersion(cx - 1, cz);
+            s.bumpVersion(cx, cz + 1);
+            s.bumpVersion(cx, cz - 1);
         }
 
         // Broadcast if local multiplayer
