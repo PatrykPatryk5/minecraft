@@ -19,7 +19,7 @@ export class WorkerPool {
     private poolSize: number;
 
     constructor(
-        private workerUrl: URL,
+        private workerConstructor: new () => Worker,
         poolSize: number = 4,
         maxConcurrent?: number
     ) {
@@ -32,7 +32,7 @@ export class WorkerPool {
     init(seed: number): boolean {
         try {
             for (let i = 0; i < this.poolSize; i++) {
-                const worker = new Worker(this.workerUrl, { type: 'module' });
+                const worker = new this.workerConstructor();
                 const proxy = Comlink.wrap<TerrainWorker>(worker);
 
                 // Initialize the worker's RNG

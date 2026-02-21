@@ -18,6 +18,7 @@ import { generateChunk, CHUNK_SIZE, initSeed } from '../core/terrainGen';
 import { generateEndChunk, generateNetherChunk } from '../core/dimensionGen';
 import { EnderDragon } from '../entities/EnderDragon';
 import { WorkerPool, getWorkerPool } from '../core/workerPool';
+import TerrainWorker from '../core/generation.worker?worker';
 import Chunk from './Chunk';
 import { globalTerrainUniforms } from '../core/constants';
 import { checkChunkBorders } from '../core/waterSystem';
@@ -93,7 +94,7 @@ const World: React.FC = () => {
 
         const poolSize = Math.min(navigator.hardwareConcurrency || 6, 8);
         const pool = new WorkerPool(
-            new URL('../core/generation.worker.ts', import.meta.url),
+            TerrainWorker,
             poolSize, poolSize * 2
         );
 
