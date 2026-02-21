@@ -26,6 +26,7 @@ const Inventory: React.FC = () => {
     const setCursorItem = useGameStore((s) => s.setCursorItem);
 
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+    const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
         const onMouseMove = (e: MouseEvent) => {
@@ -252,7 +253,13 @@ const Inventory: React.FC = () => {
     };
 
     const allItems = [...PLACEABLE_BLOCKS, ...ITEM_BLOCKS];
-    const availableItems = gameMode === 'creative' ? allItems : getPlayerItems();
+    const filteredAllItems = useMemo(() => {
+        if (!searchTerm) return allItems;
+        const low = searchTerm.toLowerCase();
+        return allItems.filter(id => BLOCK_DATA[id]?.name.toLowerCase().includes(low));
+    }, [allItems, searchTerm]);
+
+    const availableItems = gameMode === 'creative' ? filteredAllItems : getPlayerItems();
 
     const close = () => {
         closeInv();
@@ -263,7 +270,19 @@ const Inventory: React.FC = () => {
     return (
         <div className="inventory-overlay" onClick={close}>
             <div className="inventory-window" onClick={(e) => e.stopPropagation()}>
-                <h3>📦 Ekwipunek</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <h3>📦 Ekwipunek</h3>
+                    {gameMode === 'creative' && (
+                        <input
+                            type="text"
+                            placeholder="Szukaj..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="mc-search-input"
+                            autoFocus
+                        />
+                    )}
+                </div>
 
                 {/* 2x2 Crafting Grid (top section) */}
                 <div className="inv-crafting-section">
@@ -323,7 +342,7 @@ const Inventory: React.FC = () => {
                     <>
                         <div className="inv-section-label">Bloki (kliknij aby wziąć)</div>
                         <div className="craft-palette" style={{ maxHeight: '160px' }}>
-                            {allItems.map((id) => {
+                            {filteredAllItems.map((id) => {
                                 const data = BLOCK_DATA[id];
                                 if (!data) return null;
                                 const icon = getBlockIcon(id);

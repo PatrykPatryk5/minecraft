@@ -102,6 +102,12 @@ export interface ArrowEntity {
     ownerId?: string;
 }
 
+export interface TNTPrimedEntity {
+    id: string;
+    pos: [number, number, number];
+    fuse: number; // in ticks (default 80 = 4s)
+}
+
 export interface FurnaceState {
     inputSlot: InventorySlot;
     fuelSlot: InventorySlot;
@@ -137,6 +143,7 @@ export interface GameState {
     // ── World ─────────────────────────────────────────────
     chunks: Record<string, Uint16Array>;
     chunkVersions: Record<string, number>;
+
     generatedChunks: Set<string>;
     worldSeed: number;
     worldName: string;
@@ -145,10 +152,16 @@ export interface GameState {
     addArrow: (pos: [number, number, number], velocity: [number, number, number]) => void;
     removeArrow: (id: string) => void;
 
+    primedTNT: TNTPrimedEntity[];
+    spawnTNT: (pos: [number, number, number], fuse?: number) => void;
+    removeTNT: (id: string) => void;
+    updateTNT: (id: string, fuse: number) => void;
+
     setChunkData: (cx: number, cz: number, dimension: string, data: Uint16Array) => void;
     getBlock: (x: number, y: number, z: number) => number;
     addBlock: (x: number, y: number, z: number, typeId: number, fromNetwork?: boolean) => void;
     removeBlock: (x: number, y: number, z: number, fromNetwork?: boolean) => void;
+    removeBlocks: (blocks: [number, number, number][], fromNetwork?: boolean) => void;
     bumpVersion: (cx: number, cz: number) => void;
     resetWorld: () => void;
     setWorldSeed: (seed: number) => void;
@@ -554,7 +567,13 @@ const useGameStore = create<GameState>((set, get) => ({
         const idx = blockIndex(lx, y, lz);
         if (chunk[idx] === 0) return; // Already air
 
+        const oldType = chunk[idx];
         chunk[idx] = 0; // Reset ID and power to 0
+
+        // Trigger Linked breaking & actions
+        import('../core/blockActions').then(({ onBlockBroken }) => {
+            onBlockBroken(x, y, z, oldType);
+        });
 
         // Trigger Redstone update
         import('../core/redstoneSystem').then(({ updateRedstone }) => {
@@ -568,6 +587,50 @@ const useGameStore = create<GameState>((set, get) => ({
         if (!fromNetwork && get().isMultiplayer) {
             import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
                 getConnection().sendBlockBreak(x, y, z);
+            });
+        }
+    },
+
+    removeBlocks: (blocks: [number, number, number][], fromNetwork = false) => {
+        const s = get();
+        const affectedChunks = new Set<string>();
+
+        for (const [x, y, z] of blocks) {
+            if (y < 0 || y > 255) continue;
+            const cx = Math.floor(x / 16);
+            const cz = Math.floor(z / 16);
+            const key = chunkKey(cx, cz);
+            const lx = ((x % 16) + 16) % 16;
+            const lz = ((z % 16) + 16) % 16;
+            const chunk = s.chunks[key];
+            if (!chunk) continue;
+            const idx = blockIndex(lx, y, lz);
+            if (chunk[idx] === 0) continue;
+
+            chunk[idx] = 0;
+            affectedChunks.add(key);
+
+            // Trigger Redstone update
+            import('../core/redstoneSystem').then(({ updateRedstone }) => {
+                updateRedstone(x, y, z);
+            });
+        }
+
+        // Save and bump versions once per chunk
+        for (const key of affectedChunks) {
+            const chunk = s.chunks[key];
+            const parts = key.split(',');
+            const cx = parseInt(parts[0]), cz = parseInt(parts[1]);
+            saveChunk(`${s.dimension}:${cx},${cz}`, chunk);
+            s.bumpVersion(cx, cz);
+        }
+
+        // Broadcast if local multiplayer
+        if (!fromNetwork && s.isMultiplayer && blocks.length > 0) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                for (const [x, y, z] of blocks) {
+                    getConnection().sendBlockBreak(x, y, z);
+                }
             });
         }
     },
@@ -1002,19 +1065,25 @@ const useGameStore = create<GameState>((set, get) => ({
 
     // ── Falling/Gravity Blocks ─────────────────────────────
     fallingBlocks: [],
-    spawnFallingBlock: (type, pos) => {
-        const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `falling-${Math.random().toString(36).substring(2, 10)}`;
-        set((s) => ({
-            fallingBlocks: [...s.fallingBlocks, { id, type, pos }]
-        }));
-    },
+    spawnFallingBlock: (type, pos) => set((s) => ({
+        fallingBlocks: [...s.fallingBlocks, { id: Math.random().toString(36).substr(2, 9), type, pos }]
+    })),
     landFallingBlock: (id, pos, type) => {
         const s = get();
         s.addBlock(pos[0], pos[1], pos[2], type);
-        set((st) => ({
-            fallingBlocks: st.fallingBlocks.filter(b => b.id !== id)
-        }));
+        set((s) => ({ fallingBlocks: s.fallingBlocks.filter(b => b.id !== id) }));
     },
+
+    primedTNT: [],
+    spawnTNT: (pos, fuse = 80) => set((s) => ({
+        primedTNT: [...s.primedTNT, { id: Math.random().toString(36).substr(2, 9), pos, fuse }]
+    })),
+    removeTNT: (id) => set((s) => ({
+        primedTNT: s.primedTNT.filter(t => t.id !== id)
+    })),
+    updateTNT: (id, fuse) => set((s) => ({
+        primedTNT: s.primedTNT.map(t => t.id === id ? { ...t, fuse } : t)
+    })),
 
     // ── Pistons ────────────────────────────────────────────
     pistons: {},

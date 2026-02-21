@@ -36,6 +36,7 @@ import { preloadAllTextures } from './core/textures';
 import DroppedItemsManager from './entities/DroppedItems';
 import FallingBlocksManager from './entities/FallingBlocks';
 import ArrowsManager from './entities/Arrows';
+import TNTManager from './entities/TNTPrimed';
 
 const LoadingScreen: React.FC<{ caps: RendererCapabilities | null; progress: string }> = ({ caps, progress }) => (
     <div className="loading-screen">
@@ -71,6 +72,7 @@ const SceneContent: React.FC = () => {
                 <DroppedItemsManager />
                 <FallingBlocksManager />
                 <ArrowsManager />
+                <TNTManager />
             </Physics>
             <Clouds />
             <Weather />
@@ -154,7 +156,7 @@ const App: React.FC = () => {
                         alpha: false,
                         failIfMajorPerformanceCaveat: false,
                     }}
-                    shadows={useShadows ? { type: THREE.PCFShadowMap } : false}
+                    shadows={useShadows ? { type: THREE.PCFSoftShadowMap } : false}
                     dpr={graphics === 'fabulous' ? [1, Math.min(window.devicePixelRatio, 2)] : [1, 1]}
                     style={{ width: '100%', height: '100%' }}
                     onContextMenu={(e) => e.preventDefault()}

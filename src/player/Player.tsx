@@ -318,6 +318,17 @@ const Player: React.FC = () => {
                 const plZ = Math.floor(pos.current.z);
                 if (px === plX && pz === plZ && py >= feet && py <= head) return;
 
+                if (selected === BlockType.BED) {
+                    import('../core/blockActions').then(({ handleBedPlacement }) => {
+                        if (handleBedPlacement(px, py, pz, camera.rotation.y)) {
+                            s.consumeHotbarItem(s.hotbarSlot);
+                            playSound('place', [px, py, pz]);
+                            bumpAround(px, pz);
+                        }
+                    });
+                    return;
+                }
+
                 s.addBlock(px, py, pz, selected);
                 s.consumeHotbarItem(s.hotbarSlot);
                 playSound('place', [px, py, pz]);

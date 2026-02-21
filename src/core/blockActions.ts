@@ -10,6 +10,7 @@ import { attemptNetherPortalIgnite } from './portalSystem';
 import { BlockType, BLOCK_DATA } from './blockTypes';
 import { playSound } from '../audio/sounds';
 import { emitBlockBreak, emitExplosion } from '../core/particles';
+import { MAX_HEIGHT } from './terrainGen';
 
 // ─── TNT Explosion ──────────────────────────────────────
 const EXPLOSION_RADIUS = 4;
@@ -18,18 +19,14 @@ const EXPLOSION_DAMAGE = 12;
 /** Ignite TNT at position — creates delayed explosion */
 export function igniteTNT(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
-    // Remove the TNT block immediately
+    // Remove the TNT block immediately and spawn entity
     s.removeBlock(x, y, z);
+    s.spawnTNT([x + 0.5, y + 0.5, z + 0.5], 80); // 80 ticks = 4 seconds
     playSound('fuse');
-
-    // Schedule explosion after 4 seconds (80 ticks)
-    setTimeout(() => {
-        explodeAt(x, y, z);
-    }, 4000);
 }
 
 /** Create explosion at position, destroying blocks in radius */
-function explodeAt(x: number, y: number, z: number): void {
+export function explodeAt(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
     const destroyed: [number, number, number][] = [];
 
@@ -41,21 +38,23 @@ function explodeAt(x: number, y: number, z: number): void {
     for (let dx = -EXPLOSION_RADIUS; dx <= EXPLOSION_RADIUS; dx++) {
         for (let dy = -EXPLOSION_RADIUS; dy <= EXPLOSION_RADIUS; dy++) {
             for (let dz = -EXPLOSION_RADIUS; dz <= EXPLOSION_RADIUS; dz++) {
-                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-                if (dist > EXPLOSION_RADIUS) continue;
-
-                // Random falloff — outer blocks have chance to survive
-                if (dist > EXPLOSION_RADIUS * 0.6 && Math.random() > 0.6) continue;
+                const distSq = dx * dx + dy * dy + dz * dz;
+                if (distSq > EXPLOSION_RADIUS * EXPLOSION_RADIUS) continue;
 
                 const bx = x + dx, by = y + dy, bz = z + dz;
                 if (by < 1 || by > 255) continue; // Don't destroy bedrock layer
 
                 const type = s.getBlock(bx, by, bz);
-                if (!type || type === BlockType.BEDROCK || type === BlockType.WATER || type === BlockType.OBSIDIAN) continue;
+                if (!type) continue;
+
+                const blockData = BLOCK_DATA[type];
+                if (!blockData || type === BlockType.BEDROCK || type === BlockType.WATER || type === BlockType.OBSIDIAN) continue;
 
                 // Chain TNT!
                 if (type === BlockType.TNT) {
-                    setTimeout(() => igniteTNT(bx, by, bz), Math.random() * 500 + 200);
+                    s.removeBlock(bx, by, bz);
+                    // Spawn primed TNT with short random fuse for chaining effect
+                    s.spawnTNT([bx + 0.5, by + 0.5, bz + 0.5], Math.random() * 10 + 5);
                     continue;
                 }
 
@@ -66,21 +65,7 @@ function explodeAt(x: number, y: number, z: number): void {
     }
 
     // Batch remove blocks
-    for (const [bx, by, bz] of destroyed) {
-        s.removeBlock(bx, by, bz);
-    }
-
-    // Bump chunk versions around explosion
-    const affectedChunks = new Set<string>();
-    for (const [bx, , bz] of destroyed) {
-        const cx = Math.floor(bx / 16);
-        const cz = Math.floor(bz / 16);
-        const key = `${cx},${cz}`;
-        if (!affectedChunks.has(key)) {
-            affectedChunks.add(key);
-            s.bumpVersion(cx, cz);
-        }
-    }
+    s.removeBlocks(destroyed);
 
     // Damage player if near
     const playerPos = s.playerPos;
@@ -133,6 +118,9 @@ export function toggleDoor(x: number, y: number, z: number): boolean {
 // ─── Bed Spawn Point ────────────────────────────────────
 export function useBed(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
+    const type = s.getBlock(x, y, z);
+    if (type !== BlockType.BED && type !== BlockType.BED_HEAD) return;
+
     // Set spawn point
     s.setPlayerPos([x + 0.5, y + 1, z + 0.5]);
     playSound('click');
@@ -140,9 +128,52 @@ export function useBed(x: number, y: number, z: number): void {
     // Skip night
     if (s.dayTime > 0.75 || s.dayTime < 0.25) {
         s.skipNight();
-        s.addChatMessage('System', 'You slept. Sweet dreams!');
+        s.addChatMessage('System', 'Śpisz... Słodkich snów!');
     } else {
-        s.addChatMessage('System', 'You can only sleep at night.');
+        s.addChatMessage('System', 'Możesz spać tylko w nocy.');
+    }
+}
+
+/** 2-Block Bed placement check */
+export function handleBedPlacement(x: number, y: number, z: number, yaw: number): boolean {
+    const s = useGameStore.getState();
+
+    // Raycasting to find direction (where player is looking)
+    // 0: -Z (North), 1: +X (East), 2: +Z (South), 3: -X (West)
+    const dir = (Math.floor((yaw * 4) / (Math.PI * 2) + 0.5) & 3);
+    const deltas = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    const [dx, dz] = deltas[dir];
+
+    const headX = x + dx;
+    const headZ = z + dz;
+
+    // Check if head position is free and solid below
+    if (s.getBlock(headX, y, headZ) !== BlockType.AIR) return false;
+    const belowType = s.getBlock(headX, y - 1, headZ);
+    if (!BLOCK_DATA[belowType]?.solid && belowType !== BlockType.BEDROCK) return false;
+
+    // Place both parts
+    s.addBlock(x, y, z, BlockType.BED);
+    s.addBlock(headX, y, headZ, BlockType.BED_HEAD);
+
+    return true;
+}
+
+/** Linked breaking for beds, doors, etc. */
+export function onBlockBroken(x: number, y: number, z: number, type: number): void {
+    const s = useGameStore.getState();
+
+    if (type === BlockType.BED || type === BlockType.BED_HEAD) {
+        const checkDirs = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+        for (const [dx, dy, dz] of checkDirs) {
+            const nx = x + dx, ny = y, nz = z + dz;
+            const neighborType = s.getBlock(nx, ny, nz);
+            if (type === BlockType.BED && neighborType === BlockType.BED_HEAD) {
+                s.removeBlock(nx, ny, nz);
+            } else if (type === BlockType.BED_HEAD && neighborType === BlockType.BED) {
+                s.removeBlock(nx, ny, nz);
+            }
+        }
     }
 }
 
@@ -184,11 +215,16 @@ export function handleBlockAction(
         case BlockType.DOOR_OAK:
             toggleDoor(blockX, blockY, blockZ);
             return true;
-        case BlockType.CHEST:
-            // Open chest inventory (use crafting overlay for now)
-            useGameStore.getState().setOverlay('crafting');
+        case BlockType.CHEST: {
+            const s = useGameStore.getState();
+            s.setOverlay('chest');
             playSound('open');
             document.exitPointerLock();
+            return true;
+        }
+        case BlockType.BED:
+        case BlockType.BED_HEAD:
+            useBed(blockX, blockY, blockZ);
             return true;
         case BlockType.LEVER: {
             import('./redstoneSystem').then(({ toggleLever }) => {

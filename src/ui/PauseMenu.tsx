@@ -145,6 +145,11 @@ const PauseMenu: React.FC = () => {
                             onChange={(e) => updateSettings({ soundVolume: +e.target.value / 100 })} className="mc-slider" />
                     </div>
                     <div className="setting-row">
+                        <span>Muzyka: <strong>{(settings.musicVolume * 100).toFixed(0)}%</strong></span>
+                        <input type="range" min={0} max={100} value={settings.musicVolume * 100}
+                            onChange={(e) => updateSettings({ musicVolume: +e.target.value / 100 })} className="mc-slider" />
+                    </div>
+                    <div className="setting-row">
                         <span>Jasność: <strong>{(settings.brightness * 100).toFixed(0)}%</strong></span>
                         <input type="range" min={1} max={100} value={settings.brightness * 100}
                             onChange={(e) => updateSettings({ brightness: +e.target.value / 100 })} className="mc-slider" />
@@ -159,6 +164,36 @@ const PauseMenu: React.FC = () => {
                                 </button>
                             ))}
                         </div>
+                    </div>
+                    <div className="setting-row">
+                        <span>Grafika:</span>
+                        <div className="mode-selector compact">
+                            {(['fast', 'fancy', 'fabulous'] as const).map((g) => (
+                                <button key={g} className={`mode-btn sm${settings.graphics === g ? ' active' : ''}`}
+                                    onClick={() => updateSettings({ graphics: g })}>
+                                    {g === 'fast' ? '⚡' : g === 'fancy' ? '🎨' : '✨'}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="setting-row">
+                        <span>GUI Scale: <strong>{settings.guiScale}x</strong></span>
+                        <input type="range" min={1} max={4} value={settings.guiScale}
+                            onChange={(e) => updateSettings({ guiScale: +e.target.value })} className="mc-slider" />
+                    </div>
+                    <div className="setting-row" style={{ gridColumn: 'span 2', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={settings.smoothLighting} onChange={(e) => updateSettings({ smoothLighting: e.target.checked })} />
+                            AO
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={settings.viewBobbing} onChange={(e) => updateSettings({ viewBobbing: e.target.checked })} />
+                            Bobbing
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={settings.showFps} onChange={(e) => updateSettings({ showFps: e.target.checked })} />
+                            FPS
+                        </label>
                     </div>
                     <div className="setting-row">
                         <span>Cząsteczki:</span>

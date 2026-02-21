@@ -11,18 +11,20 @@
  */
 
 import React, { useRef, useCallback, useEffect, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
+import * as THREE from 'three';
 import useGameStore, { chunkKey } from '../store/gameStore';
 import { generateChunk, CHUNK_SIZE, initSeed } from '../core/terrainGen';
 import { generateEndChunk, generateNetherChunk } from '../core/dimensionGen';
 import { EnderDragon } from '../entities/EnderDragon';
 import { WorkerPool } from '../core/workerPool';
-import Chunk, { globalTerrainUniforms } from './Chunk';
+import Chunk from './Chunk';
+import { globalTerrainUniforms } from '../core/constants';
 import { checkChunkBorders } from '../core/waterSystem';
 import { tickWorld } from '../core/worldTick';
 
 const UNLOAD_BUFFER = 3;
-const BATCH_PER_FRAME = 1; // Reduced to 1 to drastically decrease main thread stutter on Generation
+const BATCH_PER_FRAME = 2; // Increased to 2 for better throughput with FOV prioritization
 const RECALCULATE_COOLDOWN = 600;
 
 // LOD thresholds (in chunk distance²)
@@ -38,6 +40,7 @@ interface ChunkEntry {
 }
 
 const World: React.FC = () => {
+    const { camera } = useThree();
     const renderDistance = useGameStore((s) => s.renderDistance);
 
     const loadQueueRef = useRef<ChunkEntry[]>([]);
@@ -140,20 +143,35 @@ const World: React.FC = () => {
         const pcz = Math.floor(pos[2] / CHUNK_SIZE);
         const rd = useGameStore.getState().renderDistance;
 
+        // FOV Prioritization: get camera forward vector
+        const cameraDir = new THREE.Vector3();
+        camera.getWorldDirection(cameraDir);
+        const dirX = cameraDir.x;
+        const dirZ = cameraDir.z;
+
         const active: ChunkEntry[] = [];
         const toLoad: ChunkEntry[] = [];
 
         for (let dx = -rd; dx <= rd; dx++) {
             for (let dz = -rd; dz <= rd; dz++) {
-                const dist = dx * dx + dz * dz;
-                if (dist > rd * rd) continue;
+                const distSq = dx * dx + dz * dz;
+                if (distSq > rd * rd) continue;
+
+                // Dot product for FOV prioritization
+                const chunkDist = Math.sqrt(distSq) || 0.1;
+                // Vector to chunk (dx, dz) - normalize it
+                const dot = (-dx * dirX + -dz * dirZ) / chunkDist;
+
+                // Prioritize chunks in front
+                const fovWeight = dot > 0 ? (1 - dot * 0.7) : (1 - dot * 0.2);
+                const priorityDist = chunkDist * fovWeight;
 
                 const cx = pcx + dx;
                 const cz = pcz + dz;
                 const key = chunkKey(cx, cz);
-                const lod: 0 | 1 | 2 = dist <= LOD_FULL ? 0 : dist <= LOD_MEDIUM ? 1 : 2;
+                const lod: 0 | 1 | 2 = distSq <= LOD_FULL ? 0 : distSq <= LOD_MEDIUM ? 1 : 2;
 
-                const entry: ChunkEntry = { cx, cz, key, dist, lod };
+                const entry: ChunkEntry = { cx, cz, key, dist: priorityDist, lod };
                 active.push(entry);
 
                 if (!loadedKeysRef.current.has(key) && !pendingKeysRef.current.has(key)) {
@@ -253,8 +271,8 @@ const World: React.FC = () => {
 
     return (
         <>
-            {visibleChunks.map((c) => (
-                <Chunk key={c.key} cx={c.cx} cz={c.cz} lod={0} hasPhysics={c.dist <= 2} />
+            {visibleChunks.map((c: ChunkEntry) => (
+                <Chunk key={c.key} cx={c.cx} cz={c.cz} lod={c.lod} hasPhysics={c.dist <= 2} />
             ))}
             {dimension === 'end' && !useGameStore.getState().dragonDefeated && <EnderDragon />}
             <fog attach="fog" args={[

@@ -17,6 +17,7 @@ import { getBlockMaterial, getAtlasTexture, getAtlasUV } from '../core/textures'
 import { RigidBody } from '@react-three/rapier';
 import useGameStore, { chunkKey } from '../store/gameStore';
 import { CHUNK_SIZE, blockIndex, type ChunkData, MAX_HEIGHT } from '../core/terrainGen';
+import { globalTerrainUniforms } from '../core/constants';
 
 // ─── Face Definitions ────────────────────────────────────
 interface FaceDef {
@@ -98,9 +99,8 @@ function getSharedBuffer(key: string): MeshBuffer {
 }
 
 // ─── Component ───────────────────────────────────────────
-export const globalTerrainUniforms = {
-    uTime: { value: 0 }
-};
+
+const meshLock = { current: false };
 
 interface ChunkProps {
     cx: number;
@@ -136,265 +136,280 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
         let active = true;
 
         const buildMesh = async () => {
-            // Yield to main thread briefly before heavy work
-            await new Promise(r => setTimeout(r, 0));
-            if (!active) return;
-            const state = useGameStore.getState();
-            const chunkData: ChunkData | undefined = state.chunks[key];
-            if (!chunkData) {
-                if (active) setMeshData(null);
-                return;
+            // Wait for meshing lock to avoid multiple heavy builds in one frame
+            while (meshLock.current) {
+                await new Promise(r => setTimeout(r, 16));
+                if (!active) return;
             }
+            meshLock.current = true;
 
-            // Ensure atlas is ready
-            const atlas = getAtlasTexture();
+            try {
+                // Yield to main thread briefly before heavy work
+                await new Promise(r => setTimeout(r, 0));
+                if (!active) return;
 
-            const nPx = state.chunks[chunkKey(cx + 1, cz)];
-            const nNx = state.chunks[chunkKey(cx - 1, cz)];
-            const nPz = state.chunks[chunkKey(cx, cz + 1)];
-            const nNz = state.chunks[chunkKey(cx, cz - 1)];
-
-            // Data arrays for SOLID mesh
-            const solid = getSharedBuffer('solid');
-            let solidIdx = 0;
-
-            // Data arrays for WATER mesh (transparent)
-            const water = getSharedBuffer('water');
-            let waterIdx = 0;
-
-            // AO Helper
-            const isSolidAt = (lx: number, y: number, lz: number): boolean => {
-                if (y < 0) return true;
-                if (y >= MAX_HEIGHT) return false;
-                let raw = 0;
-                if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
-                    raw = chunkData[blockIndex(lx, y, lz)];
-                } else {
-                    let nc: ChunkData | undefined;
-                    let nlx = lx, nlz = lz;
-                    if (lx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
-                    else if (lx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
-                    else if (lz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
-                    else if (lz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                    if (nc) raw = nc[blockIndex(nlx, y, nlz)];
+                const state = useGameStore.getState();
+                const chunkData: ChunkData | undefined = state.chunks[key];
+                if (!chunkData) {
+                    if (active) setMeshData(null);
+                    return;
                 }
-                const id = raw & 0x0FFF;
-                return id > 0 && (BLOCK_DATA[id]?.solid ?? false);
-            };
 
-            let maxChunkHeight = 0;
-            for (let i = 0; i < chunkData.length; i++) {
-                if (chunkData[i] > 0) {
-                    const y = i >> 8;
-                    if (y > maxChunkHeight) maxChunkHeight = y;
-                }
-            }
-            maxChunkHeight = Math.min(MAX_HEIGHT - 1, maxChunkHeight + 1);
+                // Ensure atlas is ready
+                const atlas = getAtlasTexture();
 
-            for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-                for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-                    for (let y = 0; y <= maxChunkHeight; y++) {
-                        const raw = chunkData[blockIndex(lx, y, lz)];
-                        const bt = raw & 0x0FFF;
-                        const power = (raw & 0xF000) >> 12;
+                const nPx = state.chunks[chunkKey(cx + 1, cz)];
+                const nNx = state.chunks[chunkKey(cx - 1, cz)];
+                const nPz = state.chunks[chunkKey(cx, cz + 1)];
+                const nNz = state.chunks[chunkKey(cx, cz - 1)];
 
-                        if (!bt) continue;
+                // Data arrays for SOLID mesh
+                const solid = getSharedBuffer('solid');
+                let solidIdx = 0;
 
-                        const isLiquidBlock = bt === BlockType.WATER || bt === BlockType.LAVA;
-                        const isWater = bt === BlockType.WATER;
-                        const target = isWater ? water : solid;
+                // Data arrays for WATER mesh (transparent)
+                const water = getSharedBuffer('water');
+                let waterIdx = 0;
 
-                        for (let f = 0; f < FACES.length; f++) {
-                            const face = FACES[f];
-                            const nx = lx + face.dir[0];
-                            const ny = y + face.dir[1];
-                            const nz = lz + face.dir[2];
+                // AO Helper - use padded buffer for fast access
+                // Padded size: 18x258x18
+                const PW = CHUNK_SIZE + 2;
+                const PH = MAX_HEIGHT + 2;
+                const PD = CHUNK_SIZE + 2;
+                const padded = new Uint16Array(PW * PH * PD);
 
-                            let nbt_raw = 0;
-                            if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0 && ny < MAX_HEIGHT) {
-                                nbt_raw = chunkData[blockIndex(nx, ny, nz)];
-                            } else if (ny >= 0 && ny < MAX_HEIGHT) {
-                                let nc: ChunkData | undefined;
-                                let nlx = nx, nlz = nz;
-                                if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
-                                else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
-                                else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
-                                else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                                if (nc) nbt_raw = nc[blockIndex(nlx, ny, nlz)];
-                            }
-                            const nbt = nbt_raw & 0x0FFF;
-
-                            let liquidHeight = 1.0;
-                            let neighborLiquidHeight = 1.0;
-
-                            if (isLiquidBlock) {
-                                let up_raw = 0;
-                                if (y < MAX_HEIGHT - 1) up_raw = chunkData[blockIndex(lx, y + 1, lz)];
-                                if ((up_raw & 0x0FFF) !== bt) liquidHeight = 0.88;
-
-                                if (nbt === bt) {
-                                    let n_up_raw = 0;
-                                    if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
-                                        n_up_raw = chunkData[blockIndex(nx, ny + 1, nz)];
-                                    } else if (ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
-                                        let nc: ChunkData | undefined;
-                                        let nlx = nx, nlz = nz;
-                                        if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
-                                        else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
-                                        else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
-                                        else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                                        if (nc) n_up_raw = nc[blockIndex(nlx, ny + 1, nlz)];
-                                    }
-                                    if ((n_up_raw & 0x0FFF) !== nbt) neighborLiquidHeight = 0.88;
-                                }
-                            }
-
-                            if (!isTransparent(nbt)) continue;
-
-                            if (lod === 2 && (
-                                bt === BlockType.TALL_GRASS ||
-                                bt === BlockType.FLOWER_RED ||
-                                bt === BlockType.FLOWER_YELLOW ||
-                                (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7)
-                            )) {
-                                continue;
-                            }
-
-                            if (bt === nbt && bt !== BlockType.LEAVES) {
-                                if (isLiquidBlock && liquidHeight > neighborLiquidHeight) {
-                                    // Draw the connecting face because we are taller!
-                                } else {
-                                    continue;
-                                }
-                            }
-
-                            const atlasUV = getAtlasUV(bt, face.name);
-                            const baseIdx = isWater ? waterIdx : solidIdx;
-
-                            for (let i = 0; i < 4; i++) {
-                                const corner = face.corners[i];
-                                const cx0 = lx + corner[0];
-                                let cy0 = y + corner[1];
-                                const cz0 = lz + corner[2];
-
-                                if (corner[1] === 1 && liquidHeight < 1.0) cy0 = y + liquidHeight;
-
-                                target.positions.push(cx0, cy0, cz0);
-                                target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
-
-                                const ux = atlasUV.u + face.uv[i][0] * atlasUV.su;
-                                const uy = atlasUV.v + face.uv[i][1] * atlasUV.sv;
-                                target.uvs.push(ux, uy);
-
-                                if (lod === 0 && !isWater) {
-                                    let aoLevel = 0;
-                                    const dx = face.dir[0], dy = face.dir[1], dz = face.dir[2];
-                                    const ox = corner[0] * 2 - 1;
-                                    const oy = corner[1] * 2 - 1;
-                                    const oz = corner[2] * 2 - 1;
-
-                                    if (Math.abs(dx) === 1) {
-                                        const s1 = isSolidAt(lx + dx, y + corner[1], lz + oz);
-                                        const s2 = isSolidAt(lx + dx, y + oy, lz + corner[2]);
-                                        const c = isSolidAt(lx + dx, y + oy, lz + oz);
-                                        aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
-                                    } else if (Math.abs(dy) === 1) {
-                                        const s1 = isSolidAt(lx + ox, y + dy, lz + corner[2]);
-                                        const s2 = isSolidAt(lx + corner[0], y + dy, lz + oz);
-                                        const c = isSolidAt(lx + ox, y + dy, lz + oz);
-                                        aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
-                                    } else {
-                                        const s1 = isSolidAt(lx + ox, y + corner[1], lz + dz);
-                                        const s2 = isSolidAt(lx + corner[0], y + oy, lz + dz);
-                                        const c = isSolidAt(lx + ox, y + oy, lz + dz);
-                                        aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
-                                    }
-                                    const br = 1.0 - aoLevel * 0.24;
-                                    let r = br, g = br, b = br;
-
-                                    // Colorize Redstone Wire
-                                    if (bt === BlockType.REDSTONE_WIRE) {
-                                        const intensity = 0.3 + (power / 15) * 0.7;
-                                        r *= intensity;
-                                        g *= (intensity * 0.1);
-                                        b *= (intensity * 0.1);
-                                    } else if (bt === BlockType.REDSTONE_LAMP && power > 0) {
-                                        r *= 1.4; g *= 1.2; b *= 0.8; // Warm glow
-                                    } else if (bt === BlockType.REDSTONE_TORCH && power > 0) {
-                                        r *= 1.5; g *= 0.3; b *= 0.3; // Intense red glow
-                                    }
-
-                                    target.colors.push(r, g, b);
-                                } else {
-                                    let r = 1, g = 1, b = 1;
-                                    if (bt === BlockType.REDSTONE_WIRE) {
-                                        const intensity = 0.3 + (power / 15) * 0.7;
-                                        r = intensity; g = intensity * 0.1; b = intensity * 0.1;
-                                    } else if (bt === BlockType.REDSTONE_LAMP && power > 0) {
-                                        r = 1.4; g = 1.2; b = 0.8;
-                                    } else if (bt === BlockType.REDSTONE_TORCH && power > 0) {
-                                        r = 1.5; g = 0.3; b = 0.3;
-                                    }
-                                    target.colors.push(r, g, b);
-                                }
-
-                                const isFloraBlock =
-                                    bt === BlockType.LEAVES ||
-                                    bt === BlockType.TALL_GRASS ||
-                                    bt === BlockType.FLOWER_RED ||
-                                    bt === BlockType.FLOWER_YELLOW ||
-                                    (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7);
-
-                                const isTopVert = corner[1] > 0;
-                                const swayLevel = isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0;
-
-                                target.isFlora.push(swayLevel);
-
-                                if (isLiquidBlock && isTopVert && liquidHeight < 1.0) {
-                                    target.isLiquid.push(1.0); // Only animate top face if it's open
-                                } else {
-                                    target.isLiquid.push(0.0);
-                                }
-                            }
-
-                            target.indices.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
-                            if (isWater) waterIdx += 4; else solidIdx += 4;
+                // Fill padded buffer
+                for (let lx = -1; lx <= CHUNK_SIZE; lx++) {
+                    for (let lz = -1; lz <= CHUNK_SIZE; lz++) {
+                        const targetChunk = (lx < 0) ? nNx : (lx >= CHUNK_SIZE) ? nPx : (lz < 0) ? nNz : (lz >= CHUNK_SIZE) ? nPz : chunkData;
+                        if (!targetChunk) continue;
+                        const nlx = (lx + 16) % 16;
+                        const nlz = (lz + 16) % 16;
+                        for (let y = 0; y < MAX_HEIGHT; y++) {
+                            padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)] = targetChunk[blockIndex(nlx, y, nlz)];
                         }
                     }
                 }
-            }
 
-            const createGeo = (data: typeof solid) => {
-                if (data.positions.length === 0) return null;
-                const g = getPooledGeo();
-                g.setAttribute('position', new THREE.Float32BufferAttribute(data.positions, 3));
-                g.setAttribute('normal', new THREE.Float32BufferAttribute(data.normals, 3));
-                g.setAttribute('uv', new THREE.Float32BufferAttribute(data.uvs, 2));
-                g.setAttribute('color', new THREE.Float32BufferAttribute(data.colors, 3));
-                if ((data as any).isFlora && (data as any).isFlora.length > 0) {
-                    g.setAttribute('isFlora', new THREE.Float32BufferAttribute((data as any).isFlora, 1));
+                const isSolidAt = (lx: number, y: number, lz: number): boolean => {
+                    const raw = padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)];
+                    const id = raw & 0x0FFF;
+                    return id > 0 && (BLOCK_DATA[id]?.solid ?? false);
+                };
+
+                let maxChunkHeight = 0;
+                for (let i = 0; i < chunkData.length; i++) {
+                    if (chunkData[i] > 0) {
+                        const y = i >> 8;
+                        if (y > maxChunkHeight) maxChunkHeight = y;
+                    }
                 }
-                if ((data as any).isLiquid && (data as any).isLiquid.length > 0) {
-                    g.setAttribute('isLiquid', new THREE.Float32BufferAttribute((data as any).isLiquid, 1));
+                maxChunkHeight = Math.min(MAX_HEIGHT - 1, maxChunkHeight + 1);
+
+                for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+                    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+                        for (let y = 0; y <= maxChunkHeight; y++) {
+                            const raw = chunkData[blockIndex(lx, y, lz)];
+                            const bt = raw & 0x0FFF;
+                            const power = (raw & 0xF000) >> 12;
+
+                            if (!bt) continue;
+
+                            const isLiquidBlock = bt === BlockType.WATER || bt === BlockType.LAVA;
+                            const isWater = bt === BlockType.WATER;
+                            const target = isWater ? water : solid;
+
+                            for (let f = 0; f < FACES.length; f++) {
+                                const face = FACES[f];
+                                const nx = lx + face.dir[0];
+                                const ny = y + face.dir[1];
+                                const nz = lz + face.dir[2];
+
+                                let nbt_raw = 0;
+                                if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0 && ny < MAX_HEIGHT) {
+                                    nbt_raw = chunkData[blockIndex(nx, ny, nz)];
+                                } else if (ny >= 0 && ny < MAX_HEIGHT) {
+                                    let nc: ChunkData | undefined;
+                                    let nlx = nx, nlz = nz;
+                                    if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
+                                    else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
+                                    else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
+                                    else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
+                                    if (nc) nbt_raw = nc[blockIndex(nlx, ny, nlz)];
+                                }
+                                const nbt = nbt_raw & 0x0FFF;
+
+                                let liquidHeight = 1.0;
+                                let neighborLiquidHeight = 1.0;
+
+                                if (isLiquidBlock) {
+                                    let up_raw = 0;
+                                    if (y < MAX_HEIGHT - 1) up_raw = chunkData[blockIndex(lx, y + 1, lz)];
+                                    if ((up_raw & 0x0FFF) !== bt) liquidHeight = 0.88;
+
+                                    if (nbt === bt) {
+                                        let n_up_raw = 0;
+                                        if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
+                                            n_up_raw = chunkData[blockIndex(nx, ny + 1, nz)];
+                                        } else if (ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
+                                            let nc: ChunkData | undefined;
+                                            let nlx = nx, nlz = nz;
+                                            if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
+                                            else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
+                                            else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
+                                            else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
+                                            if (nc) n_up_raw = nc[blockIndex(nlx, ny + 1, nlz)];
+                                        }
+                                        if ((n_up_raw & 0x0FFF) !== nbt) neighborLiquidHeight = 0.88;
+                                    }
+                                }
+
+                                if (!isTransparent(nbt)) continue;
+
+                                if (lod === 2 && (
+                                    bt === BlockType.TALL_GRASS ||
+                                    bt === BlockType.FLOWER_RED ||
+                                    bt === BlockType.FLOWER_YELLOW ||
+                                    (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7)
+                                )) {
+                                    continue;
+                                }
+
+                                if (bt === nbt && bt !== BlockType.LEAVES) {
+                                    if (isLiquidBlock && liquidHeight > neighborLiquidHeight) {
+                                        // Draw the connecting face because we are taller!
+                                    } else {
+                                        continue;
+                                    }
+                                }
+
+                                const atlasUV = getAtlasUV(bt, face.name);
+                                const baseIdx = isWater ? waterIdx : solidIdx;
+
+                                for (let i = 0; i < 4; i++) {
+                                    const corner = face.corners[i];
+                                    const cx0 = lx + corner[0];
+                                    let cy0 = y + corner[1];
+                                    const cz0 = lz + corner[2];
+
+                                    if (corner[1] === 1 && liquidHeight < 1.0) cy0 = y + liquidHeight;
+
+                                    target.positions.push(cx0, cy0, cz0);
+                                    target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
+
+                                    const ux = atlasUV.u + face.uv[i][0] * atlasUV.su;
+                                    const uy = atlasUV.v + face.uv[i][1] * atlasUV.sv;
+                                    target.uvs.push(ux, uy);
+
+                                    if (lod === 0 && !isWater) {
+                                        let aoLevel = 0;
+                                        const dx = face.dir[0], dy = face.dir[1], dz = face.dir[2];
+                                        const ox = corner[0] * 2 - 1;
+                                        const oy = corner[1] * 2 - 1;
+                                        const oz = corner[2] * 2 - 1;
+
+                                        if (Math.abs(dx) === 1) {
+                                            const s1 = isSolidAt(lx + dx, y + corner[1], lz + oz);
+                                            const s2 = isSolidAt(lx + dx, y + oy, lz + corner[2]);
+                                            const c = isSolidAt(lx + dx, y + oy, lz + oz);
+                                            aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
+                                        } else if (Math.abs(dy) === 1) {
+                                            const s1 = isSolidAt(lx + ox, y + dy, lz + corner[2]);
+                                            const s2 = isSolidAt(lx + corner[0], y + dy, lz + oz);
+                                            const c = isSolidAt(lx + ox, y + dy, lz + oz);
+                                            aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
+                                        } else {
+                                            const s1 = isSolidAt(lx + ox, y + corner[1], lz + dz);
+                                            const s2 = isSolidAt(lx + corner[0], y + oy, lz + dz);
+                                            const c = isSolidAt(lx + ox, y + oy, lz + dz);
+                                            aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
+                                        }
+                                        const br = 1.0 - aoLevel * 0.33; // More intense AO
+                                        let r = br, g = br, b = br;
+
+                                        // Colorize Redstone Wire
+                                        if (bt === BlockType.REDSTONE_WIRE) {
+                                            const intensity = 0.3 + (power / 15) * 0.7;
+                                            r *= intensity;
+                                            g *= (intensity * 0.1);
+                                            b *= (intensity * 0.1);
+                                        } else if (bt === BlockType.REDSTONE_LAMP && power > 0) {
+                                            r *= 1.4; g *= 1.2; b *= 0.8; // Warm glow
+                                        } else if (bt === BlockType.REDSTONE_TORCH && power > 0) {
+                                            r *= 1.5; g *= 0.3; b *= 0.3; // Intense red glow
+                                        }
+
+                                        target.colors.push(r, g, b);
+                                    } else {
+                                        let r = 1, g = 1, b = 1;
+                                        if (bt === BlockType.REDSTONE_WIRE) {
+                                            const intensity = 0.3 + (power / 15) * 0.7;
+                                            r = intensity; g = intensity * 0.1; b = intensity * 0.1;
+                                        } else if (bt === BlockType.REDSTONE_LAMP && power > 0) {
+                                            r = 1.4; g = 1.2; b = 0.8;
+                                        } else if (bt === BlockType.REDSTONE_TORCH && power > 0) {
+                                            r = 1.5; g = 0.3; b = 0.3;
+                                        }
+                                        target.colors.push(r, g, b);
+                                    }
+
+                                    const isFloraBlock =
+                                        bt === BlockType.LEAVES ||
+                                        bt === BlockType.TALL_GRASS ||
+                                        bt === BlockType.FLOWER_RED ||
+                                        bt === BlockType.FLOWER_YELLOW ||
+                                        (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7);
+
+                                    const isTopVert = corner[1] > 0;
+                                    const swayLevel = isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0;
+
+                                    target.isFlora.push(swayLevel);
+
+                                    if (isLiquidBlock && isTopVert && liquidHeight < 1.0) {
+                                        target.isLiquid.push(1.0); // Only animate top face if it's open
+                                    } else {
+                                        target.isLiquid.push(0.0);
+                                    }
+                                }
+
+                                target.indices.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
+                                if (isWater) waterIdx += 4; else solidIdx += 4;
+                            }
+                        }
+                    }
                 }
-                g.setIndex(data.indices);
-                g.computeBoundingSphere();
-                return g;
-            };
 
-            const solidGeo = createGeo(solid);
-            const waterGeo = createGeo(water);
+                const createGeo = (data: typeof solid) => {
+                    if (data.positions.length === 0) return null;
+                    const g = getPooledGeo();
+                    g.setAttribute('position', new THREE.Float32BufferAttribute(data.positions, 3));
+                    g.setAttribute('normal', new THREE.Float32BufferAttribute(data.normals, 3));
+                    g.setAttribute('uv', new THREE.Float32BufferAttribute(data.uvs, 2));
+                    g.setAttribute('color', new THREE.Float32BufferAttribute(data.colors, 3));
+                    if ((data as any).isFlora && (data as any).isFlora.length > 0) {
+                        g.setAttribute('isFlora', new THREE.Float32BufferAttribute((data as any).isFlora, 1));
+                    }
+                    if ((data as any).isLiquid && (data as any).isLiquid.length > 0) {
+                        g.setAttribute('isLiquid', new THREE.Float32BufferAttribute((data as any).isLiquid, 1));
+                    }
+                    g.setIndex(data.indices);
+                    g.computeBoundingSphere();
+                    return g;
+                };
 
-            const newGeos: THREE.BufferGeometry[] = [];
-            if (solidGeo) newGeos.push(solidGeo);
-            if (waterGeo) newGeos.push(waterGeo);
+                const solidGeo = createGeo(solid);
+                const waterGeo = createGeo(water);
 
-            if (!active) {
-                newGeos.forEach(returnToPool);
-                return;
+                const newGeos: THREE.BufferGeometry[] = [];
+                if (solidGeo) newGeos.push(solidGeo);
+                if (waterGeo) newGeos.push(waterGeo);
+
+                setMeshData({ solidGeo, waterGeo, atlas });
+            } catch (err) {
+                console.error("Meshing error:", err);
+            } finally {
+                meshLock.current = false;
             }
-
-            setMeshData({ solidGeo, waterGeo, atlas });
         };
 
         buildMesh();
@@ -408,7 +423,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
     if (!meshData) return null;
 
     const renderSolidMesh = () => (
-        <mesh geometry={meshData.solidGeo!} frustumCulled castShadow={useShadows} receiveShadow={useShadows}>
+        <mesh geometry={meshData.solidGeo!} frustumCulled castShadow={useShadows && lod === 0} receiveShadow={useShadows && lod === 0}>
             <meshStandardMaterial
                 map={meshData.atlas}
                 vertexColors
@@ -428,10 +443,11 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                         attribute float isLiquid;
                         uniform float uTime;
                         uniform vec2 uChunkOffset;
+                        varying float vShade;
                         `
                     );
 
-                    // Add displacement math
+                    // Add displacement and directional shading math
                     shader.vertexShader = shader.vertexShader.replace(
                         '#include <begin_vertex>',
                         `
@@ -450,7 +466,33 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                             float wave = sin(worldX * 2.0 + worldZ * 2.0 + speed) * 0.06 * isLiquid;
                             transformed.y += wave;
                         }
+
+                        // Minecraft-like directional shading
+                        vShade = 1.0;
+                        if (abs(normal.y) > 0.5) {
+                           vShade = normal.y > 0.0 ? 1.0 : 0.5; // Top/Bottom
+                        } else if (abs(normal.z) > 0.5) {
+                           vShade = 0.8; // North/South
+                        } else if (abs(normal.x) > 0.5) {
+                           vShade = 0.6; // East/West
+                        }
                         `
+                    );
+
+                    shader.fragmentShader = shader.fragmentShader.replace(
+                        '#include <common>',
+                        `
+                        #include <common>
+                        varying float vShade;
+                        `
+                    );
+
+                    shader.fragmentShader = shader.fragmentShader.replace(
+                        '#include <color_fragment>',
+                        `
+                         #include <color_fragment>
+                         diffuseColor.rgb *= vShade;
+                         `
                     );
                 }}
             />
@@ -487,6 +529,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                                 attribute float isLiquid;
                                 uniform float uTime;
                                 uniform vec2 uChunkOffset;
+                                varying float vShade;
                                 `
                             );
 
@@ -501,6 +544,32 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                                     float wave = sin(worldX * 2.0 + worldZ * 2.0 + speed) * 0.06 * isLiquid;
                                     transformed.y += wave;
                                 }
+
+                                // Minecraft-like directional shading for water
+                                vShade = 1.0;
+                                if (abs(normal.y) > 0.5) {
+                                   vShade = normal.y > 0.0 ? 1.0 : 0.5;
+                                } else if (abs(normal.z) > 0.5) {
+                                   vShade = 0.8;
+                                } else if (abs(normal.x) > 0.5) {
+                                   vShade = 0.6;
+                                }
+                                `
+                            );
+
+                            shader.fragmentShader = shader.fragmentShader.replace(
+                                '#include <common>',
+                                `
+                                #include <common>
+                                varying float vShade;
+                                `
+                            );
+
+                            shader.fragmentShader = shader.fragmentShader.replace(
+                                '#include <color_fragment>',
+                                `
+                                #include <color_fragment>
+                                diffuseColor.rgb *= vShade;
                                 `
                             );
                         }}

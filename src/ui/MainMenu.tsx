@@ -253,6 +253,10 @@ const SettingsScreen: React.FC = () => {
                     <input type="range" min={0} max={100} value={settings.musicVolume * 100} onChange={(e) => updateSettings({ musicVolume: +e.target.value / 100 })} className="mc-slider" />
                 </div>
                 <div className="setting-item">
+                    <label>Jasność: <strong>{(settings.brightness * 100).toFixed(0)}%</strong></label>
+                    <input type="range" min={1} max={100} value={settings.brightness * 100} onChange={(e) => updateSettings({ brightness: +e.target.value / 100 })} className="mc-slider" />
+                </div>
+                <div className="setting-item">
                     <label>Grafika: <strong>{settings.graphics}</strong></label>
                     <div className="mode-selector">
                         {(['fast', 'fancy', 'fabulous'] as const).map((g) => (

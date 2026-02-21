@@ -29,7 +29,7 @@ const DayNightCycle: React.FC = () => {
     const graphics = useGameStore((s) => s.settings.graphics);
     const renderDist = useGameStore((s) => s.settings.renderDistance);
     const brightness = useGameStore((s) => s.settings.brightness || 0.5);
-    const brightnessMultiplier = brightness * 2;
+    const brightnessMultiplier = (brightness + 0.3) * 2.8; // Even higher baseline for punchy colors
     const useShadows = graphics !== 'fast';
     const shadowMapSize = graphics === 'fabulous' ? 4096 : 2048;
     const dirLightRef = useRef<THREE.DirectionalLight>(null);
@@ -191,7 +191,7 @@ const DayNightCycle: React.FC = () => {
                 shadow-normalBias={0.02}
                 shadow-mapSize={[shadowMapSize, shadowMapSize]}
             >
-                <orthographicCamera attach="shadow-camera" args={[-100, 100, 100, -100, 1, 500]} />
+                <orthographicCamera attach="shadow-camera" args={[-64, 64, 64, -64, 1, 350]} />
             </directionalLight>
             <hemisphereLight ref={hemiRef} args={['#aaccff', '#443322', 0.2]} />
         </>
