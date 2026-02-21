@@ -158,18 +158,29 @@ const MobRenderer: React.FC = () => {
                 }
             }
 
-            // Hurt flash
+            // Hurt flash - OPTIMIZED: only update the group's userData and let meshes handle it if possible
+            // Actually, for simplicity and performance, we can just update the first few children if we know they are meshes
             const isHurt = mob.hurtTime && mob.hurtTime > 0;
-            group.traverse((child) => {
-                if ((child as THREE.Mesh).isMesh) {
-                    const mesh = child as THREE.Mesh;
-                    const mat = mesh.material as THREE.MeshLambertMaterial;
-                    if (mat.emissiveIntensity !== undefined) {
-                        mat.emissiveIntensity = isHurt ? 0.8 : 0;
-                        mat.emissive = isHurt ? new THREE.Color(0xff0000) : new THREE.Color(0x000000);
+            const hurtIntensity = isHurt ? 0.8 : 0;
+            const hurtColor = isHurt ? new THREE.Color(0xff0000) : new THREE.Color(0x000000);
+
+            for (let c = 0; c < group.children.length; c++) {
+                const child = group.children[c];
+                if ((child as any).isMesh) {
+                    const m = child as THREE.Mesh;
+                    // We check if it's already set to avoid expensive material updates
+                    if (m.userData.lastHurt !== isHurt) {
+                        m.userData.lastHurt = isHurt;
+                        // To avoid sharing materials between mobs when flashing, we need unique materials
+                        // But wait, the current implementation uses shared materials. We'll fix this in the memo.
+                        const mat = m.material as THREE.MeshLambertMaterial;
+                        mat.emissiveIntensity = hurtIntensity;
+                        mat.emissive = hurtColor;
                     }
+                } else if (child.type === 'Group') { // Handle nested groups (e.g. health bars)
+                    // skip health bar for performance
                 }
-            });
+            }
         }
     });
 
@@ -178,17 +189,24 @@ const MobRenderer: React.FC = () => {
             const model = MOB_MODELS[mob.type] || MOB_MODELS.zombie;
             const meshes: React.ReactNode[] = [];
 
+            // Helper to get a cloned material for this specific mob mesh
+            const getUniqueMat = (color: string) => {
+                const baseMat = getMat(color);
+                const mat = baseMat.clone();
+                return mat;
+            };
+
             // Head
             meshes.push(
                 <mesh key="head" geometry={getGeo(...model.head.size)}
-                    material={getMat(model.head.color)}
+                    material={getUniqueMat(model.head.color)}
                     position={[0, model.head.yOff, 0]} />
             );
 
             // Body
             meshes.push(
                 <mesh key="body" geometry={getGeo(...model.body.size)}
-                    material={getMat(model.body.color)}
+                    material={getUniqueMat(model.body.color)}
                     position={[0, model.body.yOff, 0]} />
             );
 
@@ -196,7 +214,7 @@ const MobRenderer: React.FC = () => {
             if (model.faceColor) {
                 meshes.push(
                     <mesh key="face" geometry={getGeo(model.head.size[0] * 0.6, model.head.size[1] * 0.3, 0.01)}
-                        material={getMat(model.faceColor)}
+                        material={getUniqueMat(model.faceColor)}
                         position={[0, model.head.yOff, model.head.size[2] / 2 + 0.01]} />
                 );
             }
@@ -206,12 +224,12 @@ const MobRenderer: React.FC = () => {
                 const armOff = model.body.size[0] / 2 + model.arms.size[0] / 2;
                 meshes.push(
                     <mesh key="arm_l" geometry={getGeo(...model.arms.size)}
-                        material={getMat(model.arms.color)}
+                        material={getUniqueMat(model.arms.color)}
                         position={[-armOff, model.arms.yOff, 0]} />
                 );
                 meshes.push(
                     <mesh key="arm_r" geometry={getGeo(...model.arms.size)}
-                        material={getMat(model.arms.color)}
+                        material={getUniqueMat(model.arms.color)}
                         position={[armOff, model.arms.yOff, 0]} />
                 );
             }
@@ -235,7 +253,7 @@ const MobRenderer: React.FC = () => {
                 meshes.push(
                     <mesh key={`leg_${li}`}
                         geometry={getGeo(...model.legs.size)}
-                        material={getMat(model.legs.color)}
+                        material={getUniqueMat(model.legs.color)}
                         position={[llx, model.legs.yOff + model.legs.size[1] / 2, lz]} />
                 );
             }
@@ -246,7 +264,7 @@ const MobRenderer: React.FC = () => {
                 meshes.push(
                     <group key="hbar" position={[0, model.head.yOff + 0.5, 0]}>
                         <mesh geometry={getGeo(0.6, 0.06, 0.02)}
-                            material={getMat('#333333')}
+                            material={getMat('#333333')} // Shared is fine for health bar
                             position={[0, 0, 0]} />
                         <mesh geometry={getGeo(0.56 * healthPct, 0.04, 0.025)}
                             material={getMat(healthPct > 0.5 ? '#44ff44' : healthPct > 0.25 ? '#ffff44' : '#ff4444')}

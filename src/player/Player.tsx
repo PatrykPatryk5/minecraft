@@ -25,7 +25,7 @@ import useGameStore from '../store/gameStore';
 import { BLOCK_DATA, BlockType, getBlockDrop } from '../core/blockTypes';
 import { getSpawnHeight, MAX_HEIGHT } from '../core/terrainGen';
 import { emitBlockBreak } from '../core/particles';
-import { playSound, startAmbience, updateListener } from '../audio/sounds';
+import { playSound, startAmbience, updateListener, updateEnvironment } from '../audio/sounds';
 import { checkWaterFill, spreadWater } from '../core/waterSystem';
 import { handleBlockAction, isOnLadder } from '../core/blockActions';
 import { attackMob } from '../mobs/MobSystem';
@@ -45,9 +45,24 @@ const FLY_SPEED = 11;
 const SPECTATOR_SPEED = 15;
 const SWIM_SPEED = 2.2;
 const PLAYER_HEIGHT = 1.62;
-const PLAYER_WIDTH = 0.25; // Slightly reduced from 0.3 to prevent snagging on walls
+const PLAYER_COLLIDER_HEIGHT = 1.8;
+const PLAYER_HEAD_CLEARANCE = PLAYER_COLLIDER_HEIGHT - PLAYER_HEIGHT;
+const PLAYER_RB_OFFSET_Y = PLAYER_HEIGHT - PLAYER_COLLIDER_HEIGHT * 0.5;
+const PLAYER_WIDTH = 0.28;
 const REACH = 5;
 const STEP_SIZE = 0.05;
+const STEP_HEIGHT = 0.6;
+const CROUCH_SPEED_MULT = 0.3;
+const CROUCH_CAMERA_DROP = 0.12;
+const GROUND_ACCEL = 14;
+const AIR_ACCEL = 4;
+const WATER_ACCEL = 7;
+const GROUND_FRICTION = 10;
+const AIR_FRICTION = 1.8;
+const WATER_FRICTION = 4;
+const COYOTE_TIME = 0.12;
+const JUMP_BUFFER_TIME = 0.12;
+const JUMP_RELEASE_MULT = 0.45;
 const FALL_DAMAGE_THRESHOLD = 3;
 const SPRINT_HUNGER_RATE = 0.15; // hunger/sec while sprinting
 const LAVA_DAMAGE_RATE = 4; // hp/sec in lava
@@ -67,7 +82,9 @@ const Player: React.FC = () => {
     const stepTimer = useRef(0);
     const bobPhase = useRef(0);
     const fallStart = useRef(80);
-    const hungerTimer = useRef(0);
+    const sprintDrainTimer = useRef(0);
+    const regenTimer = useRef(0);
+    const starvationTimer = useRef(0);
     const swimTimer = useRef(0);
     const miningTarget = useRef<string | null>(null);
     const miningProgress = useRef(0);
@@ -80,6 +97,11 @@ const Player: React.FC = () => {
     const portalCooldown = useRef(0);
     const bowCharge = useRef(0);
     const isChargingBow = useRef(false);
+    const rayDirRef = useRef(new THREE.Vector3());
+    const coyoteTimer = useRef(0);
+    const jumpBufferTimer = useRef(0);
+    const jumpHeldLast = useRef(false);
+    const crouchVisualOffset = useRef(0);
 
     const storeRef = useRef(useGameStore.getState());
     useEffect(() => {
@@ -142,13 +164,14 @@ const Player: React.FC = () => {
 
     // ─── Raycast ───────────────────────────────────────────
     const raycastBlock = useCallback((): { block: [number, number, number]; place: [number, number, number] } | null => {
-        const dir = new THREE.Vector3();
+        const dir = rayDirRef.current;
         camera.getWorldDirection(dir);
-        const origin = camera.position.clone();
+        const origin = camera.position;
         let px = Math.floor(origin.x), py = Math.floor(origin.y), pz = Math.floor(origin.z);
         for (let t = 0; t < REACH; t += STEP_SIZE) {
-            const pt = origin.clone().add(dir.clone().multiplyScalar(t));
-            const bx = Math.floor(pt.x), by = Math.floor(pt.y), bz = Math.floor(pt.z);
+            const bx = Math.floor(origin.x + dir.x * t);
+            const by = Math.floor(origin.y + dir.y * t);
+            const bz = Math.floor(origin.z + dir.z * t);
             const type = storeRef.current.getBlock(bx, by, bz);
             if (type && BLOCK_DATA[type]?.solid) {
                 return { block: [bx, by, bz], place: [px, py, pz] };
@@ -309,6 +332,32 @@ const Player: React.FC = () => {
                     return;
                 }
 
+                // Farming/tool interactions should happen before generic item early-return.
+                if ([105, 115, 125, 135, 145].includes(selected)) {
+                    if (tillBlock(bx2, by2, bz2)) {
+                        s.damageTool(s.hotbarSlot);
+                        playSound('gravel');
+                        bumpAround(bx2, bz2);
+                        return;
+                    }
+                }
+                if (selected === BlockType.SEEDS) {
+                    if (plantSeed(px, py, pz)) {
+                        s.consumeHotbarItem(s.hotbarSlot);
+                        playSound('place', [px, py, pz]);
+                        bumpAround(px, pz);
+                        return;
+                    }
+                }
+                if (selected === BlockType.BONE_MEAL) {
+                    if (applyBoneMeal(bx2, by2, bz2)) {
+                        s.consumeHotbarItem(s.hotbarSlot);
+                        playSound('pop');
+                        bumpAround(bx2, bz2);
+                        return;
+                    }
+                }
+
                 if (BLOCK_DATA[selected]?.isItem) return;
 
                 // Don't place inside player
@@ -329,52 +378,6 @@ const Player: React.FC = () => {
                     return;
                 }
 
-                s.addBlock(px, py, pz, selected);
-                s.consumeHotbarItem(s.hotbarSlot);
-                playSound('place', [px, py, pz]);
-                bumpAround(px, pz);
-
-                // If placing water/lava, trigger spreading
-                if (selected === BlockType.WATER) {
-                    spreadWater(px, py, pz);
-                }
-                if (selected === BlockType.LAVA) {
-                    spreadLava(px, py, pz);
-                }
-
-                // Trigger gravity for falling blocks
-                checkGravityBlock(px, py, pz);
-
-                // ─── Farming ─────────────────────────────────
-                if ([105, 115, 125, 135, 145].includes(selected)) {
-                    // Hoe Interaction
-                    // We clicked ON `hit.block` (bx2, by2, bz2).
-                    if (tillBlock(bx2, by2, bz2)) {
-                        playSound('gravel');
-                        bumpAround(bx2, bz2);
-                        return;
-                    }
-                }
-                if (selected === BlockType.SEEDS) {
-                    // Try planting on the air block above the clicked block (hit.place)
-                    // The `plantSeed` function checks if block below is Farmland.
-                    if (plantSeed(px, py, pz)) {
-                        s.consumeHotbarItem(s.hotbarSlot);
-                        playSound('place', [px, py, pz]);
-                        bumpAround(px, pz);
-                        return;
-                    }
-                }
-                if (selected === BlockType.BONE_MEAL) {
-                    if (applyBoneMeal(bx2, by2, bz2)) {
-                        s.consumeHotbarItem(s.hotbarSlot);
-                        playSound('pop'); // Or magical sound?
-                        bumpAround(bx2, bz2); // Update visuals
-                        return;
-                    }
-                }
-
-                // ─── Piston Placement ────────────────────────
                 if (selected === BlockType.PISTON || selected === BlockType.PISTON_STICKY) {
                     const dir = new THREE.Vector3();
                     camera.getWorldDirection(dir);
@@ -399,21 +402,19 @@ const Player: React.FC = () => {
                 s.consumeHotbarItem(s.hotbarSlot);
                 playSound('place', [px, py, pz]);
                 bumpAround(px, pz);
-                checkGravityBlock(px, py, pz);
-            } else if (e.button === 2) {
-                // Secondary action: use item / eat food
-                const s = storeRef.current;
-                const slot = s.hotbar[s.hotbarSlot];
 
-                // If holding food, try to eat first
-                if (slot && slot.id) {
-                    const info = BLOCK_DATA[slot.id];
-                    if (info && info.foodRestore && s.hunger < s.maxHunger) {
-                        s.eatFood();
-                        playSound('pop');
-                        return;
-                    }
+                // If placing water/lava, trigger spreading
+                if (selected === BlockType.WATER) {
+                    spreadWater(px, py, pz);
                 }
+                if (selected === BlockType.LAVA) {
+                    spreadLava(px, py, pz);
+                }
+
+                // Trigger gravity for falling blocks
+                checkGravityBlock(px, py, pz);
+                return;
+
             }
         };
 
@@ -528,11 +529,22 @@ const Player: React.FC = () => {
             const right = new THREE.Vector3().crossVectors(flatForward, new THREE.Vector3(0, 1, 0)).normalize();
 
             const k = keys.current ?? {};
+            const jumpHeld = !!k.Space;
+            const jumpPressed = jumpHeld && !jumpHeldLast.current;
+            const jumpReleased = !jumpHeld && jumpHeldLast.current;
+            jumpHeldLast.current = jumpHeld;
+            if (jumpPressed) jumpBufferTimer.current = JUMP_BUFFER_TIME;
+            else jumpBufferTimer.current = Math.max(0, jumpBufferTimer.current - dt);
+
+            if (onGround.current) coyoteTimer.current = COYOTE_TIME;
+            else coyoteTimer.current = Math.max(0, coyoteTimer.current - dt);
+
             const feetInWater = isInWater(p.x, p.y - PLAYER_HEIGHT + 0.1, p.z);
             const bodyInWater = isInWater(p.x, p.y - 0.5, p.z);
             const headInWater = isInWater(p.x, p.y + 0.1, p.z);
             const inWater = feetInWater || bodyInWater;
-            const isSprinting = k.ShiftLeft && !inWater;
+            const isSneaking = k.ControlLeft && !inWater && !isFlying.current;
+            const isSprinting = k.ShiftLeft && !k.ControlLeft && !inWater && !isFlying.current;
 
             // ─── Spectator ───────────────────────────────────
             if (mode === 'spectator') {
@@ -565,16 +577,30 @@ const Player: React.FC = () => {
 
             // ─── Movement ────────────────────────────────────
             const flying = mode === 'creative' && isFlying.current;
-            const speed = inWater ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : (flying ? FLY_SPEED : WALK_SPEED));
+            const baseSpeed = flying ? FLY_SPEED : (isSprinting ? SPRINT_SPEED : WALK_SPEED);
+            const speed = inWater ? SWIM_SPEED : (isSneaking && !flying ? WALK_SPEED * CROUCH_SPEED_MULT : baseSpeed);
             const move = new THREE.Vector3();
             if (k.KeyW) move.add(flatForward);
             if (k.KeyS) move.sub(flatForward);
             if (k.KeyA) move.sub(right);
             if (k.KeyD) move.add(right);
-            if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed);
+            const hasMoveInput = move.lengthSq() > 0;
+            if (hasMoveInput) move.normalize().multiplyScalar(speed);
 
-            vel.x = move.x;
-            vel.z = move.z;
+            // Minecraft-like inertia: acceleration + friction instead of instant velocity snap.
+            const accel = inWater ? WATER_ACCEL : (onGround.current ? GROUND_ACCEL : AIR_ACCEL);
+            const friction = inWater ? WATER_FRICTION : (onGround.current ? GROUND_FRICTION : AIR_FRICTION);
+            const accelLerp = Math.min(1, accel * dt);
+            vel.x += (move.x - vel.x) * accelLerp;
+            vel.z += (move.z - vel.z) * accelLerp;
+            if (!hasMoveInput) {
+                const damp = Math.max(0, 1 - friction * dt);
+                vel.x *= damp;
+                vel.z *= damp;
+            }
+
+            const crouchTarget = isSneaking && onGround.current && !flying ? -CROUCH_CAMERA_DROP : 0;
+            crouchVisualOffset.current += (crouchTarget - crouchVisualOffset.current) * Math.min(1, dt * 12);
 
             if (flying) {
                 vel.y = 0;
@@ -615,18 +641,23 @@ const Player: React.FC = () => {
                     swimTimer.current = 0;
                 }
             } else {
-                if (k.Space && onGround.current) {
+                if (jumpBufferTimer.current > 0 && coyoteTimer.current > 0) {
                     vel.y = JUMP_FORCE;
                     onGround.current = false;
                     fallStart.current = p.y;
+                    jumpBufferTimer.current = 0;
+                    coyoteTimer.current = 0;
                 }
                 vel.y += GRAVITY * dt;
+                if (jumpReleased && vel.y > 0) {
+                    vel.y *= JUMP_RELEASE_MULT;
+                }
                 if (vel.y < TERMINAL_VEL) vel.y = TERMINAL_VEL;
 
                 // Footsteps
                 if (onGround.current && (Math.abs(vel.x) > 0.1 || Math.abs(vel.z) > 0.1)) {
                     stepTimer.current += dt;
-                    const stepInterval = isSprinting ? 0.3 : 0.45;
+                    const stepInterval = isSneaking ? 0.62 : (isSprinting ? 0.3 : 0.45);
                     if (stepTimer.current > stepInterval) {
                         stepTimer.current = 0;
                         const blockBelow = storeRef.current.getBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
@@ -644,8 +675,23 @@ const Player: React.FC = () => {
                 }
             }
 
-            // Sync Spatial Audio Listener
+            // Sync Spatial Audio Listener & Environment
+            const headSubmerged = headInWater;
+            let caveCheck = false;
+            // Simple cave check: below sea level and has roof
+            if (p.y < 62 && s.dimension === 'overworld') {
+                for (let yOff = 2; yOff < 12; yOff++) {
+                    if (isSolid(p.x, p.y + yOff, p.z)) {
+                        caveCheck = true;
+                        break;
+                    }
+                }
+            } else if (s.dimension === 'nether') {
+                caveCheck = true; // Nether always has reverb
+            }
+
             updateListener(p.x, p.y, p.z, forward.x, forward.y, forward.z);
+            updateEnvironment(headSubmerged, caveCheck);
 
             // Track fall start
             if (!onGround.current && !flying && !inWater) {
@@ -654,20 +700,56 @@ const Player: React.FC = () => {
 
             // ─── Collision ───────────────────────────────────
             const w = PLAYER_WIDTH;
+            const collidesAt = (x: number, y: number, z: number) => (
+                isSolid(x - w, y - PLAYER_HEIGHT, z - w) || isSolid(x + w, y - PLAYER_HEIGHT, z - w) ||
+                isSolid(x - w, y - PLAYER_HEIGHT, z + w) || isSolid(x + w, y - PLAYER_HEIGHT, z + w) ||
+                isSolid(x - w, y - 0.5, z - w) || isSolid(x + w, y - 0.5, z - w) ||
+                isSolid(x - w, y - 0.5, z + w) || isSolid(x + w, y - 0.5, z + w) ||
+                isSolid(x - w, y + PLAYER_HEAD_CLEARANCE, z - w) || isSolid(x + w, y + PLAYER_HEAD_CLEARANCE, z - w) ||
+                isSolid(x - w, y + PLAYER_HEAD_CLEARANCE, z + w) || isSolid(x + w, y + PLAYER_HEAD_CLEARANCE, z + w)
+            );
+            const hasSupportBelow = (x: number, z: number) => {
+                const footY = p.y - PLAYER_HEIGHT - 0.06;
+                return (
+                    isSolid(x - w, footY, z - w) || isSolid(x + w, footY, z - w) ||
+                    isSolid(x - w, footY, z + w) || isSolid(x + w, footY, z + w)
+                );
+            };
+            const canStepTo = (x: number, z: number) =>
+                onGround.current && !flying && !inWater && !collidesAt(x, p.y + STEP_HEIGHT, z);
+
+            if (isSneaking && onGround.current && !flying && !inWater) {
+                const testX = p.x + vel.x * dt;
+                const testZ = p.z + vel.z * dt;
+                if (!hasSupportBelow(testX, p.z)) vel.x = 0;
+                if (!hasSupportBelow(p.x, testZ)) vel.z = 0;
+            }
 
             const nx = p.x + vel.x * dt;
-            if (
-                isSolid(nx - w, p.y - PLAYER_HEIGHT, p.z) || isSolid(nx + w, p.y - PLAYER_HEIGHT, p.z) ||
-                isSolid(nx - w, p.y - 0.5, p.z) || isSolid(nx + w, p.y - 0.5, p.z) ||
-                isSolid(nx - w, p.y, p.z) || isSolid(nx + w, p.y, p.z)
-            ) { vel.x = 0; } else { p.x = nx; }
+            if (collidesAt(nx, p.y, p.z)) {
+                if (canStepTo(nx, p.z)) {
+                    p.y += STEP_HEIGHT;
+                    p.x = nx;
+                    onGround.current = false;
+                } else {
+                    vel.x = 0;
+                }
+            } else {
+                p.x = nx;
+            }
 
             const nz = p.z + vel.z * dt;
-            if (
-                isSolid(p.x, p.y - PLAYER_HEIGHT, nz - w) || isSolid(p.x, p.y - PLAYER_HEIGHT, nz + w) ||
-                isSolid(p.x, p.y - 0.5, nz - w) || isSolid(p.x, p.y - 0.5, nz + w) ||
-                isSolid(p.x, p.y, nz - w) || isSolid(p.x, p.y, nz + w)
-            ) { vel.z = 0; } else { p.z = nz; }
+            if (collidesAt(p.x, p.y, nz)) {
+                if (canStepTo(p.x, nz)) {
+                    p.y += STEP_HEIGHT;
+                    p.z = nz;
+                    onGround.current = false;
+                } else {
+                    vel.z = 0;
+                }
+            } else {
+                p.z = nz;
+            }
 
             const ny = p.y + vel.y * dt;
             const wasInAir = !onGround.current;
@@ -701,7 +783,10 @@ const Player: React.FC = () => {
                     fallStart.current = p.y;
                 } else { p.y = ny; }
             } else {
-                if (!flying && isSolid(p.x, ny + 0.2, p.z)) { vel.y = 0; }
+                if (!flying && (
+                    isSolid(p.x - w, ny + PLAYER_HEAD_CLEARANCE, p.z - w) || isSolid(p.x + w, ny + PLAYER_HEAD_CLEARANCE, p.z - w) ||
+                    isSolid(p.x - w, ny + PLAYER_HEAD_CLEARANCE, p.z + w) || isSolid(p.x + w, ny + PLAYER_HEAD_CLEARANCE, p.z + w)
+                )) { vel.y = 0; }
                 else { p.y = ny; }
             }
 
@@ -712,30 +797,36 @@ const Player: React.FC = () => {
 
             // ─── Sprint Hunger Drain ─────────────────────────
             if (mode === 'survival' && isSprinting && (Math.abs(vel.x) > 0.5 || Math.abs(vel.z) > 0.5)) {
-                hungerTimer.current += dt;
-                if (hungerTimer.current > 1) {
-                    s.setHunger(s.hunger - SPRINT_HUNGER_RATE);
-                    hungerTimer.current = 0;
+                sprintDrainTimer.current += dt;
+                if (sprintDrainTimer.current > 1) {
+                    s.setHunger(Math.max(0, s.hunger - SPRINT_HUNGER_RATE));
+                    sprintDrainTimer.current = 0;
                 }
+            } else {
+                sprintDrainTimer.current = 0;
             }
 
             // ─── Health regen from full hunger ────────────────
             if (mode === 'survival' && s.hunger >= 18 && s.health < s.maxHealth) {
-                hungerTimer.current += dt;
-                if (hungerTimer.current > 4) {
+                regenTimer.current += dt;
+                if (regenTimer.current > 4) {
                     s.setHealth(s.health + 1);
-                    s.setHunger(s.hunger - 0.5);
-                    hungerTimer.current = 0;
+                    s.setHunger(Math.max(0, s.hunger - 0.5));
+                    regenTimer.current = 0;
                 }
+            } else {
+                regenTimer.current = 0;
             }
 
             // ─── Starvation damage ───────────────────────────
             if (mode === 'survival' && s.hunger <= 0) {
-                hungerTimer.current += dt;
-                if (hungerTimer.current > 4) {
-                    hungerTimer.current = 0;
+                starvationTimer.current += dt;
+                if (starvationTimer.current > 4) {
+                    starvationTimer.current = 0;
                     s.takeDamage(1, { ignoreArmor: true });
                 }
+            } else {
+                starvationTimer.current = 0;
             }
 
             // ─── Lava Damage ─────────────────────────────────
@@ -952,7 +1043,7 @@ const Player: React.FC = () => {
             // ─── Step Sounds ─────────────────────────────────
             if (onGround.current && (Math.abs(vel.x) > 0.5 || Math.abs(vel.z) > 0.5)) {
                 stepTimer.current += dt;
-                const interval = isSprinting ? 0.32 : 0.45;
+                const interval = isSneaking ? 0.62 : (isSprinting ? 0.32 : 0.45);
                 if (stepTimer.current > interval) {
                     const blockBelow = s.getBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
                     let stepSound: any = 'step';
@@ -970,14 +1061,14 @@ const Player: React.FC = () => {
 
             // ─── View Bobbing ────────────────────────────────
             if (s.settings.viewBobbing && onGround.current && move.lengthSq() > 0) {
-                bobPhase.current += dt * speed * 2.5;
-                bobY = Math.sin(bobPhase.current) * 0.08;
+                bobPhase.current += dt * speed * (isSneaking ? 1.7 : 2.5);
+                bobY = Math.sin(bobPhase.current) * (isSneaking ? 0.03 : 0.08);
             }
         } // End physics loop
 
         // ── Camera sync (runs every frame for smooth visuals) ──
         camera.position.copy(pos.current);
-        camera.position.y += bobY;
+        camera.position.y += bobY + crouchVisualOffset.current;
 
         const pp = s.playerPos;
         pp[0] = pos.current.x; pp[1] = pos.current.y; pp[2] = pos.current.z;
@@ -985,7 +1076,11 @@ const Player: React.FC = () => {
         pr[0] = camera.rotation.y; pr[1] = camera.rotation.x;
 
         if (rbRef.current) {
-            rbRef.current.setNextKinematicTranslation(pos.current);
+            rbRef.current.setNextKinematicTranslation({
+                x: pos.current.x,
+                y: pos.current.y - PLAYER_RB_OFFSET_Y,
+                z: pos.current.z,
+            });
         }
 
         // ─── Block Highlight ─────────────────────────────────
@@ -1009,9 +1104,9 @@ const Player: React.FC = () => {
     return (
         <>
             <PointerLockControls ref={controlsRef} />
-            <RigidBody ref={rbRef} type="kinematicPosition" colliders="cuboid" args={[PLAYER_WIDTH, PLAYER_HEIGHT / 2, PLAYER_WIDTH]}>
+            <RigidBody ref={rbRef} type="kinematicPosition" colliders="cuboid" args={[PLAYER_WIDTH, PLAYER_COLLIDER_HEIGHT / 2, PLAYER_WIDTH]}>
                 <mesh visible={false}>
-                    <boxGeometry args={[PLAYER_WIDTH * 2, PLAYER_HEIGHT, PLAYER_WIDTH * 2]} />
+                    <boxGeometry args={[PLAYER_WIDTH * 2, PLAYER_COLLIDER_HEIGHT, PLAYER_WIDTH * 2]} />
                 </mesh>
             </RigidBody>
             {/* Selection highlight */}
@@ -1024,3 +1119,4 @@ const Player: React.FC = () => {
 };
 
 export default Player;
+

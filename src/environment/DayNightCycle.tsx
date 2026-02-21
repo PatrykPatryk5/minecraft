@@ -29,12 +29,13 @@ const DayNightCycle: React.FC = () => {
     const graphics = useGameStore((s) => s.settings.graphics);
     const renderDist = useGameStore((s) => s.settings.renderDistance);
     const brightness = useGameStore((s) => s.settings.brightness || 0.5);
-    const brightnessMultiplier = (brightness + 0.3) * 2.8; // Even higher baseline for punchy colors
+    const brightnessMultiplier = 0.7 + brightness * 1.5;
     const useShadows = graphics !== 'fast';
     const shadowMapSize = graphics === 'fabulous' ? 4096 : 2048;
     const dirLightRef = useRef<THREE.DirectionalLight>(null);
     const ambLightRef = useRef<THREE.AmbientLight>(null);
     const hemiRef = useRef<THREE.HemisphereLight>(null);
+    const shadowFrustumRef = useRef(0);
     const { scene } = useThree();
 
     // Internal time state to avoid 60FPS React renders
@@ -78,6 +79,7 @@ const DayNightCycle: React.FC = () => {
         const angle = t * Math.PI * 2;
         const sunX = Math.cos(angle) * 150;
         const sunY = Math.sin(angle) * 150;
+        const sunZ = Math.sin(angle + Math.PI * 0.5) * 150;
         const isNight = t > 0.75 || t < 0.25;
         const isDawn = t > 0.2 && t < 0.35;
         const isDusk = t > 0.65 && t < 0.8;
@@ -91,39 +93,63 @@ const DayNightCycle: React.FC = () => {
             const px = playerPos[0];
             const pz = playerPos[2];
 
-            dirLightRef.current.position.set(px + sunX, Math.max(10, sunY), pz + 50);
+            const shadowFrustum = Math.min(220, Math.max(96, renderDist * 14));
+            const shadowTexel = (shadowFrustum * 2) / shadowMapSize;
+            const snappedX = Math.round((px + sunX) / shadowTexel) * shadowTexel;
+            const snappedZ = Math.round((pz + sunZ) / shadowTexel) * shadowTexel;
+
+            dirLightRef.current.position.set(snappedX, Math.max(12, sunY), snappedZ);
             dirLightRef.current.target.position.set(px, 0, pz);
             dirLightRef.current.target.updateMatrixWorld();
+
+            if (useShadows) {
+                const shadow = dirLightRef.current.shadow;
+                if (shadow.mapSize.x !== shadowMapSize || shadow.mapSize.y !== shadowMapSize) {
+                    shadow.mapSize.set(shadowMapSize, shadowMapSize);
+                    shadow.needsUpdate = true;
+                }
+                if (shadowFrustumRef.current !== shadowFrustum) {
+                    const cam = shadow.camera as THREE.OrthographicCamera;
+                    cam.left = -shadowFrustum;
+                    cam.right = shadowFrustum;
+                    cam.top = shadowFrustum;
+                    cam.bottom = -shadowFrustum;
+                    cam.near = 1;
+                    cam.far = 520;
+                    cam.updateProjectionMatrix();
+                    shadowFrustumRef.current = shadowFrustum;
+                    shadow.needsUpdate = true;
+                }
+            }
 
             let color: THREE.Color;
             let intensity: number;
 
             if (isNight) {
                 color = sunColors.moonlight;
-                intensity = 0.05;
+                intensity = 0.03;
             } else if (isDawn) {
                 const p = (t - 0.2) / 0.15;
                 color = lerpColor(sunColors.night, sunColors.dawn, p);
-                intensity = lerp(0.05, 0.25, p);
+                intensity = lerp(0.08, 0.45, p);
             } else if (isDusk) {
                 const p = (t - 0.65) / 0.15;
                 color = lerpColor(sunColors.dusk, sunColors.night, p);
-                intensity = lerp(0.25, 0.05, p);
+                intensity = lerp(0.45, 0.08, p);
             } else {
                 color = sunColors.day;
-                // Keep directional light strong enough for stark shadows
-                intensity = 0.7 + sunFactor * 0.4;
+                intensity = 0.55 + sunFactor * 0.45;
             }
 
             dirLightRef.current.color.copy(color);
             // Darken world during rain
-            const weatherFactor = 1.0 - (weatherIntensity * 0.5);
+            const weatherFactor = 1.0 - (weatherIntensity * 0.35);
             dirLightRef.current.intensity = intensity * weatherFactor * brightnessMultiplier;
         }
 
         // ─── Ambient Light ───────────────────────────────
         if (ambLightRef.current) {
-            ambLightRef.current.intensity = (isNight ? 0.4 : lerp(0.7, 1.0, sunFactor)) * brightnessMultiplier;
+            ambLightRef.current.intensity = (isNight ? 0.08 : lerp(0.16, 0.28, sunFactor)) * brightnessMultiplier;
             ambLightRef.current.color.copy(isNight ? skyColors.night : skyColors.day);
         }
 
@@ -132,11 +158,11 @@ const DayNightCycle: React.FC = () => {
             if (isNight) {
                 hemiRef.current.color.set('#0a0a2a');
                 hemiRef.current.groundColor.set('#221111');
-                hemiRef.current.intensity = 0.02 * brightnessMultiplier;
+                hemiRef.current.intensity = 0.015 * brightnessMultiplier;
             } else {
                 hemiRef.current.color.copy(isDawn ? skyColors.dawn : skyColors.day);
                 hemiRef.current.groundColor.set('#553322');
-                hemiRef.current.intensity = (0.05 + sunFactor * 0.1) * brightnessMultiplier;
+                hemiRef.current.intensity = (0.03 + sunFactor * 0.07) * brightnessMultiplier;
             }
         }
 
@@ -169,12 +195,14 @@ const DayNightCycle: React.FC = () => {
     const angle = uiTime * Math.PI * 2;
     const sunX = Math.cos(angle) * 150;
     const sunY = Math.sin(angle) * 150;
+    const sunZ = Math.sin(angle + Math.PI * 0.5) * 150;
     const isNightUi = uiTime > 0.75 || uiTime < 0.25;
+    const initialShadowFrustum = Math.min(220, Math.max(96, renderDist * 14));
 
     return (
         <>
             <Sky
-                sunPosition={[sunX, sunY, 50]}
+                sunPosition={[sunX, sunY, sunZ]}
                 turbidity={isNightUi ? 0 : 3}
                 rayleigh={isNightUi ? 0 : 0.3}
                 mieCoefficient={0.005}
@@ -184,14 +212,15 @@ const DayNightCycle: React.FC = () => {
             <ambientLight ref={ambLightRef} intensity={0.5} />
             <directionalLight
                 ref={dirLightRef}
-                position={[sunX, sunY, 50]}
+                position={[sunX, sunY, sunZ]}
                 intensity={0.8}
                 castShadow={useShadows}
-                shadow-bias={-0.0005}
-                shadow-normalBias={0.02}
+                shadow-bias={-0.00015}
+                shadow-normalBias={0.01}
+                shadow-radius={graphics === 'fabulous' ? 2.5 : 2}
                 shadow-mapSize={[shadowMapSize, shadowMapSize]}
             >
-                <orthographicCamera attach="shadow-camera" args={[-280, 280, 280, -280, 1, 600]} />
+                <orthographicCamera attach="shadow-camera" args={[-initialShadowFrustum, initialShadowFrustum, initialShadowFrustum, -initialShadowFrustum, 1, 520]} />
             </directionalLight>
             <hemisphereLight ref={hemiRef} args={['#aaccff', '#443322', 0.2]} />
         </>

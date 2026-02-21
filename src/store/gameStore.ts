@@ -425,10 +425,17 @@ const useGameStore = create<GameState>((set, get) => ({
             const bump = (k: string) => { versions[k] = (versions[k] ?? 0) + 1; };
 
             bump(key);
-            bump(chunkKey(cx + 1, cz));
-            bump(chunkKey(cx - 1, cz));
-            bump(chunkKey(cx, cz + 1));
-            bump(chunkKey(cx, cz - 1));
+            const nPx = chunkKey(cx + 1, cz);
+            const nNx = chunkKey(cx - 1, cz);
+            const nPz = chunkKey(cx, cz + 1);
+            const nNz = chunkKey(cx, cz - 1);
+
+            // Avoid updating non-existent neighbors; this keeps meshing churn lower
+            // when many new chunks stream in at once.
+            if (s.chunks[nPx]) bump(nPx);
+            if (s.chunks[nNx]) bump(nNx);
+            if (s.chunks[nPz]) bump(nPz);
+            if (s.chunks[nNz]) bump(nNz);
 
             return {
                 chunks: { ...s.chunks, [key]: data },

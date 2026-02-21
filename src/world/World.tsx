@@ -17,7 +17,7 @@ import useGameStore, { chunkKey } from '../store/gameStore';
 import { generateChunk, CHUNK_SIZE, initSeed } from '../core/terrainGen';
 import { generateEndChunk, generateNetherChunk } from '../core/dimensionGen';
 import { EnderDragon } from '../entities/EnderDragon';
-import { WorkerPool } from '../core/workerPool';
+import { WorkerPool, getWorkerPool } from '../core/workerPool';
 import Chunk from './Chunk';
 import { globalTerrainUniforms } from '../core/constants';
 import { checkChunkBorders } from '../core/waterSystem';
@@ -26,6 +26,8 @@ import { tickWorld } from '../core/worldTick';
 const UNLOAD_BUFFER = 3;
 const BATCH_PER_FRAME = 3; // Increased for faster throughput
 const RECALCULATE_COOLDOWN = 600;
+const WORLD_TICK_INTERVAL_MS = 50;
+const FURNACE_TICK_INTERVAL_MS = 50;
 
 // LOD thresholds (in chunk distance²)
 // LOD thresholds (in chunk distance²) - increased for better far-distance accuracy
@@ -40,6 +42,7 @@ interface ChunkEntry {
     lod: 0 | 1 | 2;
 }
 
+
 const World: React.FC = () => {
     const { camera } = useThree();
     const renderDistance = useGameStore((s) => s.renderDistance);
@@ -50,11 +53,13 @@ const World: React.FC = () => {
     const activeChunksRef = useRef<ChunkEntry[]>([]);
     const lastPlayerChunkRef = useRef<string>('');
     const lastRecalcTime = useRef(0);
-    const poolRef = useRef<WorkerPool | null>(null);
     const needsRerenderRef = useRef(false);
     const chunkArrivedCountRef = useRef(0);
     const lastRerenderCount = useRef(0);
     const lastRerenderTimeRef = useRef(0);
+    const lastWorldTickRef = useRef(0);
+    const worldTickQueuedRef = useRef(false);
+    const lastFurnaceTickRef = useRef(0);
 
     // Minimal state — only updated when the chunk LIST changes (not every arrival)
     const [visibleChunks, setVisibleChunks] = useState<ChunkEntry[]>([]);
@@ -67,20 +72,48 @@ const World: React.FC = () => {
     // ── Initialize Worker Pool ──────────────────────────
     const worldSeed = useGameStore(s => s.worldSeed);
 
+    const scheduleWorldTick = useCallback(() => {
+        if (worldTickQueuedRef.current) return;
+        worldTickQueuedRef.current = true;
+
+        const run = () => {
+            worldTickQueuedRef.current = false;
+            tickWorld();
+        };
+
+        if ('requestIdleCallback' in window) {
+            (window as any).requestIdleCallback(run, { timeout: 25 });
+        } else {
+            setTimeout(run, 0);
+        }
+    }, []);
+
     useEffect(() => {
         initSeed(worldSeed);
 
+        const poolSize = Math.min(navigator.hardwareConcurrency || 6, 8);
         const pool = new WorkerPool(
             new URL('../core/generation.worker.ts', import.meta.url),
-            6, 24 // Increased workers for faster terrain generation
+            poolSize, poolSize * 2
         );
 
         const ok = pool.init(worldSeed);
-        poolRef.current = ok ? pool : null;
+        // WorkerPool.init now sets globalPool automatically
 
-        if (!ok) console.warn('[World] WorkerPool failed, using sync fallback');
+        if (ok) {
+            import('../core/textures').then(({ getAtlasTexture, getAllAtlasUVs }) => {
+                getAtlasTexture(); // Ensure init
+                const uvs = getAllAtlasUVs();
+                pool.initUVs(uvs);
+            });
+        } else {
+            console.warn('[World] WorkerPool failed, using sync fallback');
+        }
 
-        return () => { pool.terminate(); };
+        return () => {
+            pool.terminate();
+            // globalPool = null;
+        };
     }, [worldSeed]);
 
     // Reset refs if dimension changes
@@ -91,31 +124,28 @@ const World: React.FC = () => {
         activeChunksRef.current = [];
         loadQueueRef.current = [];
         lastPlayerChunkRef.current = '';
-        poolRef.current?.clearQueue(); // Cancel pending generation for old dimension
+        getWorkerPool()?.clearQueue(); // Cancel pending generation for old dimension
     }
 
     // ── Handle worker results — NO setState ─────────────
     const onChunkReady = useCallback((result: any) => {
-        const { cx, cz, id, dimension: chunkDim } = result;
+        if (!result) return;
+        const { cx, cz, dimension: chunkDim } = result;
+        const key = chunkKey(cx, cz);
+
+        // always clear pending flag immediately so we don't leak when
+        // the result belongs to a stale dimension or an errored task
+        pendingKeysRef.current.delete(key);
 
         // Discard stale chunks from previous dimension
         if (chunkDim !== useGameStore.getState().dimension) return;
 
-        const key = id || chunkKey(cx, cz);
         const s = useGameStore.getState();
 
         s.setChunkData(cx, cz, chunkDim, result.data);
-        s.bumpVersion(cx, cz);
-
-        // Bump neighbors so they rebuild with new edge data (fixes cracks/AO)
-        s.bumpVersion(cx + 1, cz);
-        s.bumpVersion(cx - 1, cz);
-        s.bumpVersion(cx, cz + 1);
-        s.bumpVersion(cx, cz - 1);
 
         checkChunkBorders(cx, cz);
         loadedKeysRef.current.add(key);
-        pendingKeysRef.current.delete(key);
         chunkArrivedCountRef.current++;
     }, []);
 
@@ -128,10 +158,15 @@ const World: React.FC = () => {
 
         const dim = useGameStore.getState().dimension;
 
-        if (poolRef.current?.isReady()) {
-            poolRef.current.submit(cx, cz, dim, onChunkReady);
-            // Wait, submit() only takes cx, cz, callback. I need to update submit() signature or pass object?
-            // checking workerPool.ts...
+        const pool = getWorkerPool();
+        if (pool?.isReady()) {
+            pool.submit(cx, cz, dim, (result) => {
+                if (!result) {
+                    pendingKeysRef.current.delete(key);
+                    return;
+                }
+                onChunkReady(result);
+            });
         } else {
             // Sync fallback
             let data;
@@ -222,18 +257,34 @@ const World: React.FC = () => {
         recalculate();
     }, [recalculate, renderDistance]);
 
+    useEffect(() => {
+        const now = performance.now();
+        lastWorldTickRef.current = now;
+        lastFurnaceTickRef.current = now;
+    }, []);
+
     // Per-frame: batch send requests + throttled re-render
     useFrame(({ clock }) => {
         globalTerrainUniforms.uTime.value = clock.elapsedTime;
 
-        // Random Ticks (Farming, Grass spread) - Async/Idle to reduce frame jank
-        if ('requestIdleCallback' in window) {
-            (window as any).requestIdleCallback(() => tickWorld(), { timeout: 50 });
-        } else {
-            setTimeout(tickWorld, 0);
+        const frameNow = performance.now();
+
+        // Keep world random ticks at a fixed cadence (avoid scheduling every frame).
+        if (frameNow - lastWorldTickRef.current >= WORLD_TICK_INTERVAL_MS) {
+            lastWorldTickRef.current = frameNow;
+            scheduleWorldTick();
         }
 
-        useGameStore.getState().tickFurnace();
+        // Furnace logic should follow game ticks, not render FPS.
+        const furnaceDelta = frameNow - lastFurnaceTickRef.current;
+        if (furnaceDelta >= FURNACE_TICK_INTERVAL_MS) {
+            const steps = Math.min(4, Math.floor(furnaceDelta / FURNACE_TICK_INTERVAL_MS));
+            lastFurnaceTickRef.current += steps * FURNACE_TICK_INTERVAL_MS;
+            const state = useGameStore.getState();
+            for (let i = 0; i < steps; i++) {
+                state.tickFurnace();
+            }
+        }
 
         // Send pending requests to worker
         let sent = 0;

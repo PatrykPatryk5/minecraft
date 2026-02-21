@@ -166,9 +166,9 @@ function drawGrassSide(ctx: CanvasRenderingContext2D, seed: number) {
 
 function drawGrassTop(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
-    // 1. Solid clear/fill to ensure no black leakage
+    // 1. Solid fill with a 1px overlap to ensure no edge transparency
     ctx.fillStyle = '#5da83a';
-    ctx.fillRect(0, 0, 16, 16);
+    ctx.fillRect(-1, -1, 18, 18);
 
     // 2. Base noise over the fill
     for (let y = 0; y < 16; y++) {
@@ -193,6 +193,12 @@ function drawGrassTop(ctx: CanvasRenderingContext2D, seed: number) {
         ctx.fillStyle = `rgb(${r},${g},${b})`;
         ctx.fillRect(sx, sy, 1, 1);
     }
+
+    // Clamp the four corners to a valid grass tone to avoid rare dark atlas artifacts.
+    px(ctx, 0, 0, 88, 156, 42);
+    px(ctx, 15, 0, 88, 156, 42);
+    px(ctx, 0, 15, 88, 156, 42);
+    px(ctx, 15, 15, 88, 156, 42);
 }
 
 function drawSand(ctx: CanvasRenderingContext2D, seed: number) {
@@ -1120,6 +1126,55 @@ function drawButton(ctx: CanvasRenderingContext2D, seed: number) {
     ctx.strokeRect(5, 6, 6, 4);
 }
 
+function drawEndCrystal(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    ctx.clearRect(0, 0, 16, 16);
+    // Obsidian base
+    ctx.fillStyle = '#1a0a2e';
+    ctx.fillRect(4, 12, 8, 3);
+    // Crystal core
+    const c: RGB = [255, 100, 255];
+    for (let i = 0; i < 20; i++) {
+        const x = 5 + (rng() * 6 | 0);
+        const y = 3 + (rng() * 8 | 0);
+        px(ctx, x, y, c[0], c[1], c[2]);
+    }
+    // High-res sparkles (white)
+    for (let i = 0; i < 5; i++) {
+        px(ctx, 5 + (rng() * 6 | 0), 3 + (rng() * 8 | 0), 255, 255, 255);
+    }
+}
+
+function drawTotem(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    ctx.clearRect(0, 0, 16, 16);
+    // Golden body
+    ctx.fillStyle = '#ffff55';
+    ctx.fillRect(6, 4, 4, 8); // Head/body
+    ctx.fillRect(4, 6, 8, 2); // Arms
+    // Emerald eyes
+    ctx.fillStyle = '#55ff55';
+    px(ctx, 7, 5, 85, 255, 85); px(ctx, 8, 5, 85, 255, 85);
+    // Darker details
+    ctx.fillStyle = '#aa8800';
+    ctx.fillRect(6, 11, 4, 1);
+}
+
+function drawDragonBreath(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    ctx.clearRect(0, 0, 16, 16);
+    // Glass bottle outline
+    ctx.strokeStyle = 'rgba(200, 200, 255, 0.5)';
+    ctx.strokeRect(5, 6, 6, 8);
+    ctx.strokeRect(7, 3, 2, 3);
+    // Magenta swirling vapor
+    for (let i = 0; i < 15; i++) {
+        const x = 6 + (rng() * 4 | 0);
+        const y = 7 + (rng() * 6 | 0);
+        px(ctx, x, y, 200 + (rng() * 55 | 0), 30, 200 + (rng() * 55 | 0));
+    }
+}
+
 // ─── Main Texture Creation (MC-Accurate) ──────────────────
 
 function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right', seed: number): void {
@@ -1284,15 +1339,41 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
             for (let x = 0; x < 16; x++) { px(ctx, x, 3, 130, 100, 55); px(ctx, x, 8, 130, 100, 55); px(ctx, x, 13, 130, 100, 55); }
             return;
         case BlockType.TRAPDOOR: drawPlanks(ctx, [128, 96, 48], seed); return;
-        // Flowers & tall grass
-        case BlockType.FLOWER_RED: fillNoise(ctx, [60, 140, 40], 20, seed);
-            for (let y = 4; y < 9; y++) for (let x = 5; x < 11; x++) if (rng() < 0.6) px(ctx, x, y, 220, 40, 40); return;
-        case BlockType.FLOWER_YELLOW: fillNoise(ctx, [60, 140, 40], 20, seed);
-            for (let y = 4; y < 9; y++) for (let x = 5; x < 11; x++) if (rng() < 0.6) px(ctx, x, y, 240, 220, 40); return;
-        case BlockType.TALL_GRASS: fillNoise(ctx, [60, 140, 40], 25, seed); return;
+        // Flowers & tall grass (cutout textures, no opaque square background)
+        case BlockType.FLOWER_RED: {
+            ctx.clearRect(0, 0, 16, 16);
+            for (let y = 7; y < 16; y++) px(ctx, 8, y, 55 + (rng() * 20 | 0), 150 + (rng() * 30 | 0), 45);
+            const petals: [number, number][] = [[8, 4], [7, 5], [9, 5], [6, 6], [8, 6], [10, 6], [7, 7], [9, 7]];
+            for (const [x, y] of petals) px(ctx, x, y, 210 + (rng() * 30 | 0), 40 + (rng() * 20 | 0), 40 + (rng() * 20 | 0));
+            px(ctx, 8, 6, 250, 220, 90);
+            return;
+        }
+        case BlockType.FLOWER_YELLOW: {
+            ctx.clearRect(0, 0, 16, 16);
+            for (let y = 7; y < 16; y++) px(ctx, 8, y, 55 + (rng() * 20 | 0), 150 + (rng() * 30 | 0), 45);
+            const petals: [number, number][] = [[8, 4], [7, 5], [9, 5], [6, 6], [8, 6], [10, 6], [7, 7], [9, 7]];
+            for (const [x, y] of petals) px(ctx, x, y, 225 + (rng() * 25 | 0), 195 + (rng() * 35 | 0), 35 + (rng() * 20 | 0));
+            px(ctx, 8, 6, 255, 235, 120);
+            return;
+        }
+        case BlockType.TALL_GRASS: {
+            ctx.clearRect(0, 0, 16, 16);
+            for (let i = 0; i < 20; i++) {
+                const baseX = 3 + (rng() * 10 | 0);
+                const h = 5 + (rng() * 7 | 0);
+                for (let y = 0; y < h; y++) {
+                    const bend = ((y / h) * (rng() > 0.5 ? 1 : -1)) | 0;
+                    const x = Math.max(0, Math.min(15, baseX + bend));
+                    const pyY = 15 - y;
+                    px(ctx, x, pyY, 45 + (rng() * 30 | 0), 135 + (rng() * 55 | 0), 30 + (rng() * 25 | 0));
+                }
+            }
+            return;
+        }
         case BlockType.OAK_SAPLING: {
             // Sapling: small stem + leaves
             const rng = sRng(seed);
+            ctx.clearRect(0, 0, 16, 16);
             // Stem
             for (let y = 8; y < 16; y++) px(ctx, 7, y, 107, 84, 51);
             // Leaves
@@ -1722,6 +1803,15 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
                 ctx.fillRect(x, 16 - h, 2, h);
             }
             return;
+        case BlockType.END_CRYSTAL:
+            drawEndCrystal(ctx, seed);
+            return;
+        case BlockType.TOTEM_OF_UNDYING:
+            drawTotem(ctx, seed);
+            return;
+        case BlockType.DRAGON_BREATH:
+            drawDragonBreath(ctx, seed);
+            return;
     }
 
     // Generic fallback: use block color with noise
@@ -1743,7 +1833,7 @@ function createTexture(blockId: number, face: 'top' | 'bottom' | 'front' | 'back
 
     const canvas = document.createElement('canvas');
     canvas.width = TEX_SIZE; canvas.height = TEX_SIZE;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
     const seed = blockId * 1000 + (face === 'top' ? 1 : face === 'bottom' ? 2 : 3);
     drawBlockTexture(ctx, blockId, face, seed);
@@ -1761,7 +1851,7 @@ function createTexture(blockId: number, face: 'top' | 'bottom' | 'front' | 'back
 function createFallbackTexture(): THREE.CanvasTexture {
     const c = document.createElement('canvas');
     c.width = c.height = TEX_SIZE;
-    const ctx = c.getContext('2d')!;
+    const ctx = c.getContext('2d', { willReadFrequently: true })!;
     for (let y = 0; y < TEX_SIZE; y++) for (let x = 0; x < TEX_SIZE; x++) {
         ctx.fillStyle = (x + y) % 2 === 0 ? '#ff00ff' : '#000';
         ctx.fillRect(x, y, 1, 1);
@@ -1830,7 +1920,7 @@ export function getBlockIcon(blockId: number): string {
     const size = 64;
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
     if (data.isItem) {
         const rgb = hex(data.color);
@@ -1889,19 +1979,19 @@ export function getBlockIcon(blockId: number): string {
         // Create mini 16x16 textures for each face
         const topTex = document.createElement('canvas');
         topTex.width = TEX_SIZE; topTex.height = TEX_SIZE;
-        const topCtx = topTex.getContext('2d')!;
+        const topCtx = topTex.getContext('2d', { willReadFrequently: true })!;
         const topSeed = blockId * 1000 + 1;
         drawBlockTexture(topCtx, blockId, 'top', topSeed);
 
         const leftTex = document.createElement('canvas');
         leftTex.width = TEX_SIZE; leftTex.height = TEX_SIZE;
-        const leftCtx = leftTex.getContext('2d')!;
+        const leftCtx = leftTex.getContext('2d', { willReadFrequently: true })!;
         const leftSeed = blockId * 1000 + 3;
         drawBlockTexture(leftCtx, blockId, 'left', leftSeed);
 
         const rightTex = document.createElement('canvas');
         rightTex.width = TEX_SIZE; rightTex.height = TEX_SIZE;
-        const rightCtx = rightTex.getContext('2d')!;
+        const rightCtx = rightTex.getContext('2d', { willReadFrequently: true })!;
         const rightSeed = blockId * 1000 + 4;
         drawBlockTexture(rightCtx, blockId, 'right', rightSeed);
 
@@ -1985,7 +2075,7 @@ export function getBlockIcon(blockId: number): string {
 
 // ─── Texture Atlas System ────────────────────────────────
 
-const ATLAS_SIZE = 2048; // 32x32 slots of 64px
+const ATLAS_SIZE = 4096; // 64x64 slots of 64px
 const SLOT_SIZE = 64;
 const SLOTS_PER_ROW = ATLAS_SIZE / SLOT_SIZE;
 
@@ -2006,18 +2096,25 @@ export function getAtlasTexture(): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
     canvas.width = ATLAS_SIZE;
     canvas.height = ATLAS_SIZE;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
     // Disable smoothing for sharp upscaled pixels
     ctx.imageSmoothingEnabled = false;
 
-    // Clear canvas to ensure transparency
-    ctx.clearRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
+    // Clear to a neutral grass color instead of transparent black to prevent black bleeding
+    ctx.fillStyle = '#5da83a';
+    ctx.fillRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
 
     let currentSlot = 0;
 
     // Helper to assign slot
-    const assignSlot = (key: string, drawFn: (c: CanvasRenderingContext2D) => void) => {
+    const assignSlot = (
+        key: string,
+        drawFn: (c: CanvasRenderingContext2D) => void,
+        options?: { transparentSlot?: boolean; addOverlay?: boolean }
+    ) => {
+        const transparentSlot = options?.transparentSlot ?? false;
+        const addOverlay = options?.addOverlay ?? true;
         const col = currentSlot % SLOTS_PER_ROW;
         const row = Math.floor(currentSlot / SLOTS_PER_ROW);
 
@@ -2031,6 +2128,11 @@ export function getAtlasTexture(): THREE.CanvasTexture {
         ctx.rect(0, 0, SLOT_SIZE, SLOT_SIZE);
         ctx.clip();
 
+        // Transparent textures must start with fully transparent slot content.
+        if (transparentSlot) {
+            ctx.clearRect(0, 0, SLOT_SIZE, SLOT_SIZE);
+        }
+
         // Scale by 4 for high-res look (16 * 4 = 64)
         ctx.scale(4, 4);
 
@@ -2039,19 +2141,22 @@ export function getAtlasTexture(): THREE.CanvasTexture {
         // Return to 1:1 scale to add HD noise overlay
         ctx.scale(0.25, 0.25);
 
-        // Add subtle high-res procedural noise overlay to everything
-        for (let i = 0; i < 400; i++) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
-            ctx.fillRect((Math.random() * 64) | 0, (Math.random() * 64) | 0, 1, 1);
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.04)';
-            ctx.fillRect((Math.random() * 64) | 0, (Math.random() * 64) | 0, 1, 1);
+        // Add deterministic high-res procedural noise overlay
+        if (addOverlay) {
+            const noiseRng = sRng(currentSlot + 999);
+            for (let i = 0; i < 400; i++) {
+                ctx.fillStyle = `rgba(255, 255, 255, 0.03)`;
+                ctx.fillRect((noiseRng() * 64) | 0, (noiseRng() * 64) | 0, 1, 1);
+                ctx.fillStyle = `rgba(0, 0, 0, 0.04)`;
+                ctx.fillRect((noiseRng() * 64) | 0, (noiseRng() * 64) | 0, 1, 1);
+            }
         }
 
         ctx.restore();
 
         // Calculate UVs (bottom-left origin for Three.js, but canvas is top-left)
-        // Add 0.5px padding to prevent bleeding (pixel center sampling)
-        const pad = 0.5; // half pixel
+        // Add more padding (1.5px) to prevent bleeding on the high-res 4096px atlas
+        const pad = 1.5;
         const u = (pxX + pad) / ATLAS_SIZE;
         const v = 1.0 - ((pxY + SLOT_SIZE - pad) / ATLAS_SIZE);
         const su = (SLOT_SIZE - 2 * pad) / ATLAS_SIZE;
@@ -2065,20 +2170,32 @@ export function getAtlasTexture(): THREE.CanvasTexture {
     Object.keys(BLOCK_DATA).forEach((key) => {
         const id = Number(key);
         const faces: ('top' | 'bottom' | 'front' | 'back' | 'left' | 'right')[] = ['top', 'bottom', 'front', 'back', 'left', 'right'];
+        const blockInfo = BLOCK_DATA[id];
+        const isTransparentBlock = blockInfo?.transparent ?? false;
 
         for (const face of faces) {
             const cacheKey = `${id}_${face}`;
-            assignSlot(cacheKey, (c) => drawBlockTexture(c, id, face, id));
+            assignSlot(
+                cacheKey,
+                (c) => drawBlockTexture(c, id, face, id),
+                {
+                    transparentSlot: isTransparentBlock,
+                    addOverlay: !isTransparentBlock,
+                }
+            );
         }
     });
 
     atlasTexture = new THREE.CanvasTexture(canvas);
     atlasTexture.magFilter = THREE.NearestFilter;
-    atlasTexture.minFilter = THREE.NearestMipmapLinearFilter;
-    atlasTexture.generateMipmaps = true;
-    atlasTexture.anisotropy = 16;
+    atlasTexture.minFilter = THREE.NearestFilter;
+    atlasTexture.generateMipmaps = false;
+    atlasTexture.anisotropy = 1;
     atlasTexture.colorSpace = THREE.SRGBColorSpace;
-    atlasTexture.premultiplyAlpha = true; // Important for alphaTest transparency blending
+    atlasTexture.premultiplyAlpha = false;
+    atlasTexture.wrapS = THREE.ClampToEdgeWrapping;
+    atlasTexture.wrapT = THREE.ClampToEdgeWrapping;
+    atlasTexture.needsUpdate = true;
 
     return atlasTexture;
 }
@@ -2090,4 +2207,11 @@ export function getAtlasUV(blockId: number, face: 'top' | 'bottom' | 'front' | '
         return { u: 0, v: 0, su: 0, sv: 0 };
     }
     return uv;
+}
+
+export function getAllAtlasUVs(): Record<string, AtlasUV> {
+    if (!atlasTexture) getAtlasTexture();
+    const result: Record<string, AtlasUV> = {};
+    atlasUVs.forEach((val, key) => { result[key] = val; });
+    return result;
 }

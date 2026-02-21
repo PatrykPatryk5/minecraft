@@ -6,8 +6,9 @@
  * Simplified: treats all water as full blocks (no partial levels).
  */
 
-import useGameStore from '../store/gameStore';
+import useGameStore, { chunkKey } from '../store/gameStore';
 import { BlockType, BLOCK_DATA } from './blockTypes';
+import { blockIndex } from './terrainGen';
 
 const MAX_SPREAD = 7;
 const SPREAD_DELAY = 100; // ms between spread ticks
@@ -113,27 +114,96 @@ export function checkWaterFill(x: number, y: number, z: number): void {
  */
 export function checkChunkBorders(cx: number, cz: number): void {
     const s = useGameStore.getState();
+    const currentChunk = s.chunks[chunkKey(cx, cz)];
+    if (!currentChunk) return;
+
     const worldX = cx * 16;
     const worldZ = cz * 16;
+    const spreadSeeds: Array<[number, number, number]> = [];
+    let changed = false;
 
-    // Check X edges (x=0 and x=15)
-    for (let y = 0; y < 256; y++) {
-        for (let z = 0; z < 16; z++) {
-            // West edge (local x=0) -> check neighbor at x-1
-            checkWaterFill(worldX, y, worldZ + z);
-            // East edge (local x=15) -> check neighbor at x+16 (which is this block)
-            checkWaterFill(worldX + 15, y, worldZ + z);
-        }
-    }
+    const trySetWater = (
+        chunk: Uint16Array,
+        lx: number,
+        y: number,
+        lz: number,
+        wx: number,
+        wz: number
+    ) => {
+        const idx = blockIndex(lx, y, lz);
+        const raw = chunk[idx];
+        const id = raw & 0x0FFF;
+        if (!canWaterReplace(id)) return;
+        chunk[idx] = (raw & 0xF000) | BlockType.WATER;
+        spreadSeeds.push([wx, y, wz]);
+        changed = true;
+    };
 
-    // Check Z edges (z=0 and z=15)
-    for (let y = 0; y < 256; y++) {
-        for (let x = 0; x < 16; x++) {
-            // North edge (local z=0)
-            checkWaterFill(worldX + x, y, worldZ);
-            // South edge (local z=15)
-            checkWaterFill(worldX + x, y, worldZ + 15);
+    const syncFace = (
+        nbChunk: Uint16Array | undefined,
+        localX: number | null,
+        localZ: number | null,
+        nbX: number | null,
+        nbZ: number | null,
+        dirX: number,
+        dirZ: number
+    ) => {
+        if (!nbChunk) return;
+
+        if (localX !== null && nbX !== null) {
+            // east/west face
+            for (let y = 0; y < 256; y++) {
+                for (let z = 0; z < 16; z++) {
+                    const localIdx = blockIndex(localX, y, z);
+                    const nbIdx = blockIndex(nbX, y, z);
+                    const localId = currentChunk[localIdx] & 0x0FFF;
+                    const nbId = nbChunk[nbIdx] & 0x0FFF;
+
+                    if (nbId === BlockType.WATER && canWaterReplace(localId)) {
+                        trySetWater(currentChunk, localX, y, z, worldX + localX, worldZ + z);
+                    } else if (localId === BlockType.WATER && canWaterReplace(nbId)) {
+                        trySetWater(nbChunk, nbX, y, z, worldX + localX + dirX, worldZ + z + dirZ);
+                    }
+                }
+            }
+        } else if (localZ !== null && nbZ !== null) {
+            // north/south face
+            for (let y = 0; y < 256; y++) {
+                for (let x = 0; x < 16; x++) {
+                    const localIdx = blockIndex(x, y, localZ);
+                    const nbIdx = blockIndex(x, y, nbZ);
+                    const localId = currentChunk[localIdx] & 0x0FFF;
+                    const nbId = nbChunk[nbIdx] & 0x0FFF;
+
+                    if (nbId === BlockType.WATER && canWaterReplace(localId)) {
+                        trySetWater(currentChunk, x, y, localZ, worldX + x, worldZ + localZ);
+                    } else if (localId === BlockType.WATER && canWaterReplace(nbId)) {
+                        trySetWater(nbChunk, x, y, nbZ, worldX + x + dirX, worldZ + localZ + dirZ);
+                    }
+                }
+            }
         }
+    };
+
+    syncFace(s.chunks[chunkKey(cx - 1, cz)], 0, null, 15, null, -1, 0);
+    syncFace(s.chunks[chunkKey(cx + 1, cz)], 15, null, 0, null, 1, 0);
+    syncFace(s.chunks[chunkKey(cx, cz - 1)], null, 0, null, 15, 0, -1);
+    syncFace(s.chunks[chunkKey(cx, cz + 1)], null, 15, null, 0, 0, 1);
+
+    if (!changed) return;
+
+    // Refresh local and adjacent chunk meshes once after a bulk sync.
+    s.bumpVersion(cx, cz);
+    if (s.chunks[chunkKey(cx - 1, cz)]) s.bumpVersion(cx - 1, cz);
+    if (s.chunks[chunkKey(cx + 1, cz)]) s.bumpVersion(cx + 1, cz);
+    if (s.chunks[chunkKey(cx, cz - 1)]) s.bumpVersion(cx, cz - 1);
+    if (s.chunks[chunkKey(cx, cz + 1)]) s.bumpVersion(cx, cz + 1);
+
+    // Continue local flow from a capped seed list to avoid spikes.
+    const maxSeeds = Math.min(12, spreadSeeds.length);
+    for (let i = 0; i < maxSeeds; i++) {
+        const [x, y, z] = spreadSeeds[i];
+        setTimeout(() => spreadWater(x, y, z), SPREAD_DELAY);
     }
 }
 
@@ -154,3 +224,4 @@ function schedulePlace(x: number, y: number, z: number, delay: number): void {
         }
     }, delay);
 }
+

@@ -4,6 +4,47 @@ import { BlockType } from './blockTypes';
 import { growCrop, updateFarmland, growSapling } from './farmingSystem';
 import { CHUNK_SIZE, CHUNK_VOLUME } from './terrainGen';
 
+const SIMULATION_DISTANCE = 6;
+const ACTIVE_CACHE_MS = 250;
+const RANDOM_TICKS_PER_CHUNK = 3;
+
+interface ActiveChunkEntry {
+    key: string;
+    cx: number;
+    cz: number;
+}
+
+let cachedActiveChunks: ActiveChunkEntry[] = [];
+let cacheExpiryTime = 0;
+let cachedPlayerChunkKey = '';
+let cachedChunkCount = 0;
+
+function rebuildActiveChunks(
+    chunkKeys: string[],
+    playerChunkX: number,
+    playerChunkZ: number,
+    now: number
+) {
+    const maxDistSq = SIMULATION_DISTANCE * SIMULATION_DISTANCE;
+    cachedActiveChunks = [];
+
+    for (const key of chunkKeys) {
+        const parts = key.split(',');
+        const cx = parseInt(parts[0], 10);
+        const cz = parseInt(parts[1], 10);
+        const dx = cx - playerChunkX;
+        const dz = cz - playerChunkZ;
+
+        if (dx * dx + dz * dz <= maxDistSq) {
+            cachedActiveChunks.push({ key, cx, cz });
+        }
+    }
+
+    cachedPlayerChunkKey = `${playerChunkX},${playerChunkZ}`;
+    cachedChunkCount = chunkKeys.length;
+    cacheExpiryTime = now + ACTIVE_CACHE_MS;
+}
+
 /**
  * Optimized Random Tick
  * 
@@ -12,35 +53,36 @@ import { CHUNK_SIZE, CHUNK_VOLUME } from './terrainGen';
  */
 export const tickWorld = () => {
     const s = useGameStore.getState();
-    let keys = Object.keys(s.chunks);
-    // Optimization: If keys count is huge, we might want to cache it, 
-    // but Object.keys on 2000 props is ~0.1ms. The loop is the heavy part.
-    // However, we can bail early if nothing loaded.
-    if (keys.length === 0) return;
+    const keys = Object.keys(s.chunks);
+    if (keys.length === 0) {
+        cachedActiveChunks = [];
+        cachedChunkCount = 0;
+        cachedPlayerChunkKey = '';
+        cacheExpiryTime = 0;
+        return;
+    }
 
-    const SIMULATION_DISTANCE = 6;
     const playerPos = s.playerPos;
     const pcx = Math.floor(playerPos[0] / CHUNK_SIZE);
     const pcz = Math.floor(playerPos[2] / CHUNK_SIZE);
+    const currentPlayerChunkKey = `${pcx},${pcz}`;
+    const now = performance.now();
 
-    const activeKeys = keys.filter(key => {
-        const parts = key.split(',');
-        const distSq = (parseInt(parts[0]) - pcx) ** 2 + (parseInt(parts[1]) - pcz) ** 2;
-        return distSq <= SIMULATION_DISTANCE * SIMULATION_DISTANCE;
-    });
+    if (
+        now >= cacheExpiryTime ||
+        currentPlayerChunkKey !== cachedPlayerChunkKey ||
+        keys.length !== cachedChunkCount
+    ) {
+        rebuildActiveChunks(keys, pcx, pcz, now);
+    }
 
-    if (activeKeys.length === 0) return;
+    if (cachedActiveChunks.length === 0) return;
 
-    // Budget: Attempt to tick roughly this many blocks per frame total.
-    const TICK_BUDGET = 150; // Optimized budget for strict simulation distance
-    const attemptsPerChunk = Math.ceil(TICK_BUDGET / Math.max(1, activeKeys.length));
-
-    for (const key of activeKeys) {
+    for (const { key, cx, cz } of cachedActiveChunks) {
         const chunk = s.chunks[key];
-        const [cx, cz] = key.split(',').map(Number); // Parse only once per chunk if needed? 
-        // Actually, parsing per chunk is fine.
+        if (!chunk) continue;
 
-        for (let i = 0; i < attemptsPerChunk; i++) {
+        for (let i = 0; i < RANDOM_TICKS_PER_CHUNK; i++) {
             // Pick random index directly from flat array
             const randIdx = Math.floor(Math.random() * CHUNK_VOLUME);
             const block = chunk[randIdx];
@@ -87,7 +129,7 @@ export const tickWorld = () => {
             } else if (block === BlockType.FARMLAND) {
                 updateFarmland(wx, ly, wz);
             } else if (block === BlockType.OAK_SAPLING) {
-                // 1% chance to grow per random tick
+                // Chance to grow on random tick
                 if (Math.random() < 0.05) growSapling(wx, ly, wz);
             } else if (block >= BlockType.WHEAT_0 && block < BlockType.WHEAT_7) {
                 // Crop growth

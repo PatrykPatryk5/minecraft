@@ -3,27 +3,29 @@ import type { TerrainWorker } from './generation.worker';
 
 type WorkerCallback = (data: any) => void;
 
-interface PendingTask {
-    id: string;
-    resolve: WorkerCallback;
-}
+export let globalPool: WorkerPool | null = null;
+export const getWorkerPool = () => globalPool;
 
 export class WorkerPool {
     private rawWorkers: Worker[] = [];
     private workers: Comlink.Remote<TerrainWorker>[] = [];
-    private pending: Map<string, PendingTask> = new Map();
-    private nextWorker = 0;
+    private pending: Set<string> = new Set();
+    private nextWorkerIdx = 0;
     private ready = false;
-    private taskQueue: { cx: number, cz: number, id: string; dimension: string; resolve: WorkerCallback }[] = [];
+    private taskQueue: { id: string; type: 'gen' | 'mesh'; args: any[]; resolve: WorkerCallback }[] = [];
+    private meshWaiters: Map<string, WorkerCallback[]> = new Map();
     private activeTasks = 0;
     private maxConcurrent: number;
+    private poolSize: number;
 
     constructor(
         private workerUrl: URL,
-        private poolSize: number = 4,
+        poolSize: number = 4,
         maxConcurrent?: number
     ) {
-        this.maxConcurrent = maxConcurrent ?? poolSize * 4;
+        // Safe cap for workers
+        this.poolSize = Math.min(poolSize, 8);
+        this.maxConcurrent = maxConcurrent ?? (this.poolSize * 2);
     }
 
     /** Initialize pool and seed all workers */
@@ -41,7 +43,8 @@ export class WorkerPool {
             }
 
             this.ready = true;
-            console.log(`[WorkerPool] ${this.poolSize} Comlink workers initialized, seed: ${seed}`);
+            console.log(`[WorkerPool] ${this.poolSize} workers initialized (maxConcurrent: ${this.maxConcurrent})`);
+            globalPool = this;
             return true;
         } catch (err) {
             console.warn('[WorkerPool] Failed to create workers:', err);
@@ -50,94 +53,148 @@ export class WorkerPool {
         }
     }
 
+    /** Initialize UVs for all workers */
+    async initUVs(uvs: Record<string, any>) {
+        if (!this.ready) return;
+        await Promise.all(this.workers.map(w => w.initUVs(uvs)));
+        console.log('[WorkerPool] UVs synchronized');
+    }
+
     isReady(): boolean {
         return this.ready;
     }
 
     /** Submit a chunk generation task */
     submit(cx: number, cz: number, dimension: string, callback: WorkerCallback): void {
-        const id = `${cx},${cz}`;
+        const id = `gen:${cx},${cz}:${dimension}`;
+        if (this.pending.has(id) || this.taskQueue.some((t) => t.id === id)) return;
 
-        if (this.pending.has(id)) return; // Already processing or queued
-
-        this.pending.set(id, { id, resolve: callback });
-
-        if (this.activeTasks >= this.maxConcurrent) {
-            // Queue it
-            this.taskQueue.push({ cx, cz, id, dimension, resolve: callback });
-            return;
-        }
-
-        this.activeTasks++;
-        this.dispatch(cx, cz, dimension, id, callback);
-    }
-
-    private async dispatch(cx: number, cz: number, dimension: string, id: string, callback: WorkerCallback) {
-        const worker = this.workers[this.nextWorker % this.workers.length];
-        this.nextWorker++;
-
-        try {
-            // Await the generation natively with a timeout safety to prevent permanent lockups
-            const generatePromise = worker.generate(cx, cz, dimension);
-            const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Worker timeout')), 25000)
-            );
-
-            const data = await Promise.race([generatePromise, timeoutPromise]);
-
-            // Re-check pending map in case the queue was cleared (e.g. dimension switch)
-            const task = this.pending.get(id);
-            if (task) {
-                this.pending.delete(id);
-                this.activeTasks--;
-                task.resolve({ cx, cz, id, data, dimension });
-            }
-        } catch (e) {
-            console.error('[WorkerPool] Generation error/timeout for chunk', id, e);
-            this.activeTasks--;
-            this.pending.delete(id);
-        }
-
-        // Process queued tasks
+        this.taskQueue.push({ id, type: 'gen', args: [cx, cz, dimension], resolve: callback });
         this.processQueue();
     }
 
-    private processQueue(): void {
-        while (this.taskQueue.length > 0 && this.activeTasks < this.maxConcurrent) {
-            const task = this.taskQueue.shift()!;
-            // Only dispatch if still pending (might have been cleared)
-            if (this.pending.has(task.id)) {
-                this.activeTasks++;
-                this.dispatch(task.cx, task.cz, task.dimension, task.id, task.resolve);
+    /** Submit a meshing task */
+    async submitMesh(cx: number, cz: number, chunkData: Uint16Array, neighbors: (Uint16Array | null)[], lod: number): Promise<any> {
+        if (!this.ready) return null;
+        const id = `mesh:${cx},${cz}:${lod}`;
+
+        return new Promise((resolve) => {
+            const waiters = this.meshWaiters.get(id) ?? [];
+            waiters.push((data: any) => resolve(data));
+            this.meshWaiters.set(id, waiters);
+
+            // One active/queued mesh task per chunk+lod; newer callers wait for the same result.
+            if (!this.pending.has(id) && !this.taskQueue.some((t) => t.id === id)) {
+                this.taskQueue.push({
+                    id,
+                    type: 'mesh',
+                    args: [cx, cz, chunkData, neighbors, lod],
+                    resolve: (data: any) => this.resolveMeshWaiters(id, data),
+                });
             }
+
+            this.processQueue();
+        });
+    }
+
+    private resolveMeshWaiters(id: string, data: any) {
+        const waiters = this.meshWaiters.get(id);
+        if (!waiters || waiters.length === 0) return;
+        for (const waiter of waiters) waiter(data);
+        this.meshWaiters.delete(id);
+    }
+
+    private takeNextTask() {
+        if (this.taskQueue.length === 0) return null;
+        // Keep generation responsive even under heavy meshing load.
+        const genIndex = this.taskQueue.findIndex((task) => task.type === 'gen');
+        if (genIndex >= 0) return this.taskQueue.splice(genIndex, 1)[0];
+        return this.taskQueue.shift()!;
+    }
+
+    private async processQueue() {
+        if (!this.ready || this.activeTasks >= this.maxConcurrent || this.taskQueue.length === 0) return;
+
+        // Start as many tasks as possible up to maxConcurrent
+        while (this.activeTasks < this.maxConcurrent && this.taskQueue.length > 0) {
+            const task = this.takeNextTask();
+            if (!task) break;
+
+            if (task.type === 'gen' && this.pending.has(task.id)) {
+                // Redundant generation task
+                continue;
+            }
+
+            this.activeTasks++;
+            this.pending.add(task.id);
+            this.dispatch(task);
         }
     }
 
-    /** Get number of active tasks */
+    private async dispatch(task: { id: string; type: 'gen' | 'mesh'; args: any[]; resolve: WorkerCallback }) {
+        const workerIdx = this.nextWorkerIdx % this.workers.length;
+        this.nextWorkerIdx++;
+        const worker = this.workers[workerIdx];
+
+        try {
+            const workerPromise = task.type === 'gen'
+                ? worker.generate(task.args[0], task.args[1], task.args[2])
+                : worker.mesh(task.args[0], task.args[1], task.args[2], task.args[3], task.args[4]);
+
+            // timeout to prevent zombie tasks
+            const timeoutPromise = new Promise<null>((_, reject) =>
+                setTimeout(() => reject(new Error(`Worker timeout [${task.id}]`)), 15000)
+            );
+
+            const result = await Promise.race([workerPromise, timeoutPromise]);
+
+            if (task.type === 'gen') {
+                task.resolve({ cx: task.args[0], cz: task.args[1], id: task.id, data: result, dimension: task.args[2] });
+            } else {
+                task.resolve(result);
+            }
+        } catch (e) {
+            console.error(`[WorkerPool] Task ${task.id} failed:`, e);
+            task.resolve(null);
+        } finally {
+            this.activeTasks--;
+            this.pending.delete(task.id);
+            this.processQueue();
+        }
+    }
+
     getActiveCount(): number {
         return this.activeTasks;
     }
 
-    /** Get queue length */
     getQueueLength(): number {
         return this.taskQueue.length;
     }
 
-    /** Clear pending queue (useful when switching dimensions) */
     clearQueue(): void {
-        this.taskQueue = [];
-        this.pending.clear();
-        this.activeTasks = 0; // The active promises will still resolve, but will be ignored due to pending map clear
+        this.taskQueue.length = 0;
+        // Do not clear `pending`/`activeTasks`: running tasks cannot be cancelled safely.
+        // Resolve queued waiters now so callers can recover quickly.
+        for (const [id, waiters] of this.meshWaiters) {
+            if (!this.pending.has(id)) {
+                for (const waiter of waiters) waiter(null);
+                this.meshWaiters.delete(id);
+            }
+        }
     }
 
-    /** Terminate all workers */
     terminate(): void {
         for (const w of this.rawWorkers) w.terminate();
         this.rawWorkers = [];
         this.workers = [];
+        for (const waiters of this.meshWaiters.values()) {
+            for (const waiter of waiters) waiter(null);
+        }
+        this.meshWaiters.clear();
         this.pending.clear();
         this.taskQueue = [];
         this.activeTasks = 0;
         this.ready = false;
+        if (globalPool === this) globalPool = null;
     }
 }

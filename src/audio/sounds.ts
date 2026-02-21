@@ -21,21 +21,75 @@ let masterGain: GainNode | null = null;
 let musicGain: GainNode | null = null;
 let ambienceGain: GainNode | null = null;
 
+// Environmental filters
+let environmentalFilter: BiquadFilterNode | null = null;
+let reverbNode: ConvolverNode | null = null;
+let reverbGain: GainNode | null = null;
+let dryGain: GainNode | null = null;
+
 function getCtx(): AudioContext {
     if (!audioCtx) {
-        audioCtx = new AudioContext();
+        audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+        // Filter chain: ... -> environmentalFilter -> masterGain -> destination
+        environmentalFilter = audioCtx.createBiquadFilter();
+        environmentalFilter.type = 'lowpass';
+        environmentalFilter.frequency.value = 20000; // Open by default
+
         masterGain = audioCtx.createGain();
         masterGain.gain.value = 0.5;
+
+        // Reverb setup (wet/dry)
+        dryGain = audioCtx.createGain();
+        dryGain.gain.value = 1.0;
+
+        reverbGain = audioCtx.createGain();
+        reverbGain.gain.value = 0.0;
+
+        reverbNode = audioCtx.createConvolver();
+        // Create a simple procedural impulse response for "cave" reverb
+        const pulseLen = audioCtx.sampleRate * 2.0;
+        const pulseBuf = audioCtx.createBuffer(2, pulseLen, audioCtx.sampleRate);
+        for (let c = 0; c < 2; c++) {
+            const data = pulseBuf.getChannelData(c);
+            for (let i = 0; i < pulseLen; i++) {
+                data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / pulseLen, 2);
+            }
+        }
+        reverbNode.buffer = pulseBuf;
+
+        environmentalFilter.connect(dryGain).connect(masterGain);
+        environmentalFilter.connect(reverbNode).connect(reverbGain).connect(masterGain);
+
         masterGain.connect(audioCtx.destination);
+
         musicGain = audioCtx.createGain();
         musicGain.gain.value = 0.15;
         musicGain.connect(audioCtx.destination);
+
         ambienceGain = audioCtx.createGain();
         ambienceGain.gain.value = 0.2;
         ambienceGain.connect(audioCtx.destination);
     }
     if (audioCtx.state === 'suspended') audioCtx.resume();
     return audioCtx;
+}
+
+/** Update environmental effects based on player location */
+export function updateEnvironment(underwater: boolean, inCave: boolean): void {
+    if (!audioCtx || !environmentalFilter || !reverbGain) return;
+    const now = audioCtx.currentTime;
+
+    // Low pass filter if underwater (muffled sounds)
+    const targetFreq = underwater ? 800 : 20000;
+    environmentalFilter.frequency.setTargetAtTime(targetFreq, now, 0.1);
+
+    // Reverb if in cave
+    const targetReverb = inCave ? 0.4 : 0.0;
+    reverbGain.gain.setTargetAtTime(targetReverb, now, 0.2);
+
+    // Dry gain adjustment to keep volume consistent
+    if (dryGain) dryGain.gain.setTargetAtTime(inCave ? 0.7 : 1.0, now, 0.2);
 }
 
 // ─── Volume Control ──────────────────────────────────────

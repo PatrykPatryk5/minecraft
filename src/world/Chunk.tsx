@@ -1,14 +1,3 @@
-/**
- * Chunk Renderer (LOD + Geometry Pooling)
- *
- * Improvements:
- *   - LOD levels: 0=full (AO), 1=no AO, 2=skip small faces
- *   - Geometry buffer pool — reuses disposed buffers
- *   - Proper disposal on unmount & rebuild
- *   - MeshLambertMaterial for GPU perf
- *   - Cross-chunk face culling
- */
-
 import React, { useMemo, useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -18,29 +7,7 @@ import { RigidBody } from '@react-three/rapier';
 import useGameStore, { chunkKey } from '../store/gameStore';
 import { CHUNK_SIZE, blockIndex, type ChunkData, MAX_HEIGHT } from '../core/terrainGen';
 import { globalTerrainUniforms } from '../core/constants';
-
-// ─── Face Definitions ────────────────────────────────────
-interface FaceDef {
-    dir: [number, number, number];
-    corners: [number, number, number][];
-    uv: [number, number][];
-    name: 'right' | 'left' | 'top' | 'bottom' | 'front' | 'back';
-}
-
-const FACES: FaceDef[] = [
-    { dir: [1, 0, 0], corners: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], uv: [[0, 0], [0, 1], [1, 1], [1, 0]], name: 'right' },
-    { dir: [-1, 0, 0], corners: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], uv: [[0, 0], [0, 1], [1, 1], [1, 0]], name: 'left' },
-    { dir: [0, 1, 0], corners: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], uv: [[0, 0], [1, 0], [1, 1], [0, 1]], name: 'top' },
-    { dir: [0, -1, 0], corners: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], uv: [[0, 0], [1, 0], [1, 1], [0, 1]], name: 'bottom' },
-    { dir: [0, 0, 1], corners: [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], uv: [[0, 0], [1, 0], [1, 1], [0, 1]], name: 'front' },
-    { dir: [0, 0, -1], corners: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]], uv: [[0, 0], [1, 0], [1, 1], [0, 1]], name: 'back' },
-];
-
-function isTransparent(bt: number): boolean {
-    const id = bt & 0x0FFF;
-    if (!id) return true;
-    return BLOCK_DATA[id]?.transparent ?? true;
-}
+import { getWorkerPool } from '../core/workerPool';
 
 // ─── Geometry Pool ───────────────────────────────────────
 const geoPool: THREE.BufferGeometry[] = [];
@@ -54,11 +21,12 @@ function getPooledGeo(): THREE.BufferGeometry {
 
 function returnToPool(geo: THREE.BufferGeometry): void {
     if (geoPool.length < MAX_POOL) {
-        // Clear attributes for reuse
         geo.deleteAttribute('position');
         geo.deleteAttribute('normal');
         geo.deleteAttribute('uv');
         geo.deleteAttribute('color');
+        geo.deleteAttribute('isFlora');
+        geo.deleteAttribute('isLiquid');
         geo.setIndex(null);
         geoPool.push(geo);
     } else {
@@ -67,40 +35,6 @@ function returnToPool(geo: THREE.BufferGeometry): void {
 }
 
 // ─── Component ───────────────────────────────────────────
-
-// ─── Meshing Helper (Module Scope to avoid GC) ───────────
-interface MeshBuffer {
-    positions: number[];
-    normals: number[];
-    uvs: number[];
-    colors: number[];
-    indices: number[];
-    isFlora: number[];
-    isLiquid: number[];
-}
-
-const SHARED_GROUPS = new Map<string, MeshBuffer>();
-
-function getSharedBuffer(key: string): MeshBuffer {
-    let b = SHARED_GROUPS.get(key);
-    if (!b) {
-        b = { positions: [], normals: [], uvs: [], colors: [], indices: [], isFlora: [], isLiquid: [] };
-        SHARED_GROUPS.set(key, b);
-    }
-    // Clear for reuse
-    b.positions.length = 0;
-    b.normals.length = 0;
-    b.uvs.length = 0;
-    b.colors.length = 0;
-    b.indices.length = 0;
-    b.isFlora.length = 0;
-    b.isLiquid.length = 0;
-    return b;
-}
-
-// ─── Component ───────────────────────────────────────────
-
-const meshLock = { current: false };
 
 interface ChunkProps {
     cx: number;
@@ -134,20 +68,10 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
 
     useEffect(() => {
         let active = true;
+        let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
         const buildMesh = async () => {
-            // Wait for meshing lock to avoid multiple heavy builds in one frame
-            while (meshLock.current) {
-                await new Promise(r => setTimeout(r, 16));
-                if (!active) return;
-            }
-            meshLock.current = true;
-
             try {
-                // Yield to main thread briefly before heavy work
-                await new Promise(r => setTimeout(r, 0));
-                if (!active) return;
-
                 const state = useGameStore.getState();
                 const chunkData: ChunkData | undefined = state.chunks[key];
                 if (!chunkData) {
@@ -155,242 +79,53 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                     return;
                 }
 
-                // Ensure atlas is ready
-                const atlas = getAtlasTexture();
+                const pool = getWorkerPool();
+                if (!pool?.isReady()) {
+                    if (active && retryTimer == null) {
+                        retryTimer = setTimeout(() => {
+                            retryTimer = null;
+                            if (active) buildMesh();
+                        }, 50);
+                    }
+                    return;
+                }
 
                 const nPx = state.chunks[chunkKey(cx + 1, cz)];
                 const nNx = state.chunks[chunkKey(cx - 1, cz)];
                 const nPz = state.chunks[chunkKey(cx, cz + 1)];
                 const nNz = state.chunks[chunkKey(cx, cz - 1)];
 
-                // Data arrays for SOLID mesh
-                const solid = getSharedBuffer('solid');
-                let solidIdx = 0;
+                // Ensure atlas is ready
+                const atlas = getAtlasTexture();
 
-                // Data arrays for WATER mesh (transparent)
-                const water = getSharedBuffer('water');
-                let waterIdx = 0;
+                // Request meshing from worker
+                const result = await pool.submitMesh(cx, cz, chunkData, [nPx, nNx, nPz, nNz], lod);
+                if (!active || !result) return;
 
-                // AO Helper - use padded buffer for fast access
-                // Padded size: 18x258x18
-                const PW = CHUNK_SIZE + 2;
-                const PH = MAX_HEIGHT + 2;
-                const PD = CHUNK_SIZE + 2;
-                const padded = new Uint16Array(PW * PH * PD);
-
-                // Fill padded buffer
-                for (let lx = -1; lx <= CHUNK_SIZE; lx++) {
-                    for (let lz = -1; lz <= CHUNK_SIZE; lz++) {
-                        const targetChunk = (lx < 0) ? nNx : (lx >= CHUNK_SIZE) ? nPx : (lz < 0) ? nNz : (lz >= CHUNK_SIZE) ? nPz : chunkData;
-                        if (!targetChunk) continue;
-                        const nlx = (lx + 16) % 16;
-                        const nlz = (lz + 16) % 16;
-                        for (let y = 0; y < MAX_HEIGHT; y++) {
-                            padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)] = targetChunk[blockIndex(nlx, y, nlz)];
-                        }
-                    }
-                }
-
-                const isSolidAt = (lx: number, y: number, lz: number): boolean => {
-                    const raw = padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)];
-                    const id = raw & 0x0FFF;
-                    return id > 0 && (BLOCK_DATA[id]?.solid ?? false);
-                };
-
-                let maxChunkHeight = 0;
-                for (let i = 0; i < chunkData.length; i++) {
-                    if (chunkData[i] > 0) {
-                        const y = i >> 8;
-                        if (y > maxChunkHeight) maxChunkHeight = y;
-                    }
-                }
-                maxChunkHeight = Math.min(MAX_HEIGHT - 1, maxChunkHeight + 1);
-
-                for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-                    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-                        for (let y = 0; y <= maxChunkHeight; y++) {
-                            const raw = chunkData[blockIndex(lx, y, lz)];
-                            const bt = raw & 0x0FFF;
-                            const power = (raw & 0xF000) >> 12;
-
-                            if (!bt) continue;
-
-                            const isLiquidBlock = bt === BlockType.WATER || bt === BlockType.LAVA;
-                            const isWater = bt === BlockType.WATER;
-                            const target = isWater ? water : solid;
-
-                            for (let f = 0; f < FACES.length; f++) {
-                                const face = FACES[f];
-                                const nx = lx + face.dir[0];
-                                const ny = y + face.dir[1];
-                                const nz = lz + face.dir[2];
-
-                                const nlx = lx + face.dir[0];
-                                const nny = y + face.dir[1];
-                                const nlz = lz + face.dir[2];
-                                const nbt_raw = padded[(nlx + 1) * PH * PD + (nny + 1) * PD + (nlz + 1)];
-                                const nbt = nbt_raw & 0x0FFF;
-
-                                let liquidHeight = 1.0;
-                                let neighborLiquidHeight = 1.0;
-
-                                if (isLiquidBlock) {
-                                    let up_raw = 0;
-                                    if (y < MAX_HEIGHT - 1) up_raw = chunkData[blockIndex(lx, y + 1, lz)];
-                                    if ((up_raw & 0x0FFF) !== bt) liquidHeight = 0.88;
-
-                                    if (nbt === bt) {
-                                        const nny_up = nny + 1;
-                                        const n_up_raw = padded[(nlx + 1) * PH * PD + (nny_up + 1) * PD + (nlz + 1)];
-                                        if ((n_up_raw & 0x0FFF) !== nbt) neighborLiquidHeight = 0.88;
-                                    }
-                                }
-
-                                if (!isTransparent(nbt)) continue;
-
-                                if (lod === 2 && (
-                                    bt === BlockType.TALL_GRASS ||
-                                    bt === BlockType.FLOWER_RED ||
-                                    bt === BlockType.FLOWER_YELLOW ||
-                                    (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7)
-                                )) {
-                                    continue;
-                                }
-
-                                if (bt === nbt && bt !== BlockType.LEAVES) {
-                                    if (isLiquidBlock && liquidHeight > neighborLiquidHeight) {
-                                        // Draw the connecting face because we are taller!
-                                    } else {
-                                        continue;
-                                    }
-                                }
-
-                                const atlasUV = getAtlasUV(bt, face.name);
-                                const baseIdx = isWater ? waterIdx : solidIdx;
-
-                                for (let i = 0; i < 4; i++) {
-                                    const corner = face.corners[i];
-                                    const cx0 = lx + corner[0];
-                                    let cy0 = y + corner[1];
-                                    const cz0 = lz + corner[2];
-
-                                    if (corner[1] === 1 && liquidHeight < 1.0) cy0 = y + liquidHeight;
-
-                                    target.positions.push(cx0, cy0, cz0);
-                                    target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
-
-                                    const ux = atlasUV.u + face.uv[i][0] * atlasUV.su;
-                                    const uy = atlasUV.v + face.uv[i][1] * atlasUV.sv;
-                                    target.uvs.push(ux, uy);
-
-                                    if (lod === 0 && !isWater) {
-                                        let aoLevel = 0;
-                                        const dx = face.dir[0], dy = face.dir[1], dz = face.dir[2];
-                                        const ox = corner[0] * 2 - 1;
-                                        const oy = corner[1] * 2 - 1;
-                                        const oz = corner[2] * 2 - 1;
-
-                                        if (Math.abs(dx) === 1) {
-                                            const s1 = isSolidAt(lx + dx, y + corner[1], lz + oz);
-                                            const s2 = isSolidAt(lx + dx, y + oy, lz + corner[2]);
-                                            const c = isSolidAt(lx + dx, y + oy, lz + oz);
-                                            aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
-                                        } else if (Math.abs(dy) === 1) {
-                                            const s1 = isSolidAt(lx + ox, y + dy, lz + corner[2]);
-                                            const s2 = isSolidAt(lx + corner[0], y + dy, lz + oz);
-                                            const c = isSolidAt(lx + ox, y + dy, lz + oz);
-                                            aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
-                                        } else {
-                                            const s1 = isSolidAt(lx + ox, y + corner[1], lz + dz);
-                                            const s2 = isSolidAt(lx + corner[0], y + oy, lz + dz);
-                                            const c = isSolidAt(lx + ox, y + oy, lz + dz);
-                                            aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
-                                        }
-                                        const br = 1.0 - aoLevel * 0.33; // More intense AO
-                                        let r = br, g = br, b = br;
-
-                                        // Colorize Redstone Wire
-                                        if (bt === BlockType.REDSTONE_WIRE) {
-                                            const intensity = 0.3 + (power / 15) * 0.7;
-                                            r *= intensity;
-                                            g *= (intensity * 0.1);
-                                            b *= (intensity * 0.1);
-                                        } else if (bt === BlockType.REDSTONE_LAMP && power > 0) {
-                                            r *= 1.4; g *= 1.2; b *= 0.8; // Warm glow
-                                        } else if (bt === BlockType.REDSTONE_TORCH && power > 0) {
-                                            r *= 1.5; g *= 0.3; b *= 0.3; // Intense red glow
-                                        }
-
-                                        target.colors.push(r, g, b);
-                                    } else {
-                                        let r = 1, g = 1, b = 1;
-                                        if (bt === BlockType.REDSTONE_WIRE) {
-                                            const intensity = 0.3 + (power / 15) * 0.7;
-                                            r = intensity; g = intensity * 0.1; b = intensity * 0.1;
-                                        } else if (bt === BlockType.REDSTONE_LAMP && power > 0) {
-                                            r = 1.4; g = 1.2; b = 0.8;
-                                        } else if (bt === BlockType.REDSTONE_TORCH && power > 0) {
-                                            r = 1.5; g = 0.3; b = 0.3;
-                                        }
-                                        target.colors.push(r, g, b);
-                                    }
-
-                                    const isFloraBlock =
-                                        bt === BlockType.LEAVES ||
-                                        bt === BlockType.TALL_GRASS ||
-                                        bt === BlockType.FLOWER_RED ||
-                                        bt === BlockType.FLOWER_YELLOW ||
-                                        (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7);
-
-                                    const isTopVert = corner[1] > 0;
-                                    const swayLevel = isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0;
-
-                                    target.isFlora.push(swayLevel);
-
-                                    if (isLiquidBlock && isTopVert && liquidHeight < 1.0) {
-                                        target.isLiquid.push(1.0); // Only animate top face if it's open
-                                    } else {
-                                        target.isLiquid.push(0.0);
-                                    }
-                                }
-
-                                target.indices.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
-                                if (isWater) waterIdx += 4; else solidIdx += 4;
-                            }
-                        }
-                    }
-                }
-
-                const createGeo = (data: typeof solid) => {
-                    if (data.positions.length === 0) return null;
+                const createGeo = (data: any) => {
+                    if (!data.positions || data.positions.length === 0) return null;
                     const g = getPooledGeo();
-                    g.setAttribute('position', new THREE.Float32BufferAttribute(data.positions, 3));
-                    g.setAttribute('normal', new THREE.Float32BufferAttribute(data.normals, 3));
-                    g.setAttribute('uv', new THREE.Float32BufferAttribute(data.uvs, 2));
-                    g.setAttribute('color', new THREE.Float32BufferAttribute(data.colors, 3));
-                    if ((data as any).isFlora && (data as any).isFlora.length > 0) {
-                        g.setAttribute('isFlora', new THREE.Float32BufferAttribute((data as any).isFlora, 1));
+                    g.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+                    g.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
+                    g.setAttribute('uv', new THREE.BufferAttribute(data.uvs, 2));
+                    g.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+                    if (data.isFlora && data.isFlora.length > 0) {
+                        g.setAttribute('isFlora', new THREE.BufferAttribute(data.isFlora, 1));
                     }
-                    if ((data as any).isLiquid && (data as any).isLiquid.length > 0) {
-                        g.setAttribute('isLiquid', new THREE.Float32BufferAttribute((data as any).isLiquid, 1));
+                    if (data.isLiquid && data.isLiquid.length > 0) {
+                        g.setAttribute('isLiquid', new THREE.BufferAttribute(data.isLiquid, 1));
                     }
-                    g.setIndex(data.indices);
+                    g.setIndex(new THREE.BufferAttribute(data.indices, 1));
                     g.computeBoundingSphere();
                     return g;
                 };
 
-                const solidGeo = createGeo(solid);
-                const waterGeo = createGeo(water);
-
-                const newGeos: THREE.BufferGeometry[] = [];
-                if (solidGeo) newGeos.push(solidGeo);
-                if (waterGeo) newGeos.push(waterGeo);
+                const solidGeo = createGeo(result.solid);
+                const waterGeo = createGeo(result.water);
 
                 setMeshData({ solidGeo, waterGeo, atlas });
             } catch (err) {
                 console.error("Meshing error:", err);
-            } finally {
-                meshLock.current = false;
             }
         };
 
@@ -398,6 +133,10 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
 
         return () => {
             active = false;
+            if (retryTimer) {
+                clearTimeout(retryTimer);
+                retryTimer = null;
+            }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key, version, v_nPx, v_nNx, v_nPz, v_nNz, lod, cx, cz]);
@@ -405,11 +144,12 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
     if (!meshData) return null;
 
     const renderSolidMesh = () => (
-        <mesh geometry={meshData.solidGeo!} frustumCulled castShadow={useShadows && lod === 0} receiveShadow={useShadows && lod === 0}>
+        <mesh geometry={meshData.solidGeo!} frustumCulled castShadow={useShadows && lod <= 1} receiveShadow={useShadows}>
             <meshStandardMaterial
                 map={meshData.atlas}
                 vertexColors
-                alphaTest={0.1}
+                alphaTest={0.5}
+                alphaToCoverage={true}
                 transparent={false}
                 roughness={0.9}
                 metalness={0.05}

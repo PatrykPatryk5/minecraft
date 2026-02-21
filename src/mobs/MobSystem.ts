@@ -107,14 +107,15 @@ export function updateMobs(delta: number): void {
 
     // Update each mob
     for (let i = mobs.length - 1; i >= 0; i--) {
-        const mob = { ...mobs[i] } as Mob;
+        const mob = mobs[i]; // No need to spread yet
         const stats = MOB_STATS[mob.type as MobType];
 
         // Distance to player
         const dx = playerPos[0] - mob.pos[0];
         const dy = playerPos[1] - mob.pos[1];
         const dz = playerPos[2] - mob.pos[2];
-        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const distSq = dx * dx + dy * dy + dz * dz;
+        const dist = Math.sqrt(distSq);
 
         // Despawn if too far
         if (dist > DESPAWN_DISTANCE) {
@@ -123,25 +124,39 @@ export function updateMobs(delta: number): void {
             continue;
         }
 
+        // AI Throttling: Skip expensive logic for distant mobs
+        // Update at 20Hz if near, progressively slower if far
+        const updateInterval = dist < 24 ? 1 : dist < 64 ? 3 : 6;
+        if ((mob.id + Math.floor(now / 50)) % updateInterval !== 0) {
+            // Still process basic physics/movement for smoothness? 
+            // Actually, better to just skip if not processing AI
+            // But we need to update hurtTimer etc.
+            if (mob.hurtTimer > 0) mob.hurtTimer -= delta * 1000;
+            continue;
+        }
+
+        const mobCopy = { ...mob }; // Spread only when we decide to update
+
         // Update hurt timer
-        if (mob.hurtTimer > 0) {
-            mob.hurtTimer -= delta * 1000;
+        if (mobCopy.hurtTimer > 0) {
+            mobCopy.hurtTimer -= delta * 1000;
             // Enderman teleport when hit
-            if (mob.type === 'enderman' && Math.random() < 0.1) {
-                teleportMob(mob);
+            if (mobCopy.type === 'enderman' && Math.random() < 0.1) {
+                teleportMob(mobCopy);
             }
         }
 
         // Sunlight burning (Zombie, Skeleton)
-        if ((mob.type === 'zombie' || mob.type === 'skeleton') && s.dayTime > 0.25 && s.dayTime < 0.75) {
-            const bx = Math.floor(mob.pos[0]);
-            const bz = Math.floor(mob.pos[2]);
-            const by = Math.floor(mob.pos[1]);
-            if (by >= getGroundLevel(bx, bz, s)) {
-                mob.health -= delta * 2; // Take damage over time
-                if (mob.hurtTimer <= 0) {
-                    mob.hurtTimer = 500;
-                    playSound('hurt'); // Only occasionally play hurt sound (when hurt timer is 0)
+        if ((mobCopy.type === 'zombie' || mobCopy.type === 'skeleton') && s.dayTime > 0.25 && s.dayTime < 0.75) {
+            const bx = Math.floor(mobCopy.pos[0]);
+            const bz = Math.floor(mobCopy.pos[2]);
+            const by = Math.floor(mobCopy.pos[1]);
+            const groundY = getGroundLevel(bx, bz, s);
+            if (by >= groundY) {
+                mobCopy.health -= (delta * updateInterval) * 2;
+                if (mobCopy.hurtTimer <= 0) {
+                    mobCopy.hurtTimer = 500;
+                    playSound('hurt');
                 }
             }
         }
@@ -150,201 +165,166 @@ export function updateMobs(delta: number): void {
         if (stats.hostile) {
             // Hostile AI
             if (dist < HOSTILE_DETECT_RANGE) {
-                mob.target = [...playerPos];
-                mob.state = 'chase';
+                mobCopy.target = [...playerPos];
+                mobCopy.state = 'chase';
 
                 // Skeleton ranged behavior
-                if (mob.type === 'skeleton') {
-                    if (dist < 12 && dist > 2 && now - mob.lastAttackTime > 2000) {
-                        // Simplified "shoot" arrow implementation
+                if (mobCopy.type === 'skeleton') {
+                    if (dist < 12 && dist > 2 && now - mobCopy.lastAttackTime > 2000) {
                         s.setHealth(s.health - stats.damage);
-                        mob.lastAttackTime = now;
+                        mobCopy.lastAttackTime = now;
                         playSound('hurt');
                     }
                     if (dist < 8) {
-                        // Try to keep distance
-                        mob.state = 'flee';
-                        mob.target = [mob.pos[0] - dx, mob.pos[1], mob.pos[2] - dz];
+                        mobCopy.state = 'flee';
+                        mobCopy.target = [mobCopy.pos[0] - dx, mobCopy.pos[1], mobCopy.pos[2] - dz];
                     }
                 }
             } else {
-                mob.target = null;
-                mob.state = mob.state === 'chase' ? 'wander' : mob.state;
+                mobCopy.target = null;
+                mobCopy.state = mobCopy.state === 'chase' ? 'wander' : mobCopy.state;
             }
 
             // Creeper special behavior
-            if (mob.type === 'creeper' && dist < ATTACK_RANGE + 1) {
-                mob.state = 'fuse';
-                mob.fuseTimer += delta * 1000;
-                if (mob.fuseTimer >= CREEPER_FUSE_TIME) {
-                    creeperExplode(mob);
+            if (mobCopy.type === 'creeper' && dist < ATTACK_RANGE + 1) {
+                mobCopy.state = 'fuse';
+                mobCopy.fuseTimer += delta * updateInterval * 1000;
+                if (mobCopy.fuseTimer >= CREEPER_FUSE_TIME) {
+                    creeperExplode(mobCopy);
                     mobs.splice(i, 1);
                     changed = true;
                     continue;
                 }
-            } else if (mob.type === 'creeper') {
-                mob.fuseTimer = Math.max(0, mob.fuseTimer - delta * 500); // Defuse
+            } else if (mobCopy.type === 'creeper') {
+                mobCopy.fuseTimer = Math.max(0, mobCopy.fuseTimer - delta * updateInterval * 500); // Defuse
             }
 
-            // Blaze special behavior (ranged attack) - simplified for now
-            if (mob.type === 'blaze' && dist < 15 && now - mob.lastAttackTime > 2000) {
-                // Simulate ranged attack (direct damage if line of sight)
+            // Blaze special behavior
+            if (mobCopy.type === 'blaze' && dist < 15 && now - mobCopy.lastAttackTime > 2000) {
                 s.takeDamage(stats.damage);
-                mob.lastAttackTime = now;
+                mobCopy.lastAttackTime = now;
                 playSound('fireball');
             }
 
             // Attack (melee)
-            if (mob.type !== 'creeper' && mob.type !== 'blaze' && dist < ATTACK_RANGE && now - mob.lastAttackTime > ATTACK_COOLDOWN) {
-                mob.state = 'attack';
-                mob.lastAttackTime = now;
+            if (mobCopy.type !== 'creeper' && mobCopy.type !== 'blaze' && dist < ATTACK_RANGE && now - mobCopy.lastAttackTime > ATTACK_COOLDOWN) {
+                mobCopy.state = 'attack';
+                mobCopy.lastAttackTime = now;
                 s.takeDamage(stats.damage);
                 playSound('hurt');
             }
         } else {
             // Passive/Neutral AI
-            if (mob.type === 'wolf' && mob.hurtTimer > 0) {
-                // Wolf becomes hostile if hit
-                mob.target = [...playerPos];
-                mob.state = 'chase';
-                if (dist < ATTACK_RANGE && now - mob.lastAttackTime > ATTACK_COOLDOWN) {
+            if (mobCopy.type === 'wolf' && mobCopy.hurtTimer > 0) {
+                mobCopy.target = [...playerPos];
+                mobCopy.state = 'chase';
+                if (dist < ATTACK_RANGE && now - mobCopy.lastAttackTime > ATTACK_COOLDOWN) {
                     s.takeDamage(stats.damage);
-                    mob.lastAttackTime = now;
+                    mobCopy.lastAttackTime = now;
                     playSound('hurt');
                 }
-            } else if (mob.state === 'idle' && Math.random() < 0.01) {
-                mob.state = 'wander';
-                mob.target = [
-                    mob.pos[0] + (Math.random() - 0.5) * 10,
-                    mob.pos[1],
-                    mob.pos[2] + (Math.random() - 0.5) * 10,
+            } else if (mobCopy.state === 'idle' && Math.random() < 0.01 * updateInterval) {
+                mobCopy.state = 'wander';
+                mobCopy.target = [
+                    mobCopy.pos[0] + (Math.random() - 0.5) * 10,
+                    mobCopy.pos[1],
+                    mobCopy.pos[2] + (Math.random() - 0.5) * 10,
                 ];
             }
 
-            // Flee when hurt (except wolf)
-            if (mob.hurtTimer > 0 && mob.type !== 'wolf' && mob.state !== 'flee') {
-                mob.state = 'flee';
-                mob.target = [
-                    mob.pos[0] - dx * 2,
-                    mob.pos[1],
-                    mob.pos[2] - dz * 2,
-                ];
+            // Flee when hurt
+            if (mobCopy.hurtTimer > 0 && mobCopy.type !== 'wolf' && mobCopy.state !== 'flee') {
+                mobCopy.state = 'flee';
+                mobCopy.target = [mobCopy.pos[0] - dx * 2, mobCopy.pos[1], mobCopy.pos[2] - dz * 2];
             }
         }
 
         // Movement & Pathfinding
-        if (mob.target && (mob.state === 'chase' || mob.state === 'wander' || mob.state === 'flee')) {
-            const tdx = mob.target[0] - mob.pos[0];
-            const tdz = mob.target[2] - mob.pos[2];
+        if (mobCopy.target && (mobCopy.state === 'chase' || mobCopy.state === 'wander' || mobCopy.state === 'flee')) {
+            const tdx = mobCopy.target[0] - mobCopy.pos[0];
+            const tdz = mobCopy.target[2] - mobCopy.pos[2];
             const tDist = Math.sqrt(tdx * tdx + tdz * tdz);
 
             if (tDist > 0.5) {
-                const speed = stats.speed * delta;
+                const speed = stats.speed * delta * updateInterval;
+                const next = getNextStep(mobCopy.pos[0], mobCopy.pos[1], mobCopy.pos[2], mobCopy.target[0], mobCopy.target[1], mobCopy.target[2]);
 
-                // Get next optimal step using pathfinding
-                const next = getNextStep(mob.pos[0], mob.pos[1], mob.pos[2], mob.target[0], mob.target[1], mob.target[2]);
+                let nx = mobCopy.target[0], nz = mobCopy.target[2], shouldJump = false;
+                if (next) { nx = next.x; nz = next.z; shouldJump = next.jump; }
 
-                let nx = mob.target[0];
-                let nz = mob.target[2];
-                let shouldJump = false;
-
-                if (next) {
-                    nx = next.x;
-                    nz = next.z;
-                    shouldJump = next.jump;
-                }
-
-                const ndx = nx - mob.pos[0];
-                const ndz = nz - mob.pos[2];
+                const ndx = nx - mobCopy.pos[0], ndz = nz - mobCopy.pos[2];
                 const nDist = Math.sqrt(ndx * ndx + ndz * ndz);
 
                 if (nDist > 0.1) {
-                    mob.pos[0] += (ndx / nDist) * speed;
-                    mob.pos[2] += (ndz / nDist) * speed;
-                    mob.rotation = Math.atan2(ndx, ndz);
+                    mobCopy.pos[0] += (ndx / nDist) * speed;
+                    mobCopy.pos[2] += (ndz / nDist) * speed;
+                    mobCopy.rotation = Math.atan2(ndx, ndz);
                 }
 
-                // Smooth climbing / Jumps
-                if (shouldJump && mob.vel[1] === 0) {
-                    mob.vel[1] = 6.5; // Jump impulse
+                if (shouldJump && mobCopy.vel[1] === 0) {
+                    mobCopy.vel[1] = 6.5;
                 } else if (!next) {
-                    // Fallback to old simple auto-climb if pathfinding doesn't know what to do
-                    const forwardBlock = getGroundLevel(mob.pos[0] + (tdx / tDist) * 0.5, mob.pos[2] + (tdz / tDist) * 0.5, s);
-                    if (forwardBlock > mob.pos[1] && forwardBlock < mob.pos[1] + 1.2 && mob.vel[1] === 0) {
-                        mob.vel[1] = 5.5; // Hop
+                    const forwardBlock = getGroundLevel(mobCopy.pos[0] + (tdx / tDist) * 0.5, mobCopy.pos[2] + (tdz / tDist) * 0.5, s);
+                    if (forwardBlock > mobCopy.pos[1] && forwardBlock < mobCopy.pos[1] + 1.2 && mobCopy.vel[1] === 0) {
+                        mobCopy.vel[1] = 5.5;
                     }
                 }
-            } else if (mob.state === 'wander') {
-                mob.state = 'idle';
-                mob.target = null;
+            } else if (mobCopy.state === 'wander') {
+                mobCopy.state = 'idle';
+                mobCopy.target = null;
             }
         }
 
-        // Spider wall climbing (simplified: no gravity if next to wall)
-        if (mob.type === 'spider' && mob.state === 'chase') {
-            // If hitting a wall, move up
-            const wallCheck = s.getBlock(Math.floor(mob.pos[0] + Math.sin(mob.rotation) * 0.6), Math.floor(mob.pos[1] + 0.5), Math.floor(mob.pos[2] + Math.cos(mob.rotation) * 0.6));
+        // Spider wall climbing
+        if (mobCopy.type === 'spider' && mobCopy.state === 'chase') {
+            const wallCheck = s.getBlock(Math.floor(mobCopy.pos[0] + Math.sin(mobCopy.rotation) * 0.6), Math.floor(mobCopy.pos[1] + 0.5), Math.floor(mobCopy.pos[2] + Math.cos(mobCopy.rotation) * 0.6));
             if (wallCheck) {
-                mob.vel[1] = 4 * delta; // Climb
-                mob.pos[1] += mob.vel[1];
+                mobCopy.vel[1] = 4 * delta * updateInterval;
+                mobCopy.pos[1] += mobCopy.vel[1];
             }
         }
 
         // Gravity
-        const bx = Math.floor(mob.pos[0]);
-        const bz = Math.floor(mob.pos[2]);
-
-        const hasGround = isSolid(bx, Math.floor(mob.pos[1] - 0.1), bz);
+        const bx = Math.floor(mobCopy.pos[0]);
+        const bz = Math.floor(mobCopy.pos[2]);
+        const hasGround = isSolid(bx, Math.floor(mobCopy.pos[1] - 0.1), bz);
 
         if (!hasGround) {
-            mob.vel[1] += GRAVITY * delta;
-            mob.pos[1] += mob.vel[1] * delta;
-
-            // Ceiling Bonk
-            if (mob.vel[1] > 0 && isSolid(bx, Math.floor(mob.pos[1] + 1.8), bz)) {
-                mob.vel[1] = 0;
-            }
-            // Floor Snap
-            if (mob.vel[1] < 0 && isSolid(bx, Math.floor(mob.pos[1]), bz)) {
-                mob.pos[1] = Math.floor(mob.pos[1]) + 1;
-                mob.vel[1] = 0;
+            mobCopy.vel[1] += GRAVITY * delta * updateInterval;
+            mobCopy.pos[1] += mobCopy.vel[1] * delta * updateInterval;
+            if (mobCopy.vel[1] > 0 && isSolid(bx, Math.floor(mobCopy.pos[1] + 1.8), bz)) mobCopy.vel[1] = 0;
+            if (mobCopy.vel[1] < 0 && isSolid(bx, Math.floor(mobCopy.pos[1]), bz)) {
+                mobCopy.pos[1] = Math.floor(mobCopy.pos[1]) + 1;
+                mobCopy.vel[1] = 0;
             }
         } else {
-            if (mob.vel[1] < 0) {
-                mob.vel[1] = 0;
-                mob.pos[1] = Math.floor(mob.pos[1] - 0.1) + 1;
-            } else if (mob.vel[1] > 0) {
-                // Currently jumping up
-                mob.pos[1] += mob.vel[1] * delta;
-                mob.vel[1] += GRAVITY * delta;
+            if (mobCopy.vel[1] < 0) {
+                mobCopy.vel[1] = 0;
+                mobCopy.pos[1] = Math.floor(mobCopy.pos[1] - 0.1) + 1;
+            } else if (mobCopy.vel[1] > 0) {
+                mobCopy.pos[1] += mobCopy.vel[1] * delta * updateInterval;
+                mobCopy.vel[1] += GRAVITY * delta * updateInterval;
             }
         }
 
         // Remove dead mobs
-        if (mob.health <= 0) {
+        if (mobCopy.health <= 0) {
             mobs.splice(i, 1);
             changed = true;
-
-            // Drop items
-            if (mob.type === 'cow') s.addItem(BlockType.BEEF_RAW, 1);
-            if (mob.type === 'pig') s.addItem(BlockType.PORKCHOP_RAW, 1);
-            if (mob.type === 'sheep') s.addItem(BlockType.WOOL_WHITE, 1);
-            if (mob.type === 'chicken') s.addItem(BlockType.CHICKEN_RAW, 1);
-            if (mob.type === 'zombie') s.addItem(BlockType.LEATHER, 1);
-            if (mob.type === 'skeleton') s.addItem(BlockType.BONE, 1);
-            if (mob.type === 'spider') s.addItem(BlockType.STRING, 1);
-
-            // Drop XP
-            const xp = (mob.type === 'blaze') ? 10 :
-                (stats.hostile) ? 5 :
-                    Math.floor(Math.random() * 3) + 1;
+            if (mobCopy.type === 'cow') s.addItem(BlockType.BEEF_RAW, 1);
+            if (mobCopy.type === 'pig') s.addItem(BlockType.PORKCHOP_RAW, 1);
+            if (mobCopy.type === 'sheep') s.addItem(BlockType.WOOL_WHITE, 1);
+            if (mobCopy.type === 'chicken') s.addItem(BlockType.CHICKEN_RAW, 1);
+            if (mobCopy.type === 'zombie') s.addItem(BlockType.LEATHER, 1);
+            if (mobCopy.type === 'skeleton') s.addItem(BlockType.BONE, 1);
+            if (mobCopy.type === 'spider') s.addItem(BlockType.STRING, 1);
+            const xp = (mobCopy.type === 'blaze') ? 10 : (stats.hostile) ? 5 : Math.floor(Math.random() * 3) + 1;
             s.addXp(xp);
-
             playSound('pop');
             continue;
         }
 
-        mobs[i] = mob;
+        mobs[i] = mobCopy;
         changed = true;
     }
 
@@ -445,18 +425,40 @@ function teleportMob(mob: Mob) {
     playSound('portal'); // Use portal sound for teleport
 }
 
+// ─── Heightmap Cache ────────────
+const heightmapCache = new Map<string, { y: number, time: number }>();
+const CACHE_TTL = 2000; // 2s
+
 function getGroundLevel(x: number, z: number, s: ReturnType<typeof useGameStore.getState>): number {
     const bx = Math.floor(x);
     const bz = Math.floor(z);
+    const key = `${bx},${bz}`;
+    const now = Date.now();
+
+    const cached = heightmapCache.get(key);
+    if (cached && (now - cached.time < CACHE_TTL)) {
+        return cached.y;
+    }
+
+    let foundY = 64;
     for (let y = 120; y > 0; y--) {
         const block = s.getBlock(bx, y, bz);
         if (block && block !== BlockType.AIR && block !== BlockType.WATER &&
             block !== BlockType.TALL_GRASS && block !== BlockType.FLOWER_RED &&
             block !== BlockType.FLOWER_YELLOW) {
-            return y;
+            foundY = y;
+            break;
         }
     }
-    return 64;
+
+    heightmapCache.set(key, { y: foundY, time: now });
+    // Keep cache size in check
+    if (heightmapCache.size > 2000) {
+        const firstKey = heightmapCache.keys().next().value;
+        if (firstKey) heightmapCache.delete(firstKey);
+    }
+
+    return foundY;
 }
 
 function creeperExplode(mob: Mob): void {

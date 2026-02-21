@@ -337,6 +337,9 @@ export enum BlockType {
     BAMBOO_BLOCK = 770,
     BAMBOO_PLANKS = 771,
     BAMBOO_MOSAIC = 772,
+    END_CRYSTAL = 800,
+    DRAGON_BREATH = 801,
+    TOTEM_OF_UNDYING = 802,
 }
 
 // ─── Block Data Interface ────────────────────────────────
@@ -704,6 +707,9 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.BAMBOO_BLOCK]: { name: 'Blok Bambusa', color: '#597d30', top: '#70922d', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
     [BlockType.BAMBOO_PLANKS]: { name: 'Bambusowe Deski', color: '#978c4a', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
     [BlockType.BAMBOO_MOSAIC]: { name: 'Mozaika Bambusowa', color: '#978c4a', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
+    [BlockType.END_CRYSTAL]: { name: 'Kryształ Endu', color: '#ff55ff', transparent: true, solid: false, breakTime: 0, isItem: true },
+    [BlockType.DRAGON_BREATH]: { name: 'Smoczy Oddech', color: '#ff33ff', transparent: true, solid: false, breakTime: 0, isItem: true },
+    [BlockType.TOTEM_OF_UNDYING]: { name: 'Totem Nieśmiertelności', color: '#ffff55', transparent: true, solid: false, breakTime: 0, isItem: true },
 };
 
 /** Get block info safely */

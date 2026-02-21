@@ -149,19 +149,28 @@ const App: React.FC = () => {
                 <Canvas
                     camera={{ fov, near: 0.1, far: 1000, position: [0, 80, 0] }}
                     gl={{
-                        antialias: true,
+                        antialias: graphics !== 'fast',
                         powerPreference: 'high-performance',
                         stencil: false,
                         depth: true,
                         alpha: false,
                         failIfMajorPerformanceCaveat: false,
                     }}
-                    shadows={useShadows ? { type: THREE.PCFShadowMap } : false}
+                    shadows={useShadows ? { type: graphics === 'fabulous' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap } : false}
                     dpr={graphics === 'fabulous' ? [1, Math.min(window.devicePixelRatio, 2)] : [1, 1]}
                     style={{ width: '100%', height: '100%' }}
                     onContextMenu={(e) => e.preventDefault()}
                     frameloop="always"
                     performance={{ min: 0.5 }}
+                    onCreated={({ gl }) => {
+                        gl.outputColorSpace = THREE.SRGBColorSpace;
+                        gl.toneMapping = graphics === 'fast' ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
+                        gl.toneMappingExposure = graphics === 'fabulous' ? 1.06 : 1.0;
+                        gl.shadowMap.enabled = useShadows;
+                        if (useShadows) {
+                            gl.shadowMap.type = graphics === 'fabulous' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+                        }
+                    }}
                 >
                     <Suspense fallback={null}>
                         <SceneContent />
