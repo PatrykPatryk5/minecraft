@@ -434,9 +434,7 @@ function drawLeaves(ctx: CanvasRenderingContext2D, seed: number) {
     }
 }
 
-function drawOre(ctx: CanvasRenderingContext2D, oreColor: RGB, seed: number) {
-    // Stone base
-    drawStone(ctx, seed);
+function drawOreOverlay(ctx: CanvasRenderingContext2D, oreColor: RGB, seed: number) {
     const rng = sRng(seed + 9999);
     // Ore patches — 3-4 clusters of 2-3 pixels
     for (let i = 0; i < 4; i++) {
@@ -1210,11 +1208,16 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.LAPIS_ORE:
         case BlockType.REDSTONE_ORE:
         case BlockType.COPPER_ORE:
-            drawOre(ctx, hex(data.ore || '#ffffff'), seed);
+            drawStone(ctx, seed);
+            drawOreOverlay(ctx, hex(data.ore || '#ffffff'), seed);
             return;
         case BlockType.DEEPSLATE_COPPER_ORE:
             drawDeepslate(ctx, seed);
-            drawOre(ctx, hex(data.ore || '#ffffff'), seed);
+            drawOreOverlay(ctx, hex(data.ore || '#ffffff'), seed);
+            return;
+        case BlockType.NETHER_QUARTZ_ORE:
+            drawNetherrack(ctx, seed);
+            drawOreOverlay(ctx, hex(data.ore || '#ffffff'), seed);
             return;
 
         case BlockType.COBBLE: drawCobble(ctx, seed); return;
@@ -1273,7 +1276,7 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.NETHERITE_BLOCK: drawNetheriteBlock(ctx, seed); return;
         case BlockType.GILDED_BLACKSTONE:
             drawBlackstone(ctx, seed);
-            drawOre(ctx, [255, 215, 0], seed + 1);
+            drawOreOverlay(ctx, [255, 215, 0], seed + 1);
             return;
         case BlockType.CHISELED_POLISHED_BLACKSTONE:
             drawBlackstone(ctx, seed);
@@ -1303,14 +1306,6 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.CACTUS: drawCactus(ctx, face, seed); return;
         case BlockType.MELON: drawMelon(ctx, face, seed); return;
         case BlockType.PUMPKIN: drawPumpkin(ctx, face, seed); return;
-        // Ores
-        case BlockType.COAL_ORE: drawOre(ctx, [35, 35, 35], seed); return;
-        case BlockType.IRON_ORE: drawOre(ctx, [196, 168, 130], seed); return;
-        case BlockType.GOLD_ORE: drawOre(ctx, [255, 215, 0], seed); return;
-        case BlockType.DIAMOND: drawOre(ctx, [68, 255, 238], seed); return;
-        case BlockType.EMERALD_ORE: drawOre(ctx, [34, 204, 68], seed); return;
-        case BlockType.LAPIS_ORE: drawOre(ctx, [34, 68, 170], seed); return;
-        case BlockType.REDSTONE_ORE: drawOre(ctx, [204, 34, 34], seed); return;
         // Wool
         case BlockType.WOOL_WHITE: drawWool(ctx, [232, 232, 232], seed); return;
         case BlockType.WOOL_RED: drawWool(ctx, [184, 32, 32], seed); return;
@@ -1643,12 +1638,22 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
             }
             return;
         case BlockType.JUKEBOX:
+        case BlockType.JUKEBOX_PLAYING:
             drawPlanks(ctx, [107, 66, 38], seed);
             if (face === 'top') {
                 // Record slot
+                const isPlaying = blockId === BlockType.JUKEBOX_PLAYING;
                 for (let y = 5; y < 11; y++) for (let x = 5; x < 11; x++) {
                     const dist = Math.sqrt((x - 8) ** 2 + (y - 8) ** 2);
-                    if (dist < 3.5) px(ctx, x, y, 30, 30, 30);
+                    if (dist < 3.5) {
+                        px(ctx, x, y, 30, 30, 30);
+                        // Center of record
+                        if (dist < 1.5 && isPlaying) {
+                            // Animated/Colored center when playing
+                            const c = [255, 50, 50]; // Just a red center for now
+                            px(ctx, x, y, c[0], c[1], c[2]);
+                        }
+                    }
                 }
                 px(ctx, 7, 7, 15, 15, 15); px(ctx, 8, 7, 15, 15, 15);
             }
@@ -1801,6 +1806,30 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
                 const x = (rng() * 14) | 0;
                 const h = (rng() * height * 0.8 + 2) | 0;
                 ctx.fillRect(x, 16 - h, 2, h);
+            }
+            return;
+
+        // ─── Music Discs ──────────────────────────────
+        case BlockType.MUSIC_DISC_1:
+        case BlockType.MUSIC_DISC_2:
+        case BlockType.MUSIC_DISC_3:
+        case BlockType.MUSIC_DISC_4:
+            ctx.clearRect(0, 0, 16, 16);
+            // Disc shape
+            const colors = {
+                [BlockType.MUSIC_DISC_1]: [29, 185, 84],
+                [BlockType.MUSIC_DISC_2]: [255, 85, 85],
+                [BlockType.MUSIC_DISC_3]: [96, 165, 250],
+                [BlockType.MUSIC_DISC_4]: [251, 191, 36]
+            };
+            const discCol = colors[blockId as keyof typeof colors] || [255, 255, 255];
+
+            for (let y = 2; y < 14; y++) for (let x = 2; x < 14; x++) {
+                const dist = Math.sqrt((x - 7.5) ** 2 + (y - 7.5) ** 2);
+                if (dist < 5.5) {
+                    if (dist > 1.5) px(ctx, x, y, 30, 30, 30); // Outer vinyl
+                    else px(ctx, x, y, discCol[0], discCol[1], discCol[2]); // Inner label
+                }
             }
             return;
         case BlockType.END_CRYSTAL:

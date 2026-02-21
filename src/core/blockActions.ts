@@ -261,6 +261,40 @@ export function handleBlockAction(
             playSound('click');
             return true;
         }
+        case BlockType.JUKEBOX:
+        case BlockType.JUKEBOX_PLAYING: {
+            const s = useGameStore.getState();
+            const info = heldItem ? BLOCK_DATA[heldItem] : null;
+
+            if (info?.isMusicDisc) {
+                // Map held item to track name
+                let track: 'muzo' | 'retro' | 'creepy' | 'chill' = 'muzo';
+                if (heldItem === BlockType.MUSIC_DISC_2) track = 'retro';
+                if (heldItem === BlockType.MUSIC_DISC_3) track = 'creepy';
+                if (heldItem === BlockType.MUSIC_DISC_4) track = 'chill';
+
+                // Play disc
+                import('../audio/sounds').then(({ playMusicDisc }) => {
+                    playMusicDisc(track);
+                });
+                s.addChatMessage('System', `Teraz odtwarzane: ${info.name}`);
+
+                // Swap to playing block visual
+                if (blockType === BlockType.JUKEBOX) {
+                    s.addBlock(blockX, blockY, blockZ, BlockType.JUKEBOX_PLAYING);
+                }
+                return true;
+            } else if (blockType === BlockType.JUKEBOX_PLAYING) {
+                // Stop music
+                import('../audio/sounds').then(({ stopMusicDisc }) => {
+                    stopMusicDisc();
+                });
+                // Swap back to normal jukebox
+                s.addBlock(blockX, blockY, blockZ, BlockType.JUKEBOX);
+                return true;
+            }
+            return false;
+        }
         default:
             return false;
     }

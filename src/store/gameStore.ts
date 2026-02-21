@@ -374,7 +374,7 @@ const defaultSettings: GameSettings = {
     keybinds: { ...defaultKeybinds },
 };
 
-const emptyArmor = (): ArmorSlots => ({
+export const emptyArmor = (): ArmorSlots => ({
     helmet: { id: 0, count: 0 },
     chestplate: { id: 0, count: 0 },
     leggings: { id: 0, count: 0 },

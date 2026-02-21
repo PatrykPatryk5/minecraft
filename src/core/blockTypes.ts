@@ -299,17 +299,22 @@ export enum BlockType {
     MANGROVE_LEAVES = 537,
 
     // ─── Netherite Items ─────────────────────────────────
-    NETHERITE_SCRAP = 600,
-    NETHERITE_INGOT = 601,
-    NETHERITE_PICKAXE = 602,
-    NETHERITE_AXE = 603,
-    NETHERITE_SHOVEL = 604,
-    NETHERITE_SWORD = 605,
-    NETHERITE_HOE = 606,
-    NETHERITE_HELMET = 610,
-    NETHERITE_CHESTPLATE = 611,
-    NETHERITE_LEGGINGS = 612,
-    NETHERITE_BOOTS = 613,
+    NETHERITE_SCRAP = 439, // Changed ID
+    NETHERITE_INGOT = 440,
+    NETHERITE_PICKAXE = 441,
+    NETHERITE_AXE = 442,
+    NETHERITE_SHOVEL = 443,
+    NETHERITE_SWORD = 444,
+    NETHERITE_HOE = 445,
+    NETHERITE_HELMET = 446,
+    NETHERITE_CHESTPLATE = 447,
+    NETHERITE_LEGGINGS = 448,
+    NETHERITE_BOOTS = 449,
+    MUSIC_DISC_1 = 505,
+    MUSIC_DISC_2 = 506,
+    MUSIC_DISC_3 = 508,
+    MUSIC_DISC_4 = 509,
+    JUKEBOX_PLAYING = 507, // Changed ID
 
     // ─── Deep Dark & Lush ──────────────────────────────
     SCULK = 700,
@@ -367,6 +372,8 @@ export interface BlockInfo {
     readonly armorPoints?: number; // armor points provided
     readonly emissive?: boolean;   // emits light (visual glow)
     readonly maxDurability?: number; // amount of uses before tool breaks
+    readonly toolPower?: number; // tool power for breaking blocks
+    readonly isMusicDisc?: boolean; // if the item is a music disc
 }
 
 // ─── Block Data Map ──────────────────────────────────────
@@ -673,15 +680,20 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     // ─── Netherite Items ──────────────────────────────
     [BlockType.NETHERITE_SCRAP]: { name: 'Odłamek Netheritu', color: '#4d3b3b', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.NETHERITE_INGOT]: { name: 'Sztabka Netheritu', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true },
-    [BlockType.NETHERITE_PICKAXE]: { name: 'Netheritowy Kilof', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 2031 },
-    [BlockType.NETHERITE_AXE]: { name: 'Netheritowa Siekiera', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 2031 },
-    [BlockType.NETHERITE_SHOVEL]: { name: 'Netheritowa Łopata', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 2031 },
-    [BlockType.NETHERITE_SWORD]: { name: 'Netheritowy Miecz', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 2031 },
-    [BlockType.NETHERITE_HOE]: { name: 'Netheritowa Motyka', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 2031 },
+    [BlockType.NETHERITE_PICKAXE]: { name: 'Netheritowy Kilof', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, toolPower: 6, maxDurability: 2031 },
+    [BlockType.NETHERITE_AXE]: { name: 'Netheritowa Siekiera', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, toolPower: 6, maxDurability: 2031 },
+    [BlockType.NETHERITE_SHOVEL]: { name: 'Netheritowa Łopata', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, toolPower: 6, maxDurability: 2031 },
+    [BlockType.NETHERITE_SWORD]: { name: 'Netheritowy Miecz', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, toolPower: 6, maxDurability: 2031 },
+    [BlockType.NETHERITE_HOE]: { name: 'Netheritowa Motyka', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, toolPower: 6, maxDurability: 2031 },
     [BlockType.NETHERITE_HELMET]: { name: 'Netheritowy Hełm', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 3, maxDurability: 407 },
     [BlockType.NETHERITE_CHESTPLATE]: { name: 'Netheritowy Napierśnik', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 8, maxDurability: 592 },
     [BlockType.NETHERITE_LEGGINGS]: { name: 'Netheritowe Spodnie', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 6, maxDurability: 555 },
     [BlockType.NETHERITE_BOOTS]: { name: 'Netheritowe Buty', color: '#312e2e', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 3, maxDurability: 481 },
+    [BlockType.MUSIC_DISC_1]: { name: 'Płyta Muzyczna (Muzo)', color: '#1db954', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_2]: { name: 'Płyta Muzyczna (Retro)', color: '#ff5555', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_3]: { name: 'Płyta Muzyczna (Creepy)', color: '#60a5fa', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_4]: { name: 'Płyta Muzyczna (Chill)', color: '#fbbf24', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.JUKEBOX_PLAYING]: { name: 'Szafa grająca (gra)', color: '#4d3b3b', transparent: false, solid: true, breakTime: 0.8, tool: 'axe' },
 
     // ─── Deep Dark ──────────────────────────────────────
     [BlockType.SCULK]: { name: 'Szkulk', color: '#0b1d21', transparent: false, solid: true, breakTime: 0.6, tool: 'hoe' },

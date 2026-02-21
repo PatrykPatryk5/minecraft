@@ -20,6 +20,9 @@ let audioCtx: AudioContext | null = null;
 let masterGain: GainNode | null = null;
 let musicGain: GainNode | null = null;
 let ambienceGain: GainNode | null = null;
+let discGain: GainNode | null = null;
+let currentDiscSource: AudioBufferSourceNode | null = null;
+let currentDiscOscillators: OscillatorNode[] = [];
 
 // Environmental filters
 let environmentalFilter: BiquadFilterNode | null = null;
@@ -70,6 +73,10 @@ function getCtx(): AudioContext {
         ambienceGain = audioCtx.createGain();
         ambienceGain.gain.value = 0.2;
         ambienceGain.connect(audioCtx.destination);
+
+        discGain = audioCtx.createGain();
+        discGain.gain.value = 0.4;
+        discGain.connect(audioCtx.destination);
     }
     if (audioCtx.state === 'suspended') audioCtx.resume();
     return audioCtx;
@@ -794,4 +801,146 @@ export function startMusic(): void {
 export function stopMusic(): void {
     musicActive = false;
     if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+}
+
+// ─── Music Discs (Procedural Tracks) ─────────────────────
+export function stopMusicDisc(): void {
+    if (currentDiscSource) {
+        currentDiscSource.stop();
+        currentDiscSource = null;
+    }
+    currentDiscOscillators.forEach(osc => {
+        try { osc.stop(); } catch { /* ignore */ }
+    });
+    currentDiscOscillators = [];
+}
+
+export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill'): void {
+    stopMusicDisc();
+    const ctx = getCtx();
+    if (!discGain) return;
+    const gain = discGain; // Local variable for TS inference
+
+    if (track === 'muzo') {
+        // "Muzo" track: Happy bouncy pentatonic melody (Lengthened)
+        const tempo = 0.4;
+        const notes = [440, 493, 523, 587, 659, 739, 880]; // A4 B4 C5 D5 E5 F#5 A5
+        for (let i = 0; i < 128; i++) {
+            const time = ctx.currentTime + i * tempo;
+            const freq = notes[Math.floor(Math.random() * notes.length)];
+            const type = i % 8 === 0 ? 'triangle' : 'sine';
+            const osc = createTone(ctx, freq, 0.4, type as OscillatorType);
+            const env = ctx.createGain();
+            env.gain.setValueAtTime(0, time);
+            env.gain.linearRampToValueAtTime(0.08, time + 0.05);
+            env.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
+            osc.connect(env).connect(gain);
+            osc.start(time); osc.stop(time + 0.4);
+            currentDiscOscillators.push(osc);
+
+            // Bass support
+            if (i % 4 === 0) {
+                const bassOsc = createTone(ctx, freq / 2, 0.8, 'sine');
+                const bassEnv = ctx.createGain();
+                bassEnv.gain.setValueAtTime(0, time);
+                bassEnv.gain.linearRampToValueAtTime(0.05, time + 0.1);
+                bassEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.7);
+                bassOsc.connect(bassEnv).connect(gain);
+                bassOsc.start(time); bassOsc.stop(time + 0.8);
+                currentDiscOscillators.push(bassOsc);
+            }
+        }
+    } else if (track === 'retro') {
+        // "Retro" track: Deep bass + square wave lead (Lengthened)
+        const tempo = 0.5;
+        const bassNotes = [110, 130, 98, 87, 110, 146, 164, 123];
+        for (let i = 0; i < 80; i++) {
+            const time = ctx.currentTime + i * tempo;
+            const freq = bassNotes[Math.floor(i / 2) % bassNotes.length];
+            const osc = createTone(ctx, freq, 0.6, 'square');
+            const env = ctx.createGain();
+            env.gain.setValueAtTime(0, time);
+            env.gain.linearRampToValueAtTime(0.07, time + 0.1);
+            env.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
+            osc.connect(env).connect(gain);
+            osc.start(time); osc.stop(time + 0.6);
+            currentDiscOscillators.push(osc);
+
+            // Arpeggio lead
+            const arpNotes = [freq * 2, freq * 3, freq * 4, freq * 2.5];
+            const tOffset = (i % 4) * (tempo / 4);
+            const leadOsc = createTone(ctx, arpNotes[i % 4], 0.2, 'sawtooth');
+            const leadEnv = ctx.createGain();
+            leadEnv.gain.setValueAtTime(0, time + tOffset);
+            leadEnv.gain.linearRampToValueAtTime(0.02, time + tOffset + 0.05);
+            leadEnv.gain.exponentialRampToValueAtTime(0.001, time + tOffset + 0.15);
+            leadOsc.connect(leadEnv).connect(gain);
+            leadOsc.start(time + tOffset); leadOsc.stop(time + tOffset + 0.2);
+            currentDiscOscillators.push(leadOsc);
+        }
+    } else if (track === 'creepy') {
+        // "Creepy" track: Dark ambient / discordant (New)
+        const steps = 40;
+        for (let i = 0; i < steps; i++) {
+            const time = ctx.currentTime + i * 1.5;
+            const baseFreq = 50 + Math.random() * 100;
+            // Dissonant clusters
+            [1, 1.05, 1.414, 1.5].forEach(mult => {
+                const osc = createTone(ctx, baseFreq * mult, 2.5, 'sine');
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0, time);
+                env.gain.linearRampToValueAtTime(0.03, time + 1.0);
+                env.gain.exponentialRampToValueAtTime(0.001, time + 2.5);
+                osc.connect(env).connect(gain);
+                osc.start(time); osc.stop(time + 3.0);
+                currentDiscOscillators.push(osc);
+            });
+            // High pitch whistles
+            if (i % 3 === 0) {
+                const highOsc = createTone(ctx, 2000 + Math.random() * 3000, 1.0, 'sine');
+                const highEnv = ctx.createGain();
+                highEnv.gain.setValueAtTime(0, time + 0.5);
+                highEnv.gain.linearRampToValueAtTime(0.01, time + 0.8);
+                highEnv.gain.exponentialRampToValueAtTime(0.001, time + 1.5);
+                highOsc.connect(highEnv).connect(gain);
+                highOsc.start(time + 0.5); highOsc.stop(time + 2.0);
+                currentDiscOscillators.push(highOsc);
+            }
+        }
+    } else if (track === 'chill') {
+        // "Chill" track: Smooth synth pads (New)
+        const tempo = 2.0;
+        const chords = [
+            [261, 329, 392, 493], // Cmaj7
+            [349, 440, 523, 659], // Fmaj7
+            [293, 349, 440, 587], // Dmin7
+            [392, 493, 587, 783]  // G7
+        ];
+        for (let i = 0; i < 30; i++) {
+            const time = ctx.currentTime + i * tempo;
+            const chord = chords[i % chords.length];
+            chord.forEach(freq => {
+                const osc = createTone(ctx, freq, 2.5, 'triangle');
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0, time);
+                env.gain.linearRampToValueAtTime(0.04, time + 0.5);
+                env.gain.exponentialRampToValueAtTime(0.001, time + 2.0);
+                osc.connect(env).connect(gain);
+                osc.start(time); osc.stop(time + 3.0);
+                currentDiscOscillators.push(osc);
+            });
+            // Soft melody on top
+            if (i % 2 === 0) {
+                const melFreq = chord[Math.floor(Math.random() * chord.length)] * 2;
+                const melOsc = createTone(ctx, melFreq, 1.5, 'sine');
+                const melEnv = ctx.createGain();
+                melEnv.gain.setValueAtTime(0, time + 0.5);
+                melEnv.gain.linearRampToValueAtTime(0.03, time + 1.0);
+                melEnv.gain.exponentialRampToValueAtTime(0.001, time + 2.0);
+                melOsc.connect(melEnv).connect(gain);
+                melOsc.start(time + 0.5); melOsc.stop(time + 2.5);
+                currentDiscOscillators.push(melOsc);
+            }
+        }
+    }
 }

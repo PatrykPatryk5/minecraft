@@ -395,6 +395,12 @@ export const RECIPES: CraftingRecipe[] = [
     // ─── Food ───────────────────────────────────────────
     { type: 'shapeless', name: 'Zupa Grzybowa', result: B.MUSHROOM_STEW, count: 1, ingredients: [B.STICK, B.WHEAT] }, // Simplified stew (stick = bowl mockup)
     { type: 'shaped', name: 'Ciasto', result: B.CAKE, count: 1, ingredients: [[B.WOOL_WHITE, B.WOOL_WHITE, B.WOOL_WHITE], [B.SUGAR, B.WOOL_WHITE, B.SUGAR], [B.WHEAT, B.WHEAT, B.WHEAT]] }, // Simplified cake
+
+    // ─── Music Discs ────────────────────────────────────
+    { type: 'shapeless', name: 'Płyta Muzyczna (Muzo)', result: B.MUSIC_DISC_1, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_GREEN] },
+    { type: 'shapeless', name: 'Płyta Muzyczna (Retro)', result: B.MUSIC_DISC_2, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_RED] },
+    { type: 'shapeless', name: 'Płyta Muzyczna (Creepy)', result: B.MUSIC_DISC_3, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_BLUE] },
+    { type: 'shapeless', name: 'Płyta Muzyczna (Chill)', result: B.MUSIC_DISC_4, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_YELLOW] },
 ];
 
 // ══════════════════════════════════════════════════════════

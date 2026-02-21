@@ -7,7 +7,7 @@ import useGameStore from '../store/gameStore';
 import { BLOCK_DATA, PLACEABLE_BLOCKS, ITEM_BLOCKS } from '../core/blockTypes';
 import { getBlockIcon } from '../core/textures';
 import { matchRecipe } from '../core/crafting';
-import type { InventorySlot } from '../store/gameStore';
+import type { InventorySlot, ArmorSlots } from '../store/gameStore';
 import { playSound } from '../audio/sounds';
 
 const Inventory: React.FC = () => {
@@ -24,6 +24,9 @@ const Inventory: React.FC = () => {
 
     const cursorItem = useGameStore((s) => s.cursorItem);
     const setCursorItem = useGameStore((s) => s.setCursorItem);
+
+    const armor = useGameStore((s) => s.armor);
+    const setArmor = useGameStore((s) => s.setArmor);
 
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
     const [searchTerm, setSearchTerm] = useState('');
@@ -82,7 +85,7 @@ const Inventory: React.FC = () => {
         } else {
             s.setCursorItem(null);
         }
-        setInvCraftGrid(Array(4).fill({ id: 0, count: 0 }));
+        // setInvCraftGrid(Array(4).fill({ id: 0, count: 0 })); // REMOVED: Keep items in grid if closing? Actually vanilla Minecraft drops them.
         setOverlay('none');
         playSound('close');
         document.querySelector('canvas')?.requestPointerLock();
@@ -237,6 +240,28 @@ const Inventory: React.FC = () => {
         }
     };
 
+    const handleArmorSlotClick = (type: keyof ArmorSlots) => {
+        playSound('click');
+        const current = (armor as any)[type] as InventorySlot;
+        if (cursorItem) {
+            // Check if cursor item is valid for this slot
+            const info = BLOCK_DATA[cursorItem.id];
+            const isMatch = (type === 'helmet' && info?.name.toLowerCase().includes('hełm')) ||
+                (type === 'chestplate' && info?.name.toLowerCase().includes('napierśnik')) ||
+                (type === 'leggings' && info?.name.toLowerCase().includes('spodnie')) ||
+                (type === 'boots' && info?.name.toLowerCase().includes('buty'));
+
+            if (isMatch) {
+                const newArmor = { ...armor, [type]: cursorItem };
+                setArmor(newArmor);
+                setCursorItem(current.id ? current : null);
+            }
+        } else if (current.id) {
+            setCursorItem({ ...current });
+            setArmor({ ...armor, [type]: { id: 0, count: 0 } });
+        }
+    };
+
     const handlePaletteClick = (blockId: number) => {
         playSound('click');
         setCursorItem({ id: blockId, count: 64 });
@@ -293,38 +318,59 @@ const Inventory: React.FC = () => {
                     )}
                 </div>
 
-                {/* 2x2 Crafting Grid (top section) */}
-                <div className="inv-crafting-section">
-                    <div className="inv-section-label">Craftowanie (2×2)</div>
-                    <div className="inv-crafting-layout">
-                        <div className="inv-crafting-grid">
-                            {invCraftGrid.map((slot, i) => {
-                                const icon = slot.id ? getBlockIcon(slot.id) : null;
-                                return (
-                                    <div key={i} className={`craft-slot${slot.id ? ' filled' : ''}`}
-                                        onClick={() => handleCraftGridClick(i)}
-                                        title={slot.id ? BLOCK_DATA[slot.id]?.name : ''}>
-                                        {slot.id > 0 && icon && (
-                                            <>
-                                                <img src={icon} className="block-icon-3d" alt="" draggable={false} />
-                                                {slot.count > 1 && <span className="item-count">{slot.count}</span>}
-                                            </>
-                                        )}
-                                    </div>
-                                );
-                            })}
+                <div style={{ display: 'flex', gap: '20px' }}>
+                    {/* Armor Slots */}
+                    <div className="inv-armor-section">
+                        <div className="inv-section-label">Pancerz</div>
+                        <div className="inv-armor-grid">
+                            {(['helmet', 'chestplate', 'leggings', 'boots'] as const).map((type) => (
+                                <div key={type} className={`armor-slot ${type}`} onClick={() => handleArmorSlotClick(type)}>
+                                    {armor[type].id > 0 ? (
+                                        <>
+                                            <img src={getBlockIcon(armor[type].id)} className="block-icon-3d" alt="" draggable={false} />
+                                            {armor[type].count > 1 && <span className="item-count">{armor[type].count}</span>}
+                                        </>
+                                    ) : (
+                                        <div className={`armor-placeholder ${type}`} />
+                                    )}
+                                </div>
+                            ))}
                         </div>
-                        <div className="craft-arrow">→</div>
-                        <div className={`craft-result small${craftResult ? ' has-result' : ''}`}
-                            onClick={craftResult ? craftItem2x2 : undefined}>
-                            {craftResult ? (
-                                <>
-                                    <img src={getBlockIcon(craftResult.result)} className="block-icon-3d" alt="" draggable={false} />
-                                    {craftResult.count > 1 && <span className="result-count">×{craftResult.count}</span>}
-                                </>
-                            ) : (
-                                <span className="no-result">?</span>
-                            )}
+                    </div>
+
+                    {/* 2x2 Crafting Grid */}
+                    <div className="inv-crafting-section" style={{ flex: 1 }}>
+                        <div className="inv-section-label">Craftowanie (2×2)</div>
+                        <div className="inv-crafting-layout">
+                            <div className="inv-crafting-grid">
+                                {invCraftGrid.map((slot, i) => {
+                                    const icon = slot.id ? getBlockIcon(slot.id) : null;
+                                    return (
+                                        <div key={i} className={`craft-slot${slot.id ? ' filled' : ''}`}
+                                            onClick={() => handleCraftGridClick(i)}
+                                            title={slot.id ? BLOCK_DATA[slot.id]?.name : ''}>
+                                            {slot.id > 0 && icon && (
+                                                <>
+                                                    <img src={icon} className="block-icon-3d" alt="" draggable={false} />
+                                                    {slot.count > 1 && <span className="item-count">{slot.count}</span>}
+                                                </>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <div className="craft-arrow">→</div>
+                            <div className={`craft-result small${craftResult ? ' has-result' : ''}`}
+                                onClick={craftResult ? craftItem2x2 : undefined}>
+                                {craftResult ? (
+                                    <>
+                                        <img src={getBlockIcon(craftResult.result)} className="block-icon-3d" alt="" draggable={false} />
+                                        {craftResult.count > 1 && <span className="result-count">×{craftResult.count}</span>}
+                                    </>
+                                ) : (
+                                    <span className="no-result">?</span>
+                                )}
+                            </div>
                         </div>
                     </div>
 
