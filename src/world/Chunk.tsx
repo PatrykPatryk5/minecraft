@@ -225,18 +225,10 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                                 const ny = y + face.dir[1];
                                 const nz = lz + face.dir[2];
 
-                                let nbt_raw = 0;
-                                if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny >= 0 && ny < MAX_HEIGHT) {
-                                    nbt_raw = chunkData[blockIndex(nx, ny, nz)];
-                                } else if (ny >= 0 && ny < MAX_HEIGHT) {
-                                    let nc: ChunkData | undefined;
-                                    let nlx = nx, nlz = nz;
-                                    if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
-                                    else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
-                                    else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
-                                    else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                                    if (nc) nbt_raw = nc[blockIndex(nlx, ny, nlz)];
-                                }
+                                const nlx = lx + face.dir[0];
+                                const nny = y + face.dir[1];
+                                const nlz = lz + face.dir[2];
+                                const nbt_raw = padded[(nlx + 1) * PH * PD + (nny + 1) * PD + (nlz + 1)];
                                 const nbt = nbt_raw & 0x0FFF;
 
                                 let liquidHeight = 1.0;
@@ -248,18 +240,8 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                                     if ((up_raw & 0x0FFF) !== bt) liquidHeight = 0.88;
 
                                     if (nbt === bt) {
-                                        let n_up_raw = 0;
-                                        if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
-                                            n_up_raw = chunkData[blockIndex(nx, ny + 1, nz)];
-                                        } else if (ny + 1 >= 0 && ny + 1 < MAX_HEIGHT) {
-                                            let nc: ChunkData | undefined;
-                                            let nlx = nx, nlz = nz;
-                                            if (nx < 0) { nc = nNx; nlx = CHUNK_SIZE - 1; }
-                                            else if (nx >= CHUNK_SIZE) { nc = nPx; nlx = 0; }
-                                            else if (nz < 0) { nc = nNz; nlz = CHUNK_SIZE - 1; }
-                                            else if (nz >= CHUNK_SIZE) { nc = nPz; nlz = 0; }
-                                            if (nc) n_up_raw = nc[blockIndex(nlx, ny + 1, nlz)];
-                                        }
+                                        const nny_up = nny + 1;
+                                        const n_up_raw = padded[(nlx + 1) * PH * PD + (nny_up + 1) * PD + (nlz + 1)];
                                         if ((n_up_raw & 0x0FFF) !== nbt) neighborLiquidHeight = 0.88;
                                     }
                                 }
@@ -467,10 +449,12 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                             transformed.y += wave;
                         }
 
-                        // Minecraft-like directional shading
+                        // Minecraft-like directional shading + Top Highlight
                         vShade = 1.0;
-                        if (abs(normal.y) > 0.5) {
-                           vShade = normal.y > 0.0 ? 1.0 : 0.5; // Top/Bottom
+                        if (normal.y > 0.5) {
+                           vShade = 1.05; // Slightly brighter top
+                        } else if (normal.y < -0.5) {
+                           vShade = 0.5; // Darker bottom
                         } else if (abs(normal.z) > 0.5) {
                            vShade = 0.8; // North/South
                         } else if (abs(normal.x) > 0.5) {
@@ -492,6 +476,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                         `
                          #include <color_fragment>
                          diffuseColor.rgb *= vShade;
+                         diffuseColor.rgb = pow(diffuseColor.rgb, vec3(1.05)); // Subtle contrast punch
                          `
                     );
                 }}
@@ -547,12 +532,14 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
 
                                 // Minecraft-like directional shading for water
                                 vShade = 1.0;
-                                if (abs(normal.y) > 0.5) {
-                                   vShade = normal.y > 0.0 ? 1.0 : 0.5;
-                                } else if (abs(normal.z) > 0.5) {
-                                   vShade = 0.8;
-                                } else if (abs(normal.x) > 0.5) {
+                                if (normal.y > 0.5) {
+                                   vShade = 1.0;
+                                } else if (normal.y < -0.5) {
                                    vShade = 0.6;
+                                } else if (abs(normal.z) > 0.5) {
+                                   vShade = 0.85;
+                                } else if (abs(normal.x) > 0.5) {
+                                   vShade = 0.75;
                                 }
                                 `
                             );
@@ -570,6 +557,8 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                                 `
                                 #include <color_fragment>
                                 diffuseColor.rgb *= vShade;
+                                // Add a subtle water-like shimmer
+                                diffuseColor.rgb += vec3(0.02, 0.04, 0.08) * vShade;
                                 `
                             );
                         }}

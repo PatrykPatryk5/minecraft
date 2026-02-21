@@ -231,7 +231,7 @@ const SettingsScreen: React.FC = () => {
         <div className="menu-content">
             <div className="screen-title">⚙ Ustawienia</div>
 
-            <div className="settings-grid">
+            <div className="settings-grid" style={{ padding: '4px' }}>
                 <div className="setting-item">
                     <label>Zasięg renderowania: <strong>{settings.renderDistance}</strong> chunków {settings.renderDistance > 12 && <span style={{ color: '#fa0', fontSize: '0.8em' }}>(Zalecane do 12)</span>}</label>
                     <input type="range" min={2} max={32} value={settings.renderDistance} onChange={(e) => updateSettings({ renderDistance: +e.target.value })} className="mc-slider" />

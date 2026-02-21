@@ -1,10 +1,11 @@
-import React, { useMemo, useRef, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RigidBody, RapierRigidBody } from '@react-three/rapier';
 import * as THREE from 'three';
 import useGameStore from '../store/gameStore';
 import { getAtlasTexture, getAtlasUV } from '../core/textures';
 import { BlockType } from '../core/blockTypes';
+import { explodeAt } from '../core/blockActions';
 
 const TNTPrimedNode: React.FC<{ id: string; initialPos: [number, number, number]; fuse: number }> = ({ id, initialPos, fuse }) => {
     const rbRef = useRef<RapierRigidBody>(null);
@@ -37,7 +38,6 @@ const TNTPrimedNode: React.FC<{ id: string; initialPos: [number, number, number]
         if (exploded.current) return;
 
         // Tick fuse (Minecraft is 20tps, but we tick every frame approx)
-        // Adjust fuse based on delta time
         const ticks = delta * 20;
         const nextFuse = Math.max(0, currentFuse - ticks);
 
@@ -45,12 +45,10 @@ const TNTPrimedNode: React.FC<{ id: string; initialPos: [number, number, number]
             exploded.current = true;
             const pos = rbRef.current?.translation() || { x: initialPos[0], y: initialPos[1], z: initialPos[2] };
 
-            // Trigger explosion logic
-            import('../core/blockActions').then(({ explodeAt }) => {
-                explodeAt(Math.round(pos.x), Math.round(pos.y), Math.round(pos.z));
-            });
+            // Trigger explosion logic IMMEDIATELY
+            explodeAt(Math.round(pos.x), Math.round(pos.y), Math.round(pos.z));
 
-            // Remove entity
+            // Remove entity from store
             useGameStore.getState().removeTNT(id);
             return;
         }
@@ -61,8 +59,9 @@ const TNTPrimedNode: React.FC<{ id: string; initialPos: [number, number, number]
         if (meshRef.current) {
             // Flash white every 10 ticks
             const flash = Math.floor(nextFuse / 5) % 2 === 0;
-            (meshRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity = flash ? 0.5 : 0;
-            (meshRef.current.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(flash ? '#fff' : '#000');
+            const mat = meshRef.current.material as THREE.MeshStandardMaterial;
+            mat.emissiveIntensity = flash ? 0.5 : 0;
+            mat.emissive.set(flash ? '#fff' : '#000');
 
             // Swelling effect before explosion
             if (nextFuse < 20) {

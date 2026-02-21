@@ -24,12 +24,13 @@ import { checkChunkBorders } from '../core/waterSystem';
 import { tickWorld } from '../core/worldTick';
 
 const UNLOAD_BUFFER = 3;
-const BATCH_PER_FRAME = 2; // Increased to 2 for better throughput with FOV prioritization
+const BATCH_PER_FRAME = 3; // Increased for faster throughput
 const RECALCULATE_COOLDOWN = 600;
 
 // LOD thresholds (in chunk distance²)
-const LOD_FULL = 5 * 5;
-const LOD_MEDIUM = 8 * 8;
+// LOD thresholds (in chunk distance²) - increased for better far-distance accuracy
+const LOD_FULL = 8 * 8;
+const LOD_MEDIUM = 12 * 12;
 
 interface ChunkEntry {
     cx: number;
@@ -71,7 +72,7 @@ const World: React.FC = () => {
 
         const pool = new WorkerPool(
             new URL('../core/generation.worker.ts', import.meta.url),
-            4, 16
+            6, 24 // Increased workers for faster terrain generation
         );
 
         const ok = pool.init(worldSeed);
@@ -101,9 +102,17 @@ const World: React.FC = () => {
         if (chunkDim !== useGameStore.getState().dimension) return;
 
         const key = id || chunkKey(cx, cz);
+        const s = useGameStore.getState();
 
-        useGameStore.getState().setChunkData(cx, cz, chunkDim, result.data);
-        useGameStore.getState().bumpVersion(cx, cz);
+        s.setChunkData(cx, cz, chunkDim, result.data);
+        s.bumpVersion(cx, cz);
+
+        // Bump neighbors so they rebuild with new edge data (fixes cracks/AO)
+        s.bumpVersion(cx + 1, cz);
+        s.bumpVersion(cx - 1, cz);
+        s.bumpVersion(cx, cz + 1);
+        s.bumpVersion(cx, cz - 1);
+
         checkChunkBorders(cx, cz);
         loadedKeysRef.current.add(key);
         pendingKeysRef.current.delete(key);

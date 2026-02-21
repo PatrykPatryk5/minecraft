@@ -191,7 +191,7 @@ const DayNightCycle: React.FC = () => {
                 shadow-normalBias={0.02}
                 shadow-mapSize={[shadowMapSize, shadowMapSize]}
             >
-                <orthographicCamera attach="shadow-camera" args={[-64, 64, 64, -64, 1, 350]} />
+                <orthographicCamera attach="shadow-camera" args={[-160, 160, 160, -160, 1, 500]} />
             </directionalLight>
             <hemisphereLight ref={hemiRef} args={['#aaccff', '#443322', 0.2]} />
         </>

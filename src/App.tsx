@@ -156,7 +156,7 @@ const App: React.FC = () => {
                         alpha: false,
                         failIfMajorPerformanceCaveat: false,
                     }}
-                    shadows={useShadows ? { type: THREE.PCFSoftShadowMap } : false}
+                    shadows={useShadows ? { type: THREE.PCFShadowMap } : false}
                     dpr={graphics === 'fabulous' ? [1, Math.min(window.devicePixelRatio, 2)] : [1, 1]}
                     style={{ width: '100%', height: '100%' }}
                     onContextMenu={(e) => e.preventDefault()}

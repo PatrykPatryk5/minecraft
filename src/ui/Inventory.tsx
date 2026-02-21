@@ -40,6 +40,8 @@ const Inventory: React.FC = () => {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.code !== 'KeyE' || screen !== 'playing') return;
+            if (document.activeElement?.tagName === 'INPUT') return;
+
             const s = useGameStore.getState();
             if (s.isChatOpen) return;
             if (s.activeOverlay === 'none') {
@@ -191,7 +193,23 @@ const Inventory: React.FC = () => {
     };
 
 
-    if (activeOverlay !== 'inventory') return null;
+    const allItems = useMemo(() => [...PLACEABLE_BLOCKS, ...ITEM_BLOCKS], []);
+    const filteredAllItems = useMemo(() => {
+        if (!searchTerm) return allItems;
+        const low = searchTerm.toLowerCase();
+        return allItems.filter(id => BLOCK_DATA[id]?.name.toLowerCase().includes(low));
+    }, [allItems, searchTerm]);
+
+    // This helper must be called after all hooks
+    const availableItems = useMemo(() => {
+        if (gameMode === 'creative') return filteredAllItems;
+        // Survival items available in the mini-palette
+        const ids = new Set<number>();
+        for (const sl of [...hotbar, ...inventory]) {
+            if (sl.id) ids.add(sl.id);
+        }
+        return Array.from(ids);
+    }, [gameMode, filteredAllItems, hotbar, inventory]);
 
     const handleSlotClick = (source: 'hotbar' | 'inv', index: number) => {
         playSound('click');
@@ -252,20 +270,11 @@ const Inventory: React.FC = () => {
         );
     };
 
-    const allItems = [...PLACEABLE_BLOCKS, ...ITEM_BLOCKS];
-    const filteredAllItems = useMemo(() => {
-        if (!searchTerm) return allItems;
-        const low = searchTerm.toLowerCase();
-        return allItems.filter(id => BLOCK_DATA[id]?.name.toLowerCase().includes(low));
-    }, [allItems, searchTerm]);
-
-    const availableItems = gameMode === 'creative' ? filteredAllItems : getPlayerItems();
-
     const close = () => {
         closeInv();
     };
 
-
+    if (activeOverlay !== 'inventory') return null;
 
     return (
         <div className="inventory-overlay" onClick={close}>

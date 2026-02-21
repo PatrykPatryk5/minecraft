@@ -20,8 +20,9 @@ const EXPLOSION_DAMAGE = 12;
 export function igniteTNT(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
     // Remove the TNT block immediately and spawn entity
-    s.removeBlock(x, y, z);
+    // Spawn entity first so it renders in the same frame the block disappears
     s.spawnTNT([x + 0.5, y + 0.5, z + 0.5], 80); // 80 ticks = 4 seconds
+    s.removeBlock(x, y, z);
     playSound('fuse');
 }
 
