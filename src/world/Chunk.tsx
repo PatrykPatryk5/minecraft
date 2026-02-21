@@ -144,12 +144,12 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
     if (!meshData) return null;
 
     const renderSolidMesh = () => (
-        <mesh geometry={meshData.solidGeo!} frustumCulled castShadow={useShadows && lod <= 1} receiveShadow={useShadows}>
+        <mesh geometry={meshData.solidGeo!} frustumCulled={lod > 1} castShadow={useShadows && lod <= 1} receiveShadow={useShadows}>
             <meshStandardMaterial
                 map={meshData.atlas}
                 vertexColors
                 alphaTest={0.5}
-                alphaToCoverage={true}
+                alphaToCoverage={false}
                 transparent={false}
                 roughness={0.9}
                 metalness={0.05}
@@ -234,7 +234,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                 ) : renderSolidMesh()
             )}
             {meshData.waterGeo && (
-                <mesh geometry={meshData.waterGeo} frustumCulled renderOrder={1} receiveShadow={useShadows}>
+                <mesh geometry={meshData.waterGeo} frustumCulled={lod > 1} renderOrder={1} receiveShadow={useShadows}>
                     <meshStandardMaterial
                         map={meshData.atlas}
                         vertexColors

@@ -25,7 +25,7 @@ import { tickWorld } from '../core/worldTick';
 
 const UNLOAD_BUFFER = 3;
 const BATCH_PER_FRAME = 3; // Increased for faster throughput
-const RECALCULATE_COOLDOWN = 600;
+const RECALCULATE_COOLDOWN = 300;
 const WORLD_TICK_INTERVAL_MS = 50;
 const FURNACE_TICK_INTERVAL_MS = 50;
 
@@ -163,6 +163,11 @@ const World: React.FC = () => {
             pool.submit(cx, cz, dim, (result) => {
                 if (!result) {
                     pendingKeysRef.current.delete(key);
+                    const known = loadQueueRef.current.some((e) => e.key === key);
+                    if (!known) {
+                        const active = activeChunksRef.current.find((e) => e.key === key);
+                        if (active) loadQueueRef.current.unshift(active);
+                    }
                     return;
                 }
                 onChunkReady(result);
@@ -296,6 +301,15 @@ const World: React.FC = () => {
             const entry = loadQueueRef.current.shift()!;
             requestChunk(entry.cx, entry.cz);
             sent++;
+        }
+
+        // Retry safety: if a visible chunk is neither loaded nor pending, queue it again.
+        for (let i = 0; i < activeChunksRef.current.length && sent < BATCH_PER_FRAME; i++) {
+            const c = activeChunksRef.current[i];
+            if (!loadedKeysRef.current.has(c.key) && !pendingKeysRef.current.has(c.key)) {
+                requestChunk(c.cx, c.cz);
+                sent++;
+            }
         }
 
         // Check if player moved to new chunk

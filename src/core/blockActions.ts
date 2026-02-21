@@ -15,10 +15,13 @@ import { MAX_HEIGHT } from './terrainGen';
 // ─── TNT Explosion ──────────────────────────────────────
 const EXPLOSION_RADIUS = 4;
 const EXPLOSION_DAMAGE = 12;
+const MAX_BREAK_PARTICLES = 320;
+const EXPLOSION_REMOVE_BATCH = 256;
 
 /** Ignite TNT at position — creates delayed explosion */
 export function igniteTNT(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
+    if (s.primedTNT.length > 300) return;
     // Remove the TNT block immediately and spawn entity
     // Spawn entity first so it renders in the same frame the block disappears
     s.spawnTNT([x + 0.5, y + 0.5, z + 0.5], 80); // 80 ticks = 4 seconds
@@ -55,18 +58,27 @@ export function explodeAt(x: number, y: number, z: number): void {
                 if (type === BlockType.TNT) {
                     s.removeBlock(bx, by, bz);
                     // Spawn primed TNT with short random fuse for chaining effect
-                    s.spawnTNT([bx + 0.5, by + 0.5, bz + 0.5], Math.random() * 10 + 5);
+                    if (s.primedTNT.length < 400) {
+                        s.spawnTNT([bx + 0.5, by + 0.5, bz + 0.5], 5 + Math.floor(Math.random() * 10));
+                    }
                     continue;
                 }
 
                 destroyed.push([bx, by, bz]);
-                emitBlockBreak(bx, by, bz, type);
+                if (destroyed.length <= MAX_BREAK_PARTICLES) emitBlockBreak(bx, by, bz, type);
             }
         }
     }
 
     // Batch remove blocks
-    s.removeBlocks(destroyed);
+    if (destroyed.length > EXPLOSION_REMOVE_BATCH) {
+        for (let i = 0; i < destroyed.length; i += EXPLOSION_REMOVE_BATCH) {
+            const batch = destroyed.slice(i, i + EXPLOSION_REMOVE_BATCH);
+            setTimeout(() => useGameStore.getState().removeBlocks(batch), 0);
+        }
+    } else {
+        s.removeBlocks(destroyed);
+    }
 
     // Damage player if near
     const playerPos = s.playerPos;

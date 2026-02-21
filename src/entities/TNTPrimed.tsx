@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RigidBody, RapierRigidBody } from '@react-three/rapier';
 import * as THREE from 'three';
@@ -11,12 +11,11 @@ const TNTPrimedNode: React.FC<{ id: string; initialPos: [number, number, number]
     const rbRef = useRef<RapierRigidBody>(null);
     const meshRef = useRef<THREE.Mesh>(null);
     const atlas = getAtlasTexture();
-    const [currentFuse, setCurrentFuse] = useState(fuse);
+    const fuseRef = useRef(fuse);
     const exploded = useRef(false);
 
-    // Geometry with TNT textures
     const geometry = useMemo(() => {
-        const geo = new THREE.BoxGeometry(0.98, 0.98, 0.98); // Slightly smaller to avoid clipping
+        const geo = new THREE.BoxGeometry(0.98, 0.98, 0.98);
         const uvs = geo.attributes.uv;
         const array = uvs.array as Float32Array;
         const faces: ('right' | 'left' | 'top' | 'bottom' | 'front' | 'back')[] = ['right', 'left', 'top', 'bottom', 'front', 'back'];
@@ -34,39 +33,31 @@ const TNTPrimedNode: React.FC<{ id: string; initialPos: [number, number, number]
         return geo;
     }, []);
 
-    useFrame((state, delta) => {
+    useFrame((_, delta) => {
         if (exploded.current) return;
 
-        // Tick fuse (Minecraft is 20tps, but we tick every frame approx)
-        const ticks = delta * 20;
-        const nextFuse = Math.max(0, currentFuse - ticks);
+        fuseRef.current = Math.max(0, fuseRef.current - delta * 20);
+        const remaining = fuseRef.current;
 
-        if (nextFuse <= 0) {
+        if (remaining <= 0) {
             exploded.current = true;
             const pos = rbRef.current?.translation() || { x: initialPos[0], y: initialPos[1], z: initialPos[2] };
-
-            // Remove entity from store FIRST so mesh disappears immediately
             useGameStore.getState().removeTNT(id);
-
-            // Trigger explosion logic
             explodeAt(Math.round(pos.x), Math.round(pos.y), Math.round(pos.z));
             return;
         }
 
-        setCurrentFuse(nextFuse);
-
-        // Flashing effect
         if (meshRef.current) {
-            // Flash white every 10 ticks
-            const flash = Math.floor(nextFuse / 5) % 2 === 0;
+            const flash = Math.floor(remaining / 5) % 2 === 0;
             const mat = meshRef.current.material as THREE.MeshStandardMaterial;
             mat.emissiveIntensity = flash ? 0.5 : 0;
             mat.emissive.set(flash ? '#fff' : '#000');
 
-            // Swelling effect before explosion
-            if (nextFuse < 20) {
-                const s = 1.0 + (1.0 - nextFuse / 20) * 0.2;
+            if (remaining < 20) {
+                const s = 1.0 + (1.0 - remaining / 20) * 0.2;
                 meshRef.current.scale.set(s, s, s);
+            } else {
+                meshRef.current.scale.set(1, 1, 1);
             }
         }
     });

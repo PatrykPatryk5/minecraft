@@ -616,6 +616,12 @@ const useGameStore = create<GameState>((set, get) => ({
     removeBlocks: (blocks: [number, number, number][], fromNetwork = false) => {
         const s = get();
         const affectedChunks = new Set<string>();
+        const redstoneTargets: [number, number, number][] = [];
+        const bumpCounts = new Map<string, number>();
+        const queueBump = (cx: number, cz: number) => {
+            const k = chunkKey(cx, cz);
+            bumpCounts.set(k, (bumpCounts.get(k) ?? 0) + 1);
+        };
 
         for (const [x, y, z] of blocks) {
             if (y < 0 || y > 255) continue;
@@ -631,11 +637,7 @@ const useGameStore = create<GameState>((set, get) => ({
 
             chunk[idx] = 0;
             affectedChunks.add(key);
-
-            // Trigger Redstone update
-            import('../core/redstoneSystem').then(({ updateRedstone }) => {
-                updateRedstone(x, y, z);
-            });
+            if (redstoneTargets.length < 256) redstoneTargets.push([x, y, z]);
         }
 
         // Save and bump versions once per chunk
@@ -644,18 +646,37 @@ const useGameStore = create<GameState>((set, get) => ({
             const parts = key.split(',');
             const cx = parseInt(parts[0]), cz = parseInt(parts[1]);
             saveChunk(`${s.dimension}:${cx},${cz}`, chunk);
-            s.bumpVersion(cx, cz);
-            // neighbors
-            s.bumpVersion(cx + 1, cz);
-            s.bumpVersion(cx - 1, cz);
-            s.bumpVersion(cx, cz + 1);
-            s.bumpVersion(cx, cz - 1);
+            queueBump(cx, cz);
+            queueBump(cx + 1, cz);
+            queueBump(cx - 1, cz);
+            queueBump(cx, cz + 1);
+            queueBump(cx, cz - 1);
+        }
+
+        if (bumpCounts.size > 0) {
+            set((state) => {
+                const chunkVersions = { ...state.chunkVersions };
+                for (const [key, delta] of bumpCounts) {
+                    chunkVersions[key] = (chunkVersions[key] ?? 0) + delta;
+                }
+                return { chunkVersions };
+            });
+        }
+
+        // Redstone can be very expensive during massive TNT chains.
+        if (redstoneTargets.length > 0) {
+            import('../core/redstoneSystem').then(({ updateRedstone }) => {
+                for (const [x, y, z] of redstoneTargets) {
+                    updateRedstone(x, y, z);
+                }
+            });
         }
 
         // Broadcast if local multiplayer
         if (!fromNetwork && s.isMultiplayer && blocks.length > 0) {
             import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
-                for (const [x, y, z] of blocks) {
+                const netBatch = blocks.length > 512 ? blocks.slice(0, 512) : blocks;
+                for (const [x, y, z] of netBatch) {
                     getConnection().sendBlockBreak(x, y, z);
                 }
             });

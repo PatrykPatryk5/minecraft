@@ -1,14 +1,3 @@
-/**
- * Day/Night Cycle (Enhanced for PBR)
- *
- * Improved lighting for MeshStandardMaterial:
- *   - Stronger directional light with color temperature
- *   - Ambient light varies with time
- *   - Fog color matches sky
- *   - Sun/Moon with smooth transitions
- *   - 20 minute real-time cycle (matching MC)
- */
-
 import React, { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Sky, Stars } from '@react-three/drei';
@@ -19,6 +8,11 @@ const CYCLE_SECONDS = 20 * 60;
 
 function lerp(a: number, b: number, t: number): number {
     return a + (b - a) * t;
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
 }
 
 function lerpColor(a: THREE.Color, b: THREE.Color, t: number): THREE.Color {
@@ -32,28 +26,25 @@ const DayNightCycle: React.FC = () => {
     const brightnessMultiplier = 0.7 + brightness * 1.5;
     const useShadows = graphics !== 'fast';
     const shadowMapSize = graphics === 'fabulous' ? 4096 : 2048;
+
     const dirLightRef = useRef<THREE.DirectionalLight>(null);
     const ambLightRef = useRef<THREE.AmbientLight>(null);
     const hemiRef = useRef<THREE.HemisphereLight>(null);
     const shadowFrustumRef = useRef(0);
     const { scene } = useThree();
 
-    // Internal time state to avoid 60FPS React renders
     const timeRef = useRef(useGameStore.getState().dayTime);
     const lastStoreUpdate = useRef(0);
     const [uiTime, setUiTime] = React.useState(timeRef.current);
 
-    // Color palette
     const sunColors = useMemo(() => ({
         day: new THREE.Color('#fff5e0'),
         dawn: new THREE.Color('#ff9944'),
-        dusk: new THREE.Color('#ff6633'),
-        night: new THREE.Color('#223366'),
         moonlight: new THREE.Color('#8899bb'),
     }), []);
 
     const skyColors = useMemo(() => ({
-        day: new THREE.Color('#356296'), // Darker, less blinding sky blue
+        day: new THREE.Color('#356296'),
         dawn: new THREE.Color('#884422'),
         night: new THREE.Color('#080812'),
         storm: new THREE.Color('#444a55'),
@@ -63,34 +54,33 @@ const DayNightCycle: React.FC = () => {
     const weatherIntensity = useGameStore((s) => s.weatherIntensity);
 
     useFrame((_, delta) => {
-        // Prevent massive time jumps on lag spikes
         const safeDelta = Math.min(delta, 0.1);
         timeRef.current = (timeRef.current + safeDelta / CYCLE_SECONDS) % 1;
         const t = timeRef.current;
 
         lastStoreUpdate.current += safeDelta;
-        if (lastStoreUpdate.current > 1.0) {
+        if (lastStoreUpdate.current > 0.1) {
             lastStoreUpdate.current = 0;
             useGameStore.getState().setDayTime(t);
             setUiTime(t);
         }
 
-        // Calculate sun progress: 0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk
         const angle = t * Math.PI * 2;
         const sunX = Math.cos(angle) * 150;
         const sunY = Math.sin(angle) * 150;
         const sunZ = Math.sin(angle + Math.PI * 0.5) * 150;
-        const isNight = t > 0.75 || t < 0.25;
-        const isDawn = t > 0.2 && t < 0.35;
-        const isDusk = t > 0.65 && t < 0.8;
 
-        // Sun height factor (0 = horizon, 1 = zenith)
-        const sunFactor = Math.max(0, Math.sin(angle));
+        const sunHeight = Math.sin(angle);
+        const daylight = smoothstep(-0.1, 0.12, sunHeight);
+        const isNight = daylight < 0.08;
+        const dawnFactor = Math.max(0, 1 - Math.abs(t - 0.25) / 0.12);
+        const duskFactor = Math.max(0, 1 - Math.abs(t - 0.75) / 0.12);
+        const twilight = Math.max(dawnFactor, duskFactor);
 
-        // ─── Directional Light ───────────────────────────
         if (dirLightRef.current) {
             const playerPos = useGameStore.getState().playerPos;
             const px = playerPos[0];
+            const py = playerPos[1];
             const pz = playerPos[2];
 
             const shadowFrustum = Math.min(220, Math.max(96, renderDist * 14));
@@ -98,9 +88,10 @@ const DayNightCycle: React.FC = () => {
             const snappedX = Math.round((px + sunX) / shadowTexel) * shadowTexel;
             const snappedZ = Math.round((pz + sunZ) / shadowTexel) * shadowTexel;
 
-            dirLightRef.current.position.set(snappedX, Math.max(12, sunY), snappedZ);
-            dirLightRef.current.target.position.set(px, 0, pz);
+            dirLightRef.current.position.set(snappedX, Math.max(py + 12, py + sunY), snappedZ);
+            dirLightRef.current.target.position.set(px, py - 10, pz);
             dirLightRef.current.target.updateMatrixWorld();
+            dirLightRef.current.castShadow = useShadows && daylight > 0.08;
 
             if (useShadows) {
                 const shadow = dirLightRef.current.shadow;
@@ -122,51 +113,25 @@ const DayNightCycle: React.FC = () => {
                 }
             }
 
-            let color: THREE.Color;
-            let intensity: number;
-
-            if (isNight) {
-                color = sunColors.moonlight;
-                intensity = 0.03;
-            } else if (isDawn) {
-                const p = (t - 0.2) / 0.15;
-                color = lerpColor(sunColors.night, sunColors.dawn, p);
-                intensity = lerp(0.08, 0.45, p);
-            } else if (isDusk) {
-                const p = (t - 0.65) / 0.15;
-                color = lerpColor(sunColors.dusk, sunColors.night, p);
-                intensity = lerp(0.45, 0.08, p);
-            } else {
-                color = sunColors.day;
-                intensity = 0.55 + sunFactor * 0.45;
-            }
-
-            dirLightRef.current.color.copy(color);
-            // Darken world during rain
+            const baseColor = lerpColor(sunColors.moonlight, sunColors.day, daylight);
+            const warmTint = lerpColor(baseColor, sunColors.dawn, twilight * 0.45);
+            dirLightRef.current.color.copy(warmTint);
             const weatherFactor = 1.0 - (weatherIntensity * 0.35);
-            dirLightRef.current.intensity = intensity * weatherFactor * brightnessMultiplier;
+            const sunIntensity = lerp(0.03, 1.0, daylight) + twilight * 0.08;
+            dirLightRef.current.intensity = sunIntensity * weatherFactor * brightnessMultiplier;
         }
 
-        // ─── Ambient Light ───────────────────────────────
         if (ambLightRef.current) {
-            ambLightRef.current.intensity = (isNight ? 0.08 : lerp(0.16, 0.28, sunFactor)) * brightnessMultiplier;
-            ambLightRef.current.color.copy(isNight ? skyColors.night : skyColors.day);
+            ambLightRef.current.intensity = lerp(0.08, 0.3, daylight) * brightnessMultiplier;
+            ambLightRef.current.color.copy(lerpColor(skyColors.night, skyColors.day, daylight));
         }
 
-        // ─── Hemisphere Light ────────────────────────────
         if (hemiRef.current) {
-            if (isNight) {
-                hemiRef.current.color.set('#0a0a2a');
-                hemiRef.current.groundColor.set('#221111');
-                hemiRef.current.intensity = 0.015 * brightnessMultiplier;
-            } else {
-                hemiRef.current.color.copy(isDawn ? skyColors.dawn : skyColors.day);
-                hemiRef.current.groundColor.set('#553322');
-                hemiRef.current.intensity = (0.03 + sunFactor * 0.07) * brightnessMultiplier;
-            }
+            hemiRef.current.color.copy(lerpColor(skyColors.night, skyColors.day, daylight));
+            hemiRef.current.groundColor.set('#553322');
+            hemiRef.current.intensity = lerp(0.015, 0.11, daylight) * brightnessMultiplier;
         }
 
-        // ─── Fog Color Sync ──────────────────────────────
         const isUnderwater = useGameStore.getState().isUnderwater;
         if (scene.fog && scene.fog instanceof THREE.Fog) {
             if (isUnderwater) {
@@ -174,10 +139,8 @@ const DayNightCycle: React.FC = () => {
                 scene.fog.near = 1;
                 scene.fog.far = 25;
             } else {
-                let fogColor = isNight ? skyColors.night :
-                    isDawn ? lerpColor(skyColors.night, skyColors.dawn, ((t - 0.2) / 0.15)) :
-                        isDusk ? lerpColor(skyColors.day, skyColors.night, ((t - 0.65) / 0.15)) :
-                            skyColors.day;
+                let fogColor = lerpColor(skyColors.night, skyColors.day, daylight);
+                fogColor = lerpColor(fogColor, skyColors.dawn, twilight * 0.4);
 
                 if (weather !== 'clear') {
                     fogColor = lerpColor(fogColor, skyColors.storm, weatherIntensity);
@@ -185,10 +148,14 @@ const DayNightCycle: React.FC = () => {
                 scene.fog.color.copy(fogColor);
 
                 const maxFog = renderDist * 16;
-                // Reduce fog density (push near closer to far)
-                scene.fog.near = isNight ? maxFog * 0.4 : maxFog * 0.8;
+                scene.fog.near = lerp(maxFog * 0.45, maxFog * 0.82, daylight);
                 scene.fog.far = maxFog;
             }
+        }
+
+        // Keep UI stars transition smooth enough without per-frame React re-renders.
+        if (isNight && uiTime >= 0.25 && uiTime <= 0.75) {
+            setUiTime(t);
         }
     });
 
@@ -196,7 +163,8 @@ const DayNightCycle: React.FC = () => {
     const sunX = Math.cos(angle) * 150;
     const sunY = Math.sin(angle) * 150;
     const sunZ = Math.sin(angle + Math.PI * 0.5) * 150;
-    const isNightUi = uiTime > 0.75 || uiTime < 0.25;
+    const daylightUi = smoothstep(-0.1, 0.12, Math.sin(angle));
+    const isNightUi = daylightUi < 0.08;
     const initialShadowFrustum = Math.min(220, Math.max(96, renderDist * 14));
 
     return (

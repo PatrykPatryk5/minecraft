@@ -63,6 +63,7 @@ const WATER_FRICTION = 4;
 const COYOTE_TIME = 0.12;
 const JUMP_BUFFER_TIME = 0.12;
 const JUMP_RELEASE_MULT = 0.45;
+const PLACE_REPEAT_INTERVAL = 0.15;
 const FALL_DAMAGE_THRESHOLD = 3;
 const SPRINT_HUNGER_RATE = 0.15; // hunger/sec while sprinting
 const LAVA_DAMAGE_RATE = 4; // hp/sec in lava
@@ -102,6 +103,9 @@ const Player: React.FC = () => {
     const jumpBufferTimer = useRef(0);
     const jumpHeldLast = useRef(false);
     const crouchVisualOffset = useRef(0);
+    const leftMouseHeld = useRef(false);
+    const rightMouseHeld = useRef(false);
+    const rightRepeatTimer = useRef(0);
 
     const storeRef = useRef(useGameStore.getState());
     useEffect(() => {
@@ -203,8 +207,11 @@ const Player: React.FC = () => {
 
             const selected = s.getSelectedBlock();
             const hit = raycastBlock();
+            if (e.button === 0) leftMouseHeld.current = true;
+            if (e.button === 2) rightMouseHeld.current = true;
 
             if (e.button === 0) {
+                miningHeld.current = true;
                 // ── Break Block or Attack Mob ──
                 const dir = camera.getWorldDirection(new THREE.Vector3());
                 let damage = 2; // Base fist damage
@@ -420,10 +427,13 @@ const Player: React.FC = () => {
 
         const onMouseUp = (e: MouseEvent) => {
             if (e.button === 0) {
+                leftMouseHeld.current = false;
                 miningHeld.current = false;
                 miningTarget.current = null;
                 miningProgress.current = 0;
             } else if (e.button === 2) {
+                rightMouseHeld.current = false;
+                rightRepeatTimer.current = 0;
                 if (isChargingBow.current) {
                     const s = storeRef.current;
                     const power = Math.min(1.0, bowCharge.current);
@@ -545,6 +555,62 @@ const Player: React.FC = () => {
             const inWater = feetInWater || bodyInWater;
             const isSneaking = k.ControlLeft && !inWater && !isFlying.current;
             const isSprinting = k.ShiftLeft && !k.ControlLeft && !inWater && !isFlying.current;
+
+            if (rightMouseHeld.current && !isChargingBow.current && mode !== 'spectator') {
+                rightRepeatTimer.current += dt;
+                if (rightRepeatTimer.current >= PLACE_REPEAT_INTERVAL) {
+                    rightRepeatTimer.current = 0;
+
+                    const held = s.getSelectedBlock();
+                    if (held && held !== BlockType.BOW) {
+                        const repeatHit = raycastBlock();
+                        if (repeatHit) {
+                            const [bx2, by2, bz2] = repeatHit.block;
+                            const clickedType = s.getBlock(bx2, by2, bz2);
+                            const [px, py, pz] = repeatHit.place;
+
+                            const blocksUi = clickedType === BlockType.CRAFTING || clickedType === BlockType.FURNACE || clickedType === BlockType.FURNACE_ON || clickedType === BlockType.CHEST;
+                            if (!blocksUi && py >= 0 && py <= MAX_HEIGHT - 1) {
+                                if ([105, 115, 125, 135, 145].includes(held)) {
+                                    if (tillBlock(bx2, by2, bz2)) {
+                                        s.damageTool(s.hotbarSlot);
+                                        bumpAround(bx2, bz2);
+                                        playSound('gravel');
+                                    }
+                                } else if (held === BlockType.SEEDS) {
+                                    if (plantSeed(px, py, pz)) {
+                                        s.consumeHotbarItem(s.hotbarSlot);
+                                        bumpAround(px, pz);
+                                        playSound('place', [px, py, pz]);
+                                    }
+                                } else if (held === BlockType.BONE_MEAL) {
+                                    if (applyBoneMeal(bx2, by2, bz2)) {
+                                        s.consumeHotbarItem(s.hotbarSlot);
+                                        bumpAround(bx2, bz2);
+                                        playSound('pop');
+                                    }
+                                } else if (!BLOCK_DATA[held]?.isItem && held !== BlockType.BED && held !== BlockType.PISTON && held !== BlockType.PISTON_STICKY) {
+                                    const feet = Math.floor(p.y - PLAYER_HEIGHT);
+                                    const head = Math.floor(p.y);
+                                    const plX = Math.floor(p.x);
+                                    const plZ = Math.floor(p.z);
+                                    if (!(px === plX && pz === plZ && py >= feet && py <= head)) {
+                                        s.addBlock(px, py, pz, held);
+                                        s.consumeHotbarItem(s.hotbarSlot);
+                                        bumpAround(px, pz);
+                                        playSound('place', [px, py, pz]);
+                                        if (held === BlockType.WATER) spreadWater(px, py, pz);
+                                        if (held === BlockType.LAVA) spreadLava(px, py, pz);
+                                        checkGravityBlock(px, py, pz);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                rightRepeatTimer.current = 0;
+            }
 
             // ─── Spectator ───────────────────────────────────
             if (mode === 'spectator') {
@@ -897,6 +963,44 @@ const Player: React.FC = () => {
             }
 
             // ─── Hold-to-Mine Progress ───────────────────────
+            if (miningHeld.current && !miningTarget.current) {
+                const hitNew = raycastBlock();
+                if (hitNew) {
+                    const [tbx, tby, tbz] = hitNew.block;
+                    const tType = s.getBlock(tbx, tby, tbz);
+                    if (tType && tType !== BlockType.BEDROCK) {
+                        if (mode === 'creative') {
+                            emitBlockBreak(tbx, tby, tbz, tType);
+                            playSound('break', [tbx, tby, tbz]);
+                            s.removeBlock(tbx, tby, tbz);
+                            bumpAround(tbx, tbz);
+                            checkWaterFill(tbx, tby, tbz);
+                            checkLavaFill(tbx, tby, tbz);
+                            processGravity(tbx, tby, tbz);
+                        } else {
+                            const tData = BLOCK_DATA[tType];
+                            if (tData && tData.breakTime > 0) {
+                                miningTarget.current = `${tbx},${tby},${tbz}`;
+                                miningProgress.current = 0;
+                            } else {
+                                emitBlockBreak(tbx, tby, tbz, tType);
+                                playSound('break', [tbx, tby, tbz]);
+                                s.removeBlock(tbx, tby, tbz);
+                                bumpAround(tbx, tbz);
+                                checkWaterFill(tbx, tby, tbz);
+                                checkLavaFill(tbx, tby, tbz);
+                                processGravity(tbx, tby, tbz);
+                                const drop = getBlockDrop(tType);
+                                if (drop && drop !== BlockType.AIR) {
+                                    s.addDroppedItem(drop, [tbx + 0.5, tby + 0.5, tbz + 0.5]);
+                                    playSound('pop');
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if (miningHeld.current && miningTarget.current && mode === 'survival') {
                 const hitNow = raycastBlock();
                 if (hitNow) {
@@ -962,7 +1066,6 @@ const Player: React.FC = () => {
 
                                 miningTarget.current = null;
                                 miningProgress.current = 0;
-                                miningHeld.current = false;
                                 s.setMiningProgress(0);
                             }
                         }
@@ -1119,4 +1222,3 @@ const Player: React.FC = () => {
 };
 
 export default Player;
-
