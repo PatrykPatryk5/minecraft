@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
 import useGameStore from '../store/gameStore';
+import { getConnection } from '../multiplayer/ConnectionManager';
 
 interface PlayerModelProps {
     id: string;
@@ -53,10 +54,13 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
             if (posBuffer.current.length > 20) posBuffer.current.shift();
         }
 
-        // --- Render Logic (Jitter Buffer) ---
-        const renderTime = now - BUFFER_TIME;
-        let interpPos = new THREE.Vector3(...playerState.pos);
-        let interpRot = playerState.rot || [0, 0];
+        // --- Render Logic (Estimated Server Time) ---
+        const conn = getConnection();
+        const serverTime = now + conn.getClockOffset();
+        const renderTime = serverTime - BUFFER_TIME;
+
+        let targetPos = new THREE.Vector3(...playerState.pos);
+        let targetRot = playerState.rot || [0, 0];
 
         if (posBuffer.current.length >= 2) {
             // Find two points to interpolate between
@@ -70,39 +74,39 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
 
             if (p1.ts <= renderTime && p2.ts >= renderTime) {
                 const alpha = (renderTime - p1.ts) / (p2.ts - p1.ts);
-                interpPos.set(
+                targetPos.set(
                     p1.pos[0] + (p2.pos[0] - p1.pos[0]) * alpha,
                     p1.pos[1] + (p2.pos[1] - p1.pos[1]) * alpha,
                     p1.pos[2] + (p2.pos[2] - p1.pos[2]) * alpha
                 );
-                // Adjust for pivot
-                interpPos.y -= 1.5;
 
-                // Rotation lerp
-                const r1 = p1.rot;
-                const r2 = p2.rot;
-                interpRot = [
-                    r1[0] + (r2[0] - r1[0]) * alpha,
-                    r1[1] + (r2[1] - r1[1]) * alpha
+                // Rotation lerp with proper angle wrapping
+                const wrapAngle = (a: number, b: number, t: number) => {
+                    let diff = b - a;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    return a + diff * t;
+                };
+
+                targetRot = [
+                    wrapAngle(p1.rot[0], p2.rot[0], alpha),
+                    wrapAngle(p1.rot[1], p2.rot[1], alpha)
                 ];
-            } else {
-                // Not enough data for the current render window? 
-                const [tx, ty, tz] = playerState.pos;
-                interpPos.set(tx, ty - 1.5, tz);
             }
-        } else {
-            const [tx, ty, tz] = playerState.pos;
-            interpPos.set(tx, ty - 1.5, tz);
         }
 
-        const targetPos = interpPos;
-        const [ryw, rxp] = interpRot;
+        // Final position adjustment (Steve's pivot is at 1.5 height)
+        targetPos.y -= 1.5;
 
-        // If we are extremely far (teleport), snap
+        const [ryw, rxp] = targetRot;
+
+        // Snapping and Smoothness
+        // If we are extremely far (teleport), snap instantly
         if (currentPos.current.distanceTo(targetPos) > 10) {
             currentPos.current.copy(targetPos);
         } else {
-            currentPos.current.lerp(targetPos, 0.4);
+            // No redundant smoothing here, we want accurate interpolation
+            currentPos.current.copy(targetPos);
         }
 
         // Handle walk animation based on distance moved THIS frame

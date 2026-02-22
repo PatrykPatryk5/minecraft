@@ -65,6 +65,8 @@ export class ConnectionManager {
     private pingInterval: any = null;
     private actionCounter: number = 0;
     private lastActionReset: number = Date.now();
+    private clockOffset: number = 0;
+    private ping: number = 0;
 
     constructor() {
         this.fetchConfig();
@@ -222,7 +224,6 @@ export class ConnectionManager {
     }
 
     private lastSyncTime: number = 0;
-    private ping: number = 0;
 
     /** Connect to a Host */
     async joinGame(hostId: string, playerName: string, password: string = ''): Promise<void> {
@@ -643,8 +644,25 @@ export class ConnectionManager {
         this.sendToHost({ type: 'ping', payload: { ts: Date.now() } });
     }
 
+    sendInventoryUpdate(payload: any): void {
+        this.sendToHost({ type: 'inventory_update', payload });
+    }
+
+    sendEntitySync(type: 'item' | 'arrow' | 'tnt', id: string, pos: [number, number, number], vel?: [number, number, number], data?: any): void {
+        this.sendToHost({ type: 'entity_sync', payload: { type, id, pos, vel, data } });
+    }
+
+    sendWorldSync(payload: { time?: number, weather?: string, weatherIntensity?: number }): void {
+        if (this.role !== 'host') return;
+        this.broadcast({ type: 'world_sync', payload });
+    }
+
     getPing(): number {
         return this.ping;
+    }
+
+    getClockOffset(): number {
+        return this.clockOffset;
     }
 
     // ── CLIENT Receive Logic ────────────────────────────────
@@ -756,8 +774,69 @@ export class ConnectionManager {
                 break;
             }
 
+            case 'block_place':
+            case 'block_break': {
+                if (this.role === 'host' && senderId) {
+                    const { x, y, z } = packet.payload;
+                    const blockType = packet.type === 'block_place' ? (packet.payload as any).blockType : 0;
+
+                    console.log(`[MP] Client ${senderId} ${packet.type}: ${x}, ${y}, ${z} (${blockType})`);
+
+                    if (blockType === 0) store.removeBlock(x, y, z, true);
+                    else store.addBlock(x, y, z, blockType, true);
+
+                    const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
+                    store.bumpVersion(cx, cz);
+
+                    // Broadcast to all other clients
+                    this.broadcast({
+                        type: 'block_update',
+                        payload: { x, y, z, blockType }
+                    }, senderId);
+                }
+                break;
+            }
+
+            case 'chat': {
+                if (this.role === 'host' && senderId) {
+                    const { text } = packet.payload;
+                    const p = store.connectedPlayers[senderId];
+                    const senderName = p ? p.name : 'Unknown';
+
+                    store.addChatMessage(senderName, text, 'player');
+                    this.broadcast({
+                        type: 'chat_broadcast',
+                        payload: { sender: senderName, text }
+                    }, senderId);
+                }
+                break;
+            }
+
+            case 'action': {
+                if (this.role === 'host' && senderId) {
+                    const { actionType } = (packet.payload as any);
+                    this.broadcast({
+                        type: 'player_action',
+                        payload: { id: senderId, actionType }
+                    }, senderId);
+                }
+                break;
+            }
+
             case 'entity_sync': {
                 if (this.role === 'host') this.broadcast(packet as any, senderId);
+
+                const { type, id, pos, vel, data } = packet.payload;
+                if (type === 'item') {
+                    // Check if already exists
+                    if (!store.droppedItems.find(i => i.id === id)) {
+                        store.addDroppedItem(data, pos, vel || [0, 0, 0], id);
+                    }
+                } else if (type === 'tnt') {
+                    if (!store.primedTNT.find(t => t.id === id)) {
+                        store.spawnTNT(pos, data || 80, true);
+                    }
+                }
                 break;
             }
 
@@ -803,6 +882,17 @@ export class ConnectionManager {
                     // This is our main ping to host/dedicated server
                     this.ping = rtt;
                     store.setPing(rtt);
+
+                    // Clock Offset Estimation (NTP-lite)
+                    if (packet.ts) {
+                        const estimatedServerTimeAtReceive = packet.ts + rtt / 2;
+                        const newOffset = estimatedServerTimeAtReceive - Date.now();
+                        // Average over time for stability (start with 100% on first ping)
+                        if (this.clockOffset === 0) this.clockOffset = newOffset;
+                        else this.clockOffset = this.clockOffset * 0.9 + newOffset * 0.1;
+
+                        console.log(`[MP] RTT: ${rtt}ms, Clock Offset: ${Math.round(this.clockOffset)}ms`);
+                    }
                 } else {
                     // This is a ping from a client if we are host
                     this.lastLatency.set(senderId, rtt);
@@ -829,12 +919,20 @@ export class ConnectionManager {
 
             case 'world_event': {
                 const { event, x, y, z, data } = packet.payload;
+
+                // If we are host, broadcast to everyone else
+                if (this.role === 'host' && senderId) {
+                    this.broadcast(packet as any, senderId);
+                }
+
                 if (event === 'block_break') {
                     import('../audio/sounds').then(({ playSound }) => playSound('break', [x, y, z]));
                     import('../core/particles').then(({ emitBlockBreak }) => emitBlockBreak(x, y, z, data || 0));
                 } else if (event === 'explosion') {
                     import('../audio/sounds').then(({ playSound }) => playSound('explode', [x, y, z]));
                     import('../core/particles').then(({ emitExplosion }) => emitExplosion(x, y, z));
+                } else if (event === 'skip_night') {
+                    store.skipNight(true);
                 }
                 break;
             }
@@ -906,6 +1004,13 @@ export class ConnectionManager {
 
             case 'inventory_update': {
                 if (this.role === 'host') this.broadcast(packet, senderId);
+
+                const { type, key, data } = packet.payload;
+                if (type === 'chest') {
+                    store.setChest(key, data, true);
+                } else if (type === 'furnace') {
+                    store.setFurnace(data, true);
+                }
                 break;
             }
 

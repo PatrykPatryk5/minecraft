@@ -7,9 +7,9 @@
 
 // ─── Constants ───────────────────────────────────────────
 
-export const PROTOCOL_VERSION = 11; // Standard 1.1 - Added dimension/underwater flags to binary
+export const PROTOCOL_VERSION = 12; // Standard 1.2 - Int16 rotation precision
 export const TICK_RATE = 20;
-export const POSITION_SYNC_INTERVAL = 50;
+export const POSITION_SYNC_INTERVAL = 33; // 30Hz for ultra-smooth movement
 export const MAX_CHAT_LENGTH = 256;
 export const MAX_PLAYERS = 20;
 export const DEFAULT_PORT = 3001;
@@ -117,28 +117,28 @@ export interface PlayerInfo {
 // [5-22] PAYLOAD
 
 export function encodeMoveBinary(pos: [number, number, number], rot: [number, number], health: number, dimension: string = 'overworld', isUnderwater: boolean = false): ArrayBuffer {
-    const buffer = new ArrayBuffer(21);
+    const buffer = new ArrayBuffer(23);
     const view = new DataView(buffer);
     view.setUint8(0, 0x01); // Client -> Host: Move
     view.setUint32(1, Date.now() % 0xFFFFFFFF);
     view.setFloat32(5, pos[0]);
     view.setFloat32(9, pos[1]);
     view.setFloat32(13, pos[2]);
-    view.setInt8(17, Math.round(rot[0] * 127 / Math.PI));
-    view.setInt8(18, Math.round(rot[1] * 127 / Math.PI));
-    view.setUint8(19, health || 20);
+    view.setInt16(17, Math.round(rot[0] * 32767 / Math.PI));
+    view.setInt16(19, Math.round(rot[1] * 32767 / Math.PI));
+    view.setUint8(21, health || 20);
 
     // Flags: bit 0 = underwater, bits 1-2 = dimension
     let dimIdx = 0;
     if (dimension === 'nether') dimIdx = 1;
     if (dimension === 'end') dimIdx = 2;
     const flags = (isUnderwater ? 1 : 0) | (dimIdx << 1);
-    view.setUint8(20, flags);
+    view.setUint8(22, flags);
     return buffer;
 }
 
 export function encodePlayerMoveBinary(nid: number, pos: [number, number, number], rot: [number, number], health: number, latency?: number, dimension: string = 'overworld', isUnderwater: boolean = false): ArrayBuffer {
-    const buffer = new ArrayBuffer(24);
+    const buffer = new ArrayBuffer(26);
     const view = new DataView(buffer);
     view.setUint8(0, 0x02); // Host -> Client: PlayerMove
     view.setUint32(1, Date.now() % 0xFFFFFFFF);
@@ -146,16 +146,16 @@ export function encodePlayerMoveBinary(nid: number, pos: [number, number, number
     view.setFloat32(7, pos[0]);
     view.setFloat32(11, pos[1]);
     view.setFloat32(15, pos[2]);
-    view.setInt8(19, Math.round((rot ? rot[0] : 0) * 127 / Math.PI));
-    view.setInt8(20, Math.round((rot ? rot[1] : 0) * 127 / Math.PI));
-    view.setUint8(21, health || 20);
-    view.setUint8(22, Math.min(255, latency || 0));
+    view.setInt16(19, Math.round((rot ? rot[0] : 0) * 32767 / Math.PI));
+    view.setInt16(21, Math.round((rot ? rot[1] : 0) * 32767 / Math.PI));
+    view.setUint8(23, health || 20);
+    view.setUint8(24, Math.min(255, latency || 0));
 
     let dimIdx = 0;
     if (dimension === 'nether') dimIdx = 1;
     if (dimension === 'end') dimIdx = 2;
     const flags = (isUnderwater ? 1 : 0) | (dimIdx << 1);
-    view.setUint8(23, flags);
+    view.setUint8(25, flags);
     return buffer;
 }
 
@@ -188,7 +188,7 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer): T | 
         }
 
         if (type === 0x01) { // Client -> Host: Move
-            const flags = view.getUint8(20);
+            const flags = view.getUint8(22);
             const dimIdx = (flags >> 1) & 0x03;
             const dimension = dimIdx === 1 ? 'nether' : (dimIdx === 2 ? 'end' : 'overworld');
             return {
@@ -196,8 +196,8 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer): T | 
                 ts: view.getUint32(1),
                 payload: {
                     pos: [view.getFloat32(5), view.getFloat32(9), view.getFloat32(13)],
-                    rot: [view.getInt8(17) * Math.PI / 127, view.getInt8(18) * Math.PI / 127],
-                    health: view.getUint8(19),
+                    rot: [view.getInt16(17) * Math.PI / 32767, view.getInt16(19) * Math.PI / 32767],
+                    health: view.getUint8(21),
                     dimension,
                     isUnderwater: (flags & 1) === 1
                 }
@@ -206,7 +206,7 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer): T | 
 
         if (type === 0x02) { // Host -> Client: PlayerMove
             const nid = view.getUint16(5);
-            const flags = view.getUint8(23);
+            const flags = view.getUint8(25);
             const dimIdx = (flags >> 1) & 0x03;
             const dimension = dimIdx === 1 ? 'nether' : (dimIdx === 2 ? 'end' : 'overworld');
             return {
@@ -215,9 +215,9 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer): T | 
                 payload: {
                     nid,
                     pos: [view.getFloat32(7), view.getFloat32(11), view.getFloat32(15)],
-                    rot: [view.getInt8(19) * Math.PI / 127, view.getInt8(20) * Math.PI / 127],
-                    health: view.getUint8(21),
-                    latency: view.getUint8(22),
+                    rot: [view.getInt16(19) * Math.PI / 32767, view.getInt16(21) * Math.PI / 32767],
+                    health: view.getUint8(23),
+                    latency: view.getUint8(24),
                     dimension,
                     isUnderwater: (flags & 1) === 1
                 }

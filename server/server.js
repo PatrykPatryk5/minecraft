@@ -322,7 +322,7 @@ wss.on('connection', (ws) => {
                 break;
 
             case 'ping':
-                ws.send(encodePacket({ type: 'pong', payload: { ts: packet.payload.ts } }));
+                ws.send(encodePacket({ type: 'pong', ts: Date.now(), payload: { ts: packet.payload.ts } }));
                 break;
 
             case 'pong':
@@ -347,6 +347,7 @@ wss.on('connection', (ws) => {
 
 function broadcast(packet, excludeId = null) {
     packet.seq = outSeq++;
+    packet.ts = Date.now();
     const encoded = encodePacket(packet);
     for (const [id, player] of players.entries()) {
         if (id !== excludeId && player.ws.readyState === 1) {

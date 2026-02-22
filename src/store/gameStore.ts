@@ -153,7 +153,7 @@ export interface GameState {
     removeArrow: (id: string) => void;
 
     primedTNT: TNTPrimedEntity[];
-    spawnTNT: (pos: [number, number, number], fuse?: number) => void;
+    spawnTNT: (pos: [number, number, number], fuse?: number, fromNetwork?: boolean) => void;
     removeTNT: (id: string) => void;
     updateTNT: (id: string, fuse: number) => void;
 
@@ -236,7 +236,7 @@ export interface GameState {
 
     // ── Furnace ───────────────────────────────────────────
     furnace: FurnaceState;
-    setFurnace: (f: FurnaceState) => void;
+    setFurnace: (f: FurnaceState, fromNetwork?: boolean) => void;
     tickFurnace: () => void;
 
     // ── Food / Eat ────────────────────────────────────────
@@ -251,7 +251,7 @@ export interface GameState {
     // ── Day/Night ─────────────────────────────────────────
     dayTime: number;
     setDayTime: (t: number) => void;
-    skipNight: () => void;
+    skipNight: (fromNetwork?: boolean) => void;
 
     // ── Mobs ──────────────────────────────────────────────
     mobs: any[];
@@ -319,7 +319,7 @@ export interface GameState {
 
     // ── Dropped Items ──────────────────────────────────────
     droppedItems: DroppedItem[];
-    addDroppedItem: (type: number, pos: [number, number, number], velocity?: [number, number, number]) => void;
+    addDroppedItem: (type: number, pos: [number, number, number], velocity?: [number, number, number], networkId?: string) => void;
     removeDroppedItem: (id: string) => void;
 
     // ── Falling/Gravity Blocks ─────────────────────────────
@@ -330,7 +330,7 @@ export interface GameState {
     // ── Chests ─────────────────────────────────────────────
     chests: Record<string, ChestData>;
     getChest: (key: string) => ChestData | null;
-    setChest: (key: string, data: ChestData) => void;
+    setChest: (key: string, data: ChestData, fromNetwork?: boolean) => void;
 
     // ── Pistons ────────────────────────────────────────────
     pistons: Record<string, PistonData>;
@@ -1016,7 +1016,14 @@ const useGameStore = create<GameState>((set, get) => ({
         cookProgress: 0,
         cookTimeTotal: 200,
     },
-    setFurnace: (f) => set({ furnace: f }),
+    setFurnace: (f: FurnaceState, fromNetwork: boolean = false) => {
+        set({ furnace: f });
+        if (!fromNetwork && get().isMultiplayer) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                getConnection().sendInventoryUpdate({ type: 'furnace', data: f });
+            });
+        }
+    },
     tickFurnace: () => {
         const s = get();
         const f = s.furnace;
@@ -1100,7 +1107,21 @@ const useGameStore = create<GameState>((set, get) => ({
     // ── Day/Night ─────────────────────────────────────────
     dayTime: 0.3,
     setDayTime: (t) => set({ dayTime: t }),
-    skipNight: () => set({ dayTime: 0.3 }),
+    skipNight: (fromNetwork: boolean = false) => {
+        set({ dayTime: 0.3 });
+        if (!fromNetwork && get().isMultiplayer) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                const conn = getConnection();
+                if (conn.getRole() === 'host') {
+                    conn.sendWorldSync({ time: 0.3 });
+                } else {
+                    conn.sendChat('/skipnight'); // Use command or new packet? 
+                    // Let's use a specialized world_event for better sync
+                    conn.sendWorldEvent('skip_night', 0, 0, 0);
+                }
+            });
+        }
+    },
 
     // ── Mobs ──────────────────────────────────────────────
     mobs: [],
@@ -1202,17 +1223,29 @@ const useGameStore = create<GameState>((set, get) => ({
     // ── Chests ─────────────────────────────────────────────
     chests: {},
     getChest: (key) => get().chests[key] || null,
-    setChest: (key, data) => set((s) => ({
-        chests: { ...s.chests, [key]: data },
-    })),
+    setChest: (key: string, data: ChestData, fromNetwork: boolean = false) => {
+        set((s) => ({
+            chests: { ...s.chests, [key]: data },
+        }));
+        if (!fromNetwork && get().isMultiplayer) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                getConnection().sendInventoryUpdate({ type: 'chest', key, data });
+            });
+        }
+    },
 
     // ── Dropped Items ──────────────────────────────────────
     droppedItems: [],
-    addDroppedItem: (type, pos, velocity) => {
-        const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `item-${Math.random().toString(36).substring(2, 10)}`;
+    addDroppedItem: (type: number, pos: [number, number, number], velocity: [number, number, number] = [0, 0, 0], networkId?: string) => {
+        const id = networkId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `item-${Math.random().toString(36).substring(2, 10)}`);
         set((s) => ({
             droppedItems: [...s.droppedItems, { id, type, pos, velocity }]
         }));
+        if (!networkId && get().isMultiplayer) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                getConnection().sendEntitySync('item', id, pos, velocity, type);
+            });
+        }
     },
     removeDroppedItem: (id) => set((s) => ({
         droppedItems: s.droppedItems.filter(i => i.id !== id)
@@ -1230,9 +1263,17 @@ const useGameStore = create<GameState>((set, get) => ({
     },
 
     primedTNT: [],
-    spawnTNT: (pos, fuse = 80) => set((s) => ({
-        primedTNT: [...s.primedTNT, { id: Math.random().toString(36).substr(2, 9), pos, fuse }]
-    })),
+    spawnTNT: (pos: [number, number, number], fuse: number = 80, fromNetwork: boolean = false) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        set((s) => ({
+            primedTNT: [...s.primedTNT, { id, pos, fuse }]
+        }));
+        if (!fromNetwork && get().isMultiplayer) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                getConnection().sendEntitySync('tnt', id, pos, undefined, fuse);
+            });
+        }
+    },
     removeTNT: (id) => set((s) => ({
         primedTNT: s.primedTNT.filter(t => t.id !== id)
     })),
