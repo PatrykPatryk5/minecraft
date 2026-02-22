@@ -15,6 +15,7 @@ import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import useGameStore from '../store/gameStore';
+import { updateMobs } from './MobSystem';
 
 interface MobModel {
     head: { size: [number, number, number]; color: string; yOff: number };
@@ -102,6 +103,12 @@ const MobRenderer: React.FC = () => {
     const limbPhases = useRef<Map<string, number>>(new Map());
 
     useFrame((_, delta) => {
+        const s = useGameStore.getState();
+        if (s.isPaused || s.screen !== 'playing') return;
+
+        // Run simulation / spawning / AI
+        updateMobs(delta);
+
         if (!groupRef.current) return;
         const children = groupRef.current.children;
 

@@ -64,7 +64,7 @@ const GRAVITY = -28;
 
 let nextMobId = 1;
 let lastSpawnCheck = 0;
-const SPAWN_INTERVAL = 1000; // Check every 1s (Minecraft is 400ms but 1s is safer for perf)
+const SPAWN_INTERVAL = 1000; // Check every 400ms (standard MC is 400ms)
 
 // ─── Core Functions ─────────────────────────────────────
 
@@ -100,15 +100,17 @@ export function updateMobs(delta: number): void {
     if (now - lastSpawnCheck > SPAWN_INTERVAL && mobs.length < MAX_MOBS) {
         lastSpawnCheck = now;
 
-        // Pack spawning: try to spawn 1-4 mobs in a flock
-        const packSize = 1 + Math.floor(Math.random() * 4);
-        for (let p = 0; p < packSize; p++) {
-            if (mobs.length >= MAX_MOBS) break;
-            const newMob = trySpawnMob(playerPos, s.dayTime);
-            if (newMob) {
-                mobs.push(newMob);
-                changed = true;
-                // Offset subsequent pack members slightly
+        // Multiple pack attempts per check
+        for (let attempt = 0; attempt < 2; attempt++) {
+            // Pack spawning: try to spawn 2-6 mobs in a flock
+            const packSize = 2 + Math.floor(Math.random() * 5);
+            for (let p = 0; p < packSize; p++) {
+                if (mobs.length >= MAX_MOBS) break;
+                const newMob = trySpawnMob(playerPos, s.dayTime);
+                if (newMob) {
+                    mobs.push(newMob);
+                    changed = true;
+                }
             }
         }
     }
@@ -394,35 +396,38 @@ function trySpawnMob(playerPos: [number, number, number], dayTime: number): Mob 
     const y = getGroundLevel(x, z, s);
     if (y < 1) return null;
 
+    const cx = Math.floor(x / 16);
+    const cz = Math.floor(z / 16);
+    if (!s.chunks[`${cx},${cz}`]) return null; // Avoid spawning in unloaded chunks
+
     const groundBlock = s.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
 
     // Choose mob type based on time/luck
-    let type: MobType;
+    let type: MobType = 'pig'; // Default
 
     if (isEnd) {
         type = 'enderman';
     } else if (isNether) {
         type = 'blaze';
     } else if (isNight) {
-        const r = Math.random();
-        if (r < 0.3) type = 'zombie';
-        else if (r < 0.5) type = 'skeleton';
-        else if (r < 0.65) type = 'creeper';
-        else if (r < 0.8) type = 'spider';
-        else if (r < 0.9) type = 'wolf';
+        const rNight = Math.random();
+        if (rNight < 0.3) type = 'zombie';
+        else if (rNight < 0.5) type = 'skeleton';
+        else if (rNight < 0.65) type = 'creeper';
+        else if (rNight < 0.8) type = 'spider';
+        else if (rNight < 0.9) type = 'wolf';
         else type = 'enderman';
     } else {
         // Day spawning - ANIMALS ONLY
         // Requirement: Must spawn on Grass
         if (groundBlock !== BlockType.GRASS) return null;
 
-        const r = Math.random();
-        if (r < 0.25) type = 'pig';
-        else if (r < 0.50) type = 'cow';
-        else if (r < 0.70) type = 'sheep';
-        else if (r < 0.85) type = 'chicken';
-        else if (r < 0.95) type = 'wolf';
-        else return null; // No day monsters
+        const rDay = Math.random();
+        if (rDay < 0.25) type = 'pig';
+        else if (rDay < 0.50) type = 'cow';
+        else if (rDay < 0.70) type = 'sheep';
+        else if (rDay < 0.85) type = 'chicken';
+        else type = 'wolf';
     }
 
     return spawnMob(type, x, y + 1, z);
@@ -459,7 +464,9 @@ function getGroundLevel(x: number, z: number, s: ReturnType<typeof useGameStore.
         const block = s.getBlock(bx, y, bz);
         if (block && block !== BlockType.AIR && block !== BlockType.WATER &&
             block !== BlockType.TALL_GRASS && block !== BlockType.FLOWER_RED &&
-            block !== BlockType.FLOWER_YELLOW) {
+            block !== BlockType.FLOWER_YELLOW && block !== BlockType.LEAVES &&
+            block !== BlockType.OAK_LOG && block !== BlockType.SPRUCE &&
+            block !== BlockType.BIRCH_LOG && block !== BlockType.GLASS) {
             foundY = y;
             break;
         }

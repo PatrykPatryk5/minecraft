@@ -160,6 +160,7 @@ export interface GameState {
     setChunkData: (cx: number, cz: number, dimension: string, data: Uint16Array) => void;
     getBlock: (x: number, y: number, z: number) => number;
     addBlock: (x: number, y: number, z: number, typeId: number, fromNetwork?: boolean) => void;
+    addBlocks: (blocks: { x: number, y: number, z: number, typeId: number }[], fromNetwork?: boolean) => void;
     removeBlock: (x: number, y: number, z: number, fromNetwork?: boolean) => void;
     removeBlocks: (blocks: [number, number, number][], fromNetwork?: boolean) => void;
     bumpVersion: (cx: number, cz: number) => void;
@@ -414,11 +415,27 @@ const useGameStore = create<GameState>((set, get) => ({
     setChunkData: (cx, cz, dimension, data) => {
         if (dimension !== get().dimension) return;
         const key = chunkKey(cx, cz);
-        saveChunk(`${dimension}:${cx},${cz}`, data);
+
+        const existing = get().chunks[key];
+        let finalData = data;
+
+        if (existing) {
+            // MERGE: Keep existing non-air blocks (portals, structures, player-placed)
+            // But fill in the REST with the worker's new terrain data.
+            finalData = new Uint16Array(data);
+            for (let i = 0; i < CHUNK_VOLUME; i++) {
+                const existingBlock = existing[i] & 0x0FFF;
+                if (existingBlock !== 0) {
+                    finalData[i] = existing[i]; // Keep existing (ID + potential power)
+                }
+            }
+            // Optimization: if it's the same, skip
+            if (existing.every((val, i) => val === finalData[i])) return;
+        }
+
+        saveChunk(`${dimension}:${cx},${cz}`, finalData);
 
         set((s) => {
-            if (s.chunks[key] === data) return {};
-
             const versions = { ...s.chunkVersions };
             const bump = (k: string) => { versions[k] = (versions[k] ?? 0) + 1; };
 
@@ -457,7 +474,7 @@ const useGameStore = create<GameState>((set, get) => ({
         return { chunks: newChunks, chunkVersions: newVersions };
     }),
 
-    getBlock: (x, y, z) => {
+    getBlock: (x: number, y: number, z: number) => {
         if (y < 0 || y > 255) return 0;
         const cx = Math.floor(x / 16);
         const cz = Math.floor(z / 16);
@@ -469,7 +486,7 @@ const useGameStore = create<GameState>((set, get) => ({
         return raw & 0x0FFF; // 12-bit ID
     },
 
-    getBlockPower: (x, y, z) => {
+    getBlockPower: (x: number, y: number, z: number) => {
         if (y < 0 || y > 255) return 0;
         const cx = Math.floor(x / 16);
         const cz = Math.floor(z / 16);
@@ -482,29 +499,36 @@ const useGameStore = create<GameState>((set, get) => ({
     },
 
     addBlock: (x, y, z, typeId, fromNetwork = false) => {
-        if (y < 0 || y > 255) return;
-        const cx = Math.floor(x / 16);
-        const cz = Math.floor(z / 16);
-        const key = chunkKey(cx, cz);
-        const lx = ((x % 16) + 16) % 16;
-        const lz = ((z % 16) + 16) % 16;
-        const state = get();
+        get().addBlocks([{ x, y, z, typeId }], fromNetwork);
+    },
 
-        let chunk = state.chunks[key];
-        if (!chunk) {
-            chunk = new Uint16Array(CHUNK_VOLUME);
-        }
+    addBlocks: (blocks, fromNetwork = false) => {
+        const s = get();
+        const affectedChunks = new Map<string, Uint16Array>();
+        const versions = { ...s.chunkVersions };
 
-        // Use a new copy to ensure React/Zustand detect change if they compare references
-        const newChunk = new Uint16Array(chunk);
-        newChunk[blockIndex(lx, y, lz)] = typeId & 0x0FFF;
+        for (const b of blocks) {
+            if (b.y < 0 || b.y > 255) continue;
+            const cx = Math.floor(b.x / 16);
+            const cz = Math.floor(b.z / 16);
+            const key = chunkKey(cx, cz);
+            const lx = ((b.x % 16) + 16) % 16;
+            const lz = ((b.z % 16) + 16) % 16;
 
-        import('../core/redstoneSystem').then(({ updateRedstone }) => {
-            updateRedstone(x, y, z);
-        });
+            let chunk = affectedChunks.get(key) || s.chunks[key];
+            if (!chunk) {
+                chunk = new Uint16Array(CHUNK_VOLUME);
+            }
 
-        set((s) => {
-            const versions = { ...s.chunkVersions };
+            // If it's the original from state, copy it
+            if (chunk === s.chunks[key]) {
+                chunk = new Uint16Array(chunk);
+            }
+
+            chunk[blockIndex(lx, b.y, lz)] = b.typeId & 0x0FFF;
+            affectedChunks.set(key, chunk);
+
+            // Bump versions
             const bump = (ccx: number, ccz: number) => {
                 const k = chunkKey(ccx, ccz);
                 versions[k] = (versions[k] ?? 0) + 1;
@@ -514,20 +538,41 @@ const useGameStore = create<GameState>((set, get) => ({
             if (lx === 15) bump(cx + 1, cz);
             if (lz === 0) bump(cx, cz - 1);
             if (lz === 15) bump(cx, cz + 1);
+        }
 
-            return {
-                chunks: { ...s.chunks, [key]: newChunk },
-                chunkVersions: versions
-            };
+        if (affectedChunks.size === 0) return;
+
+        const newChunks = { ...s.chunks };
+        let newGen = s.generatedChunks;
+        let genChanged = false;
+
+        for (const [key, chunk] of affectedChunks) {
+            newChunks[key] = chunk;
+            if (!newGen.has(key)) {
+                if (!genChanged) {
+                    newGen = new Set(newGen);
+                    genChanged = true;
+                }
+                newGen.add(key);
+            }
+            const parts = key.split(',');
+            saveChunk(`${s.dimension}:${parts[0]},${parts[1]}`, chunk);
+        }
+
+        set({
+            chunks: newChunks,
+            chunkVersions: versions,
+            generatedChunks: newGen
         });
 
-        // Save to IndexedDB
-        saveChunk(`${state.dimension}:${cx},${cz}`, newChunk);
+        // Simplified: just trigger one redstone update for each affected position
+        import('../core/redstoneSystem').then(({ updateRedstone }) => {
+            for (const b of blocks) updateRedstone(b.x, b.y, b.z);
+        });
 
-        // Broadcast if local multiplayer
-        if (!fromNetwork && state.isMultiplayer) {
+        if (!fromNetwork && s.isMultiplayer) {
             import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
-                getConnection().sendBlockPlace(x, y, z, typeId);
+                for (const b of blocks) getConnection().sendBlockPlace(b.x, b.y, b.z, b.typeId);
             });
         }
     },

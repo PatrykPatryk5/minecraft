@@ -62,34 +62,35 @@ export function generateNetherChunk(cx: number, cz: number): Uint16Array {
                     data[blockIndex(lx, y, lz)] = BlockType.BEDROCK; // Solid ceiling
                 }
 
-                // 3D cave noise
+                // 3D noise for "solid" pillars and mass
+                const noiseVal = noise3d(wx * 0.04, y * 0.06, wz * 0.04);
+                // Density falloff: more solid at floor and ceiling, less in middle
+                const distToCenter = Math.abs(y - 64) / 64;
+                const threshold = 0.2 + (1 - distToCenter) * 0.4; // 0.2 at center, 0.6 at edges
+
+                const isSolid = noiseVal > threshold;
                 const caveVal = noise3d(wx * 0.05, y * 0.08, wz * 0.05);
-                const isCave = caveVal > 0.1;
+                const isCave = caveVal > 0.2; // Slightly stricter caves
 
-                if (y <= floor || y >= ceil) {
-                    // Solid regions
-                    if (isCave && y > LAVA_LEVEL + 2 && y < ceil - 2) {
-                        // Cave area — nothing (air)
-                    } else {
-                        // Netherrack base
-                        data[blockIndex(lx, y, lz)] = BlockType.NETHERRACK;
+                if (y <= floor || y >= ceil || (isSolid && !isCave)) {
+                    // Netherrack base
+                    data[blockIndex(lx, y, lz)] = BlockType.NETHERRACK;
 
-                        // Soul sand patches near floor
-                        if (y === floor && seededRandom(wx + y, wz) > 0.6) {
-                            data[blockIndex(lx, y, lz)] = BlockType.SOUL_SAND;
-                        }
+                    // Soul sand patches
+                    if (y < 20 && seededRandom(wx + y, wz) > 0.8) {
+                        data[blockIndex(lx, y, lz)] = BlockType.SOUL_SAND;
+                    }
 
-                        // Glowstone on ceiling
-                        if (y >= ceil - 3 && seededRandom(wx * 3, wz * 3 + y) > 0.92) {
-                            data[blockIndex(lx, y, lz)] = BlockType.GLOWSTONE;
-                        }
+                    // Glowstone clusters
+                    if ((y >= ceil - 3 || y > 80) && seededRandom(wx * 3, wz * 3 + y) > 0.96) {
+                        data[blockIndex(lx, y, lz)] = BlockType.GLOWSTONE;
+                    }
 
-                        // Nether brick fortress fragments
-                        if (y > LAVA_LEVEL + 5 && y < ceil - 5) {
-                            const fortNoise = noise2d(wx * 0.005 + 500, wz * 0.005 + 500);
-                            if (fortNoise > 0.7 && seededRandom(wx * 5, wz * 5 + y) > 0.85) {
-                                data[blockIndex(lx, y, lz)] = BlockType.NETHER_BRICKS;
-                            }
+                    // Nether brick fortress fragments
+                    if (y > LAVA_LEVEL + 10 && y < ceil - 10) {
+                        const fortNoise = noise2d(wx * 0.005 + 500, wz * 0.005 + 500);
+                        if (fortNoise > 0.8 && seededRandom(wx * 5, wz * 5 + y) > 0.9) {
+                            data[blockIndex(lx, y, lz)] = BlockType.NETHER_BRICKS;
                         }
                     }
                 } else if (y <= LAVA_LEVEL) {

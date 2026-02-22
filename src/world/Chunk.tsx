@@ -194,11 +194,11 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                         if (normal.y > 0.5) {
                            vShade = 1.05; // Slightly brighter top
                         } else if (normal.y < -0.5) {
-                           vShade = 0.5; // Darker bottom
+                           vShade = 0.85; // Less dark bottom (was 0.5)
                         } else if (abs(normal.z) > 0.5) {
-                           vShade = 0.8; // North/South
+                           vShade = 0.95; // North/South (was 0.8)
                         } else if (abs(normal.x) > 0.5) {
-                           vShade = 0.6; // East/West
+                           vShade = 0.9; // East/West (was 0.6)
                         }
                         `
                     );

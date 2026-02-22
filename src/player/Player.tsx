@@ -1178,7 +1178,7 @@ const Player: React.FC = () => {
             // ─── View Bobbing ────────────────────────────────
             if (s.settings.viewBobbing && onGround.current && move.lengthSq() > 0) {
                 bobPhase.current += dt * speed * (isSneaking ? 1.7 : 2.5);
-                bobY = Math.sin(bobPhase.current) * (isSneaking ? 0.03 : 0.08);
+                bobY = Math.sin(bobPhase.current) * (isSneaking ? 0.015 : 0.04);
             }
         } // End physics loop
 

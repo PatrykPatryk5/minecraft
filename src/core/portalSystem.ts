@@ -39,13 +39,13 @@ export function attemptNetherPortalIgnite(x: number, y: number, z: number): bool
                 }
 
                 if (valid) {
+                    const portalBlocks: { x: number, y: number, z: number, typeId: number }[] = [];
                     for (let h = 1; h <= 3; h++) {
-                        s.addBlock(bx, y + h, bz, BlockType.NETHER_PORTAL_BLOCK);
-                        s.addBlock(bx + dx, y + h, bz + dz, BlockType.NETHER_PORTAL_BLOCK);
+                        portalBlocks.push({ x: bx, y: y + h, z: bz, typeId: BlockType.NETHER_PORTAL_BLOCK });
+                        portalBlocks.push({ x: bx + dx, y: y + h, z: bz + dz, typeId: BlockType.NETHER_PORTAL_BLOCK });
                     }
-                    playSound('fuse'); // we don't have portal ignite specifically yet, fuse is fine
-                    // Bump version? s.addBlock does it if we update gameStore, but we should manually bump chunks if they span borders.
-                    // For now, simple useGameStore will update the chunks eventually.
+                    s.addBlocks(portalBlocks);
+                    playSound('fuse');
                     return true;
                 }
             }
@@ -76,47 +76,49 @@ export function getSafeHeight(x: number, z: number, searchRange: [number, number
 
 export function buildNetherPortalSafe(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
-    const dx = 1;
-    const dz = 0;
-
     const bx = Math.floor(x);
     const by = Math.floor(y);
     const bz = Math.floor(z);
 
-    // 1. Build a 4x4 platform under the portal for safety
-    for (let ox = -1; ox <= 2; ox++) {
-        for (let oz = -1; oz <= 1; oz++) {
+    const blocks: { x: number, y: number, z: number, typeId: number }[] = [];
+
+    // 1. Build a 5x5 platform under the portal for enhanced safety
+    for (let ox = -2; ox <= 2; ox++) {
+        for (let oz = -2; oz <= 2; oz++) {
             const current = s.getBlock(bx + ox, by - 1, bz + oz);
             if (current === BlockType.AIR || current === BlockType.LAVA || current === BlockType.WATER) {
-                s.addBlock(bx + ox, by - 1, bz + oz, BlockType.OBSIDIAN);
+                blocks.push({ x: bx + ox, y: by - 1, z: bz + oz, typeId: BlockType.OBSIDIAN });
             }
         }
     }
 
-    // 2. Clear interior (4x5 area)
-    for (let ox = -1; ox <= 2; ox++) {
+    // 2. Clear interior (4x5 area) - larger clearing to prevent suffocation
+    for (let ox = -2; ox <= 3; ox++) {
         for (let dy = 0; dy <= 4; dy++) {
-            for (let oz = -1; oz <= 1; oz++) {
-                s.addBlock(bx + ox, by + dy, bz + oz, BlockType.AIR);
+            for (let oz = -2; oz <= 2; oz++) {
+                blocks.push({ x: bx + ox, y: by + dy, z: bz + oz, typeId: BlockType.AIR });
             }
         }
     }
 
     // 3. Build typical 4x5 Frame
     // Bottom
-    s.addBlock(bx, by, bz, BlockType.OBSIDIAN);
-    s.addBlock(bx + 1, by, bz, BlockType.OBSIDIAN);
+    blocks.push({ x: bx, y: by, z: bz, typeId: BlockType.OBSIDIAN });
+    blocks.push({ x: bx + 1, y: by, z: bz, typeId: BlockType.OBSIDIAN });
     // Top
-    s.addBlock(bx, by + 4, bz, BlockType.OBSIDIAN);
-    s.addBlock(bx + 1, by + 4, bz, BlockType.OBSIDIAN);
+    blocks.push({ x: bx, y: by + 4, z: bz, typeId: BlockType.OBSIDIAN });
+    blocks.push({ x: bx + 1, y: by + 4, z: bz, typeId: BlockType.OBSIDIAN });
     // Left pillar
-    for (let h = 0; h <= 4; h++) s.addBlock(bx - 1, by + h, bz, BlockType.OBSIDIAN);
+    for (let h = 0; h <= 4; h++) blocks.push({ x: bx - 1, y: by + h, z: bz, typeId: BlockType.OBSIDIAN });
     // Right pillar
-    for (let h = 0; h <= 4; h++) s.addBlock(bx + 2, by + h, bz, BlockType.OBSIDIAN);
+    for (let h = 0; h <= 4; h++) blocks.push({ x: bx + 2, y: by + h, z: bz, typeId: BlockType.OBSIDIAN });
 
     // 4. Fill with portal blocks
     for (let h = 1; h <= 3; h++) {
-        s.addBlock(bx, by + h, bz, BlockType.NETHER_PORTAL_BLOCK);
-        s.addBlock(bx + 1, by + h, bz, BlockType.NETHER_PORTAL_BLOCK);
+        blocks.push({ x: bx, y: by + h, z: bz, typeId: BlockType.NETHER_PORTAL_BLOCK });
+        blocks.push({ x: bx + 1, y: by + h, z: bz, typeId: BlockType.NETHER_PORTAL_BLOCK });
     }
+
+    // Place all blocks at once!
+    s.addBlocks(blocks);
 }

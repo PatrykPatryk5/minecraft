@@ -5,7 +5,7 @@ import { BlockType } from '../core/blockTypes';
 import * as THREE from 'three';
 
 const MAX_LIGHTS = 16; // Limit PointLights for performance
-const SCAN_RADIUS = 2; // Chunks around player
+const SCAN_RADIUS = 3; // Increased to see lights further away
 const SCAN_INTERVAL_MS = 1000; // Scan once per second
 
 interface LightSource {
@@ -69,7 +69,7 @@ const TorchLights: React.FC = () => {
                 for (let y = minY; y <= maxY; y++) {
                     for (let lx = 0; lx < 16; lx++) {
                         for (let lz = 0; lz < 16; lz++) {
-                            const idx = lx + y * 16 + lz * 256; // Fast blockIndex
+                            const idx = (y << 8) | (lz << 4) | lx; // Synchronized with terrainGen.ts blockIndex
                             const block = chunk[idx];
 
                             if (lightSourceIds.includes(block)) {
@@ -118,9 +118,9 @@ const TorchLights: React.FC = () => {
                     key={`${l.x},${l.y},${l.z}`}
                     position={[l.x, l.y, l.z]}
                     color={l.color}
-                    intensity={l.intensity}
-                    distance={l.intensity > 1 ? 14 : 8}
-                    decay={2}
+                    intensity={l.intensity * 1.2}
+                    distance={l.intensity > 1 ? 20 : 12}
+                    decay={1}
                 />
             ))}
         </group>
