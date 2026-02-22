@@ -23,6 +23,7 @@
         "simplex-noise": "^4.0.3",
         "three": "^0.183.1",
         "three-mesh-bvh": "^0.9.8",
+        "ws": "^8.19.0",
         "zustand": "^5.0.11"
     },
     "devDependencies": {

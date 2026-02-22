@@ -30,6 +30,7 @@ import MultiplayerScreen from './ui/MultiplayerScreen';
 import MobRenderer from './mobs/MobRenderer';
 import { MultiplayerRenderer } from './multiplayer/MultiplayerRenderer';
 import Weather from './environment/Weather';
+import NetworkHUD from './ui/NetworkHUD';
 import useGameStore from './store/gameStore';
 import { getRendererCaps, type RendererCapabilities } from './core/renderer';
 import { preloadAllTextures } from './core/textures';
@@ -37,6 +38,7 @@ import DroppedItemsManager from './entities/DroppedItems';
 import FallingBlocksManager from './entities/FallingBlocks';
 import ArrowsManager from './entities/Arrows';
 import TNTManager from './entities/TNTPrimed';
+import PreJoinShield from './ui/PreJoinShield';
 
 
 const UnderwaterOverlay = () => {
@@ -173,6 +175,7 @@ const App: React.FC = () => {
             <MainMenu />
             <KeybindScreen />
             <MultiplayerScreen />
+            <PreJoinShield />
 
             {isPlaying && (
                 <Canvas
@@ -207,10 +210,10 @@ const App: React.FC = () => {
                 </Canvas>
             )}
 
-            {/* HUD and Debug — only when playing and HUD enabled */}
             {isPlaying && showHUD && (
                 <>
                     <HUD />
+                    <NetworkHUD />
                     <DebugScreen />
                 </>
             )}

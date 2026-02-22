@@ -62,8 +62,23 @@ const DayNightCycle: React.FC = () => {
         lastStoreUpdate.current += safeDelta;
         if (lastStoreUpdate.current > 0.1) {
             lastStoreUpdate.current = 0;
-            useGameStore.getState().setDayTime(t);
-            setUiTime(t);
+            const state = useGameStore.getState();
+            const isClient = state.isMultiplayer && (window as any).isMPClient;
+
+            if (isClient) {
+                // Clients just follow the store
+                timeRef.current = state.dayTime;
+            } else {
+                // Host or Single Player advances time and updates store
+                const storeTime = state.dayTime;
+                // Use a small epsilon to detect manual jumps (like /time set)
+                if (Math.abs(t - storeTime) > 0.02) {
+                    timeRef.current = storeTime;
+                } else {
+                    state.setDayTime(t);
+                }
+            }
+            setUiTime(timeRef.current);
         }
 
         const angle = t * Math.PI * 2;

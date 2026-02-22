@@ -18,7 +18,11 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
 
     const prevPos = useRef(new THREE.Vector3());
     const currentPos = useRef(new THREE.Vector3());
+    const velocity = useRef(new THREE.Vector3());
     const walkTime = useRef(0);
+    const lastUpdate = useRef(0);
+    const posBuffer = useRef<{ pos: [number, number, number], rot: [number, number], ts: number }[]>([]);
+    const BUFFER_TIME = 100; // 100ms interpolation buffer
 
     // Initial positioning
     useFrame((_, delta) => {
@@ -33,26 +37,76 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
             group.current.visible = true;
         }
 
-        const [tx, ty, tz] = playerState.pos;
-        const [ryw, rxp] = playerState.rot || [0, 0];
+        // Buffer incoming state
+        const now = Date.now();
+        const hasNewPos = playerState.ts !== undefined && playerState.ts > lastUpdate.current;
 
-        // Smooth position interpolation
-        const targetPos = new THREE.Vector3(tx, ty - 1.5, tz); // Adjusted height so feet at ground
+        if (hasNewPos) {
+            posBuffer.current.push({
+                pos: playerState.pos,
+                rot: playerState.rot || [0, 0],
+                ts: playerState.ts || now
+            });
+            lastUpdate.current = playerState.ts || now;
+            // Keep buffer small (max 20 entries)
+            if (posBuffer.current.length > 20) posBuffer.current.shift();
+        }
 
-        // How far are we from target?
-        const distToTarget = currentPos.current.distanceTo(targetPos);
+        // --- Render Logic (Jitter Buffer) ---
+        const renderTime = now - BUFFER_TIME;
+        let interpPos = new THREE.Vector3(...playerState.pos);
+        let interpRot = playerState.rot || [0, 0];
 
-        // If we are extremely far (e.g. initial spawn teleport), snap immediately
-        if (distToTarget > 10) {
+        if (posBuffer.current.length >= 2) {
+            // Find two points to interpolate between
+            let i = 0;
+            for (; i < posBuffer.current.length - 1; i++) {
+                if (posBuffer.current[i + 1].ts > renderTime) break;
+            }
+
+            const p1 = posBuffer.current[i];
+            const p2 = posBuffer.current[i + 1];
+
+            if (p1.ts <= renderTime && p2.ts >= renderTime) {
+                const alpha = (renderTime - p1.ts) / (p2.ts - p1.ts);
+                interpPos.set(
+                    p1.pos[0] + (p2.pos[0] - p1.pos[0]) * alpha,
+                    p1.pos[1] + (p2.pos[1] - p1.pos[1]) * alpha,
+                    p1.pos[2] + (p2.pos[2] - p1.pos[2]) * alpha
+                );
+                // Adjust for pivot
+                interpPos.y -= 1.5;
+
+                // Rotation lerp
+                const r1 = p1.rot;
+                const r2 = p2.rot;
+                interpRot = [
+                    r1[0] + (r2[0] - r1[0]) * alpha,
+                    r1[1] + (r2[1] - r1[1]) * alpha
+                ];
+            } else {
+                // Not enough data for the current render window? 
+                const [tx, ty, tz] = playerState.pos;
+                interpPos.set(tx, ty - 1.5, tz);
+            }
+        } else {
+            const [tx, ty, tz] = playerState.pos;
+            interpPos.set(tx, ty - 1.5, tz);
+        }
+
+        const targetPos = interpPos;
+        const [ryw, rxp] = interpRot;
+
+        // If we are extremely far (teleport), snap
+        if (currentPos.current.distanceTo(targetPos) > 10) {
             currentPos.current.copy(targetPos);
         } else {
-            // LERPing the position continuously
             currentPos.current.lerp(targetPos, 0.4);
         }
 
         // Handle walk animation based on distance moved THIS frame
         // Use a small epsilon to avoid jittering
-        const moveDist = prevPos.current.distanceTo(currentPos.current);
+        const moveDist = prevPos.current.distanceTo(currentPos.current); // This prevPos now refers to the last target pos
         const isUnderwater = playerState.isUnderwater;
 
         if (moveDist > 0.005) {
@@ -65,24 +119,42 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
 
         if (group.current) {
             group.current.position.copy(currentPos.current);
-            // Face the player's yaw
-            group.current.rotation.y = ryw;
+            // Face the player's yaw (LERPed)
+            const targetYaw = ryw;
+            let diff = targetYaw - group.current.rotation.y;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            group.current.rotation.y += diff * 0.3;
 
-            // Head pitch
+            // Head pitch (LERPed)
             if (headRef.current) {
-                headRef.current.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rxp));
+                const targetPitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rxp));
+                headRef.current.rotation.x += (targetPitch - headRef.current.rotation.x) * 0.3;
             }
 
             // Limb swing animations
             const swingX = Math.sin(walkTime.current) * (isUnderwater ? 0.4 : 0.8);
             const swingY = isUnderwater ? Math.cos(walkTime.current * 0.5) * 0.1 : 0; // Subtle floating bob in water
 
+            // Action animations (swing/hit)
+            let actionSwing = 0;
+            const lastAction = playerState.lastAction;
+            if (lastAction && Date.now() - lastAction.time < 300) {
+                const progress = (Date.now() - lastAction.time) / 300;
+                if (lastAction.type === 'swing' || lastAction.type === 'hit') {
+                    actionSwing = Math.sin(progress * Math.PI) * 1.5;
+                } else if (lastAction.type === 'eat') {
+                    // Quick bobbing head for eating
+                    if (headRef.current) headRef.current.rotation.x += Math.sin(progress * Math.PI * 4) * 0.2;
+                }
+            }
+
             if (leftArmRef.current) {
                 leftArmRef.current.rotation.x = -swingX;
                 leftArmRef.current.position.y = 1.5 + swingY;
             }
             if (rightArmRef.current) {
-                rightArmRef.current.rotation.x = swingX;
+                rightArmRef.current.rotation.x = swingX - actionSwing;
                 rightArmRef.current.position.y = 1.5 + swingY;
             }
             if (leftLegRef.current) leftLegRef.current.rotation.x = swingX;
@@ -91,6 +163,13 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
     });
 
     const playerName = useGameStore(s => s.connectedPlayers[id]?.name || 'Unknown');
+    const playerHealth = useGameStore(s => s.connectedPlayers[id]?.health ?? 20);
+
+    const healthColor = useMemo(() => {
+        if (playerHealth > 15) return '#00ff00';
+        if (playerHealth > 5) return '#ffff00';
+        return '#ff0000';
+    }, [playerHealth]);
 
     // Materials - Steve style colors
     const materialSkin = useMemo(() => new THREE.MeshStandardMaterial({ color: '#ffccaa' }), []); // Skin
@@ -100,6 +179,18 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
 
     return (
         <group ref={group}>
+            {/* Health Bar */}
+            <group position={[0, 2.45, 0]}>
+                <mesh position={[0, 0, -0.01]}>
+                    <planeGeometry args={[0.5, 0.05]} />
+                    <meshBasicMaterial color="#333" />
+                </mesh>
+                <mesh position={[(playerHealth / 20 - 1) * 0.25, 0, 0]}>
+                    <planeGeometry args={[(playerHealth / 20) * 0.5, 0.05]} />
+                    <meshBasicMaterial color={healthColor} />
+                </mesh>
+            </group>
+
             {/* Name Tag */}
             <Text
                 position={[0, 2.2, 0]}

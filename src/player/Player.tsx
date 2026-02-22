@@ -23,6 +23,7 @@ import * as THREE from 'three';
 import useKeyboard from './useKeyboard';
 import useGameStore from '../store/gameStore';
 import { BLOCK_DATA, BlockType, getBlockDrop } from '../core/blockTypes';
+import { getConnection } from '../multiplayer/ConnectionManager';
 import { getSpawnHeight, MAX_HEIGHT } from '../core/terrainGen';
 import { emitBlockBreak } from '../core/particles';
 import { playSound, startAmbience, updateListener, updateEnvironment } from '../audio/sounds';
@@ -244,8 +245,11 @@ const Player: React.FC = () => {
                     if (selected && BLOCK_DATA[selected]?.isItem && BLOCK_DATA[selected]?.maxDurability) {
                         s.damageTool(s.hotbarSlot);
                     }
+                    getConnection().sendAction('swing');
                     return;
                 }
+
+                getConnection().sendAction('swing');
 
                 if (!hit) {
                     return;
@@ -295,12 +299,9 @@ const Player: React.FC = () => {
                 // ── Right Click: Interact or Place Block ──
                 if (selected && BLOCK_DATA[selected]?.foodRestore) {
                     // Eat if: purely food item (isItem) OR if hungry
-                    // This allows placing Cake (solid block) but eating it if hungry if we were to implement block-eating
-                    // For now, most food are isItem: true.
                     if (s.hunger < s.maxHunger || BLOCK_DATA[selected].isItem) {
                         s.eatFood();
-                        // If it's a placeable block (like Cake), we still return if we ate? 
-                        // In MC, you place Cake. So let's only return if it's isItem (non-placeable).
+                        getConnection().sendAction('eat');
                         if (BLOCK_DATA[selected].isItem) return;
                     }
                 }
@@ -325,14 +326,12 @@ const Player: React.FC = () => {
                 const clickedType = s.getBlock(bx2, by2, bz2);
 
                 if (clickedType === BlockType.CRAFTING) {
-                    // Open 3x3 crafting table
                     s.setOverlay('crafting');
                     playSound('open');
                     document.exitPointerLock();
                     return;
                 }
                 if (clickedType === BlockType.FURNACE || clickedType === BlockType.FURNACE_ON) {
-                    // Open furnace
                     s.setOverlay('furnace');
                     playSound('open');
                     document.exitPointerLock();
@@ -346,11 +345,8 @@ const Player: React.FC = () => {
 
                 const [px, py, pz] = hit.place;
                 if (py < 0 || py > MAX_HEIGHT - 1) return;
-
-                // (Already defined above: const selected = s.getSelectedBlock();)
                 if (!selected) return;
 
-                // Farming/tool interactions should happen before generic item early-return.
                 if ([105, 115, 125, 135, 145].includes(selected)) {
                     if (tillBlock(bx2, by2, bz2)) {
                         s.damageTool(s.hotbarSlot);
@@ -378,7 +374,6 @@ const Player: React.FC = () => {
 
                 if (BLOCK_DATA[selected]?.isItem) return;
 
-                // Don't place inside player
                 const feet = Math.floor(pos.current.y - PLAYER_HEIGHT);
                 const head = Math.floor(pos.current.y);
                 const plX = Math.floor(pos.current.x);
@@ -399,17 +394,15 @@ const Player: React.FC = () => {
                 if (selected === BlockType.PISTON || selected === BlockType.PISTON_STICKY) {
                     const dir = new THREE.Vector3();
                     camera.getWorldDirection(dir);
-                    dir.negate(); // Point towards player
-
+                    dir.negate();
                     let pDir = 0;
                     if (Math.abs(dir.y) > Math.abs(dir.x) && Math.abs(dir.y) > Math.abs(dir.z)) {
-                        pDir = dir.y > 0 ? 1 : 0; // 1=Up, 0=Down
+                        pDir = dir.y > 0 ? 1 : 0;
                     } else if (Math.abs(dir.x) > Math.abs(dir.z)) {
-                        pDir = dir.x > 0 ? 5 : 4; // 5=East, 4=West
+                        pDir = dir.x > 0 ? 5 : 4;
                     } else {
-                        pDir = dir.z > 0 ? 3 : 2; // 3=South, 2=North
+                        pDir = dir.z > 0 ? 3 : 2;
                     }
-
                     placePiston(px, py, pz, pDir, selected === BlockType.PISTON_STICKY);
                     s.consumeHotbarItem(s.hotbarSlot);
                     bumpAround(px, pz);
@@ -420,19 +413,10 @@ const Player: React.FC = () => {
                 s.consumeHotbarItem(s.hotbarSlot);
                 playSound('place', [px, py, pz]);
                 bumpAround(px, pz);
-
-                // If placing water/lava, trigger spreading
-                if (selected === BlockType.WATER) {
-                    spreadWater(px, py, pz);
-                }
-                if (selected === BlockType.LAVA) {
-                    spreadLava(px, py, pz);
-                }
-
-                // Trigger gravity for falling blocks
+                if (selected === BlockType.WATER) spreadWater(px, py, pz);
+                if (selected === BlockType.LAVA) spreadLava(px, py, pz);
                 checkGravityBlock(px, py, pz);
                 return;
-
             }
         };
 

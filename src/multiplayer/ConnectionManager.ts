@@ -24,10 +24,10 @@
 import Peer, { DataConnection } from 'peerjs';
 import {
     encodePacket, decodePacket,
-    type ClientPacket, type ServerPacket,
-    POSITION_SYNC_INTERVAL, MAX_CHAT_LENGTH,
+    type ClientPacket, type ServerPacket, type PlayerInfo,
+    PROTOCOL_VERSION, POSITION_SYNC_INTERVAL, MAX_CHAT_LENGTH,
 } from './protocol';
-import useGameStore from '../store/gameStore';
+import useGameStore, { Dimension } from '../store/gameStore';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type PeerRole = 'host' | 'client' | 'none';
@@ -36,16 +36,64 @@ export class ConnectionManager {
     private peer: Peer | null = null;
     private connections: Map<string, DataConnection> = new Map(); // For host
     private hostConn: DataConnection | null = null;               // For client
+    private peerId: string | null = null;
 
     private role: PeerRole = 'none';
     private status: ConnectionStatus = 'disconnected';
+    private ownId: string | null = null;
+    private ownNid: number | null = null;
+    private nidToUuid = new Map<number, string>();
     private positionTimer: ReturnType<typeof setInterval> | null = null;
+    private syncTimer: ReturnType<typeof setInterval> | null = null;
+    private lobbyTimer: ReturnType<typeof setInterval> | null = null;
     private lastSentPos: [number, number, number] = [0, 0, 0];
     private _lastSentRot: number = 0;
     private _lastSentRot2: number = 0;
+    private currentLobbyId: string | null = null;
+    private lastSentPositions: Map<string, [number, number, number]> = new Map();
+    private ws: WebSocket | null = null;
+    private relayWs: WebSocket | null = null;
+    private relayClientIds: Set<string> = new Set();
+    private isUsingRelay: boolean = false;
+    private config: any = null;
+    private authSession: { token: string; uuid: string } | null = null;
+    private outSeq: number = 0;
+    private lastInSeq: Map<string, number> = new Map();
+    private lastLatency: Map<string, number> = new Map();
+    private pingInterval: any = null;
+    private actionCounter: number = 0;
+    private lastActionReset: number = Date.now();
 
     constructor() {
-        // No URL needed for P2P
+        this.fetchConfig();
+    }
+
+    private async fetchConfig() {
+        try {
+            const res = await fetch('/api/config');
+            const data = await res.json();
+            this.config = data.peer;
+            console.log('[MP] Fetched IceServers config.');
+        } catch (e) {
+            console.warn('[MP] Could not fetch config, using defaults.');
+        }
+    }
+
+    async claimSession(name: string): Promise<void> {
+        try {
+            const res = await fetch('/api/auth/claim', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name }),
+                signal: AbortSignal.timeout(3000)
+            });
+            const data = await res.json();
+            this.authSession = data;
+            console.log(`[MP] Online Session claimed: ${data.uuid}`);
+        } catch (e) {
+            console.warn('[MP] Could not claim online session, continuing in offline mode.');
+            this.authSession = null;
+        }
     }
 
     getStatus(): ConnectionStatus {
@@ -56,54 +104,106 @@ export class ConnectionManager {
         return this.role;
     }
 
+    private serverPassword: string | null = null;
+
     /** Start as Host */
-    async hostGame(playerName: string): Promise<string> {
+    async hostGame(playerName: string, isPublic: boolean = true, password: string = '', isOnline: boolean = false, isLegacy: boolean = false): Promise<string> {
         this.disconnect();
         this.role = 'host';
         this.status = 'connecting';
-        console.log('[MP] Starting host...');
+        this.serverPassword = password || null;
+        console.log(`[MP] Starting host (WAN: ${isPublic}, Password: ${!!password})...`);
 
         return new Promise((resolve, reject) => {
             // Generate random readable ID
             const id = 'muzo-' + Math.random().toString(36).substring(2, 8);
             this.peer = new Peer(id, {
-                debug: 2
+                debug: 1,
+                config: this.config
             });
 
-            this.peer.on('open', (peerId) => {
+            this.peer.on('open', async (peerId) => {
                 this.status = 'connected';
+                this.currentLobbyId = peerId;
                 console.log('[MP] Hosting on ID:', peerId);
+
+                // Register with Relay fallback (non-blocking)
+                this.connectToRelay(peerId);
 
                 // Add ourselves to the store
                 const state = useGameStore.getState();
                 state.setPlayerName(playerName);
                 state.setIsMultiplayer(true);
-                // The host doesn't need to add themselves to connectedPlayers, but we can set up the world
+                (window as any).isMPClient = false; // We are Host
 
                 this.startPositionSync();
+                this.startWorldSync();
+
+                if (isPublic) {
+                    this.startLobbyHeartbeat(peerId, playerName, !!password, isOnline, isLegacy);
+                }
+
                 resolve(peerId);
             });
 
             this.peer.on('connection', (conn) => {
                 console.log(`[MP] Client ${conn.peer} connecting...`);
 
-                // Keep track of connection
-                this.connections.set(conn.peer, conn);
+                conn.on('data', async (data: any) => {
+                    const packet = decodePacket<ClientPacket>(data);
+                    if (!packet) return;
 
-                conn.on('open', () => {
-                    console.log(`[MP] Client ${conn.peer} joined.`);
-                });
+                    // Handshake logic
+                    if (!this.connections.has(conn.peer)) {
+                        if (packet.type !== 'join') {
+                            conn.send(encodePacket({ type: 'error', payload: { message: 'Błąd protokołu: Musisz najpierw dołączyć.' } } as any));
+                            return setTimeout(() => conn.close(), 100);
+                        }
 
-                conn.on('data', (data: any) => {
-                    const packet = decodePacket(data);
-                    if (packet) this.handleClientPacket(conn.peer, packet as any); // Treat as ClientPacket
+                        // Online Mode Check (Host side)
+                        const { token, uuid, name } = packet.payload;
+
+                        if (isOnline) {
+                            try {
+                                const verifyRes = await fetch('/api/auth/verify', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ token, uuid }),
+                                    signal: AbortSignal.timeout(3000)
+                                });
+                                const verifyData = await verifyRes.json();
+                                if (!verifyData.success) {
+                                    conn.send(encodePacket({ type: 'server_warning', payload: { message: 'Błąd weryfikacji UUID! Dołączasz jako gość.', severity: 'low' } } as any));
+                                    console.log(`[MP] P2P Auth verification failed for ${name}, allowing as guest.`);
+                                } else {
+                                    console.log(`[MP] Host verified Online Player: ${name} (${uuid})`);
+                                }
+                            } catch (e) {
+                                conn.send(encodePacket({ type: 'server_warning', payload: { message: 'Serwer autoryzacji niedostępny. Dołączasz w trybie Offline.', severity: 'medium' } } as any));
+                                console.warn(`[MP] Auth server unreachable for P2P client ${name}, falling back to offline.`);
+                            }
+                        }
+
+                        // Validate password
+                        if (this.serverPassword && packet.payload.password !== this.serverPassword) {
+                            console.warn(`[MP] Client ${conn.peer} failed password check.`);
+                            conn.send(encodePacket({ type: 'error', payload: { message: 'Błędne hasło!' } } as any));
+                            setTimeout(() => conn.close(), 500);
+                            return;
+                        }
+                        // Password OK or not needed
+                        this.connections.set(conn.peer, conn);
+                    }
+
+                    // Handle the packet (now with senderId)
+                    this.handlePacket(packet, conn.peer);
                 });
 
                 conn.on('close', () => {
                     console.log(`[MP] Client ${conn.peer} left.`);
                     this.connections.delete(conn.peer);
                     this.broadcast({ type: 'player_leave', payload: { id: conn.peer } }, conn.peer);
-                    this.handlePacket({ type: 'player_leave', payload: { id: conn.peer } });
+                    this.handlePacket({ type: 'player_leave', payload: { id: conn.peer } }); // Notify host's local state
                 });
 
                 conn.on('error', (err) => {
@@ -119,36 +219,88 @@ export class ConnectionManager {
         });
     }
 
+    private lastSyncTime: number = 0;
+    private ping: number = 0;
+
     /** Connect to a Host */
-    async joinGame(hostId: string, playerName: string): Promise<void> {
+    async joinGame(hostId: string, playerName: string, password: string = ''): Promise<void> {
         this.disconnect();
+
+        // WSS Enforcement & Security check
+        let targetUrl = hostId;
+        if (window.location.protocol === 'https:' && targetUrl.startsWith('ws://')) {
+            console.warn('[MP] Unsecure WebSocket detected on HTTPS page. Upgrading to WSS...');
+            targetUrl = targetUrl.replace('ws://', 'wss://');
+            alert('UWAGA: Wykryto niebezpieczne połączenie (WS). Automatycznie ulepszono do WSS dla bezpieczeństwa.');
+        }
+
+        // Check if hostId is a WebSocket URL (dedicated server)
+        if (targetUrl.startsWith('ws://') || targetUrl.startsWith('wss://')) {
+            console.log(`[MP] Connecting to Dedicated Server: ${targetUrl}`);
+            return this.joinWebSocket(targetUrl, playerName, password);
+        }
+
         this.role = 'client';
         this.status = 'connecting';
-        console.log(`[MP] Joining ${hostId}...`);
+        console.log(`[MP] Connecting to Host: ${hostId}...`);
 
-        return new Promise((resolve, reject) => {
-            this.peer = new Peer({ debug: 2 });
+        return new Promise(async (resolve, reject) => {
+            const myId = 'muzo-cli-' + Math.random().toString(36).substring(2, 6);
+            this.peer = new Peer(myId, { debug: 1, config: this.config });
 
-            this.peer.on('open', (myId) => {
-                console.log('[MP] My ID is', myId);
-                const conn = this.peer!.connect(hostId, { reliable: true });
+            // If we have an online session, use it
+            if (!this.authSession) await this.claimSession(playerName);
+
+            // Connect to Relay for fallback signaling/tunneling
+            await this.connectToRelay(myId);
+
+            const connectionTimeout = setTimeout(() => {
+                if (this.status === 'connecting') {
+                    console.warn('[MP] P2P connection timed out, trying Replicator Relay fallback...');
+                    this.isUsingRelay = true;
+                    this.status = 'connected';
+                    this.currentLobbyId = hostId;
+
+                    // Send join packet via Relay
+                    this.sendViaRelay(hostId, {
+                        type: 'join',
+                        payload: {
+                            name: playerName,
+                            password,
+                            version: PROTOCOL_VERSION,
+                            token: this.authSession?.token,
+                            uuid: this.authSession?.uuid
+                        }
+                    });
+
+                    resolve();
+                }
+            }, 5000);
+
+            this.peer.on('open', (id) => {
+                const conn = this.peer!.connect(hostId, {
+                    reliable: true,
+                    metadata: {
+                        name: playerName,
+                        password,
+                        version: PROTOCOL_VERSION,
+                        token: this.authSession?.token || 'offline',
+                        uuid: this.authSession?.uuid || `off-${Math.random().toString(36).substring(2, 6)}`
+                    }
+                });
                 this.hostConn = conn;
 
                 conn.on('open', () => {
+                    clearTimeout(connectionTimeout);
                     this.status = 'connected';
-                    console.log('[MP] Connected to Host!');
+                    this.currentLobbyId = hostId;
+                    this.isUsingRelay = false;
+                    console.log('[MP] Connected to Host via P2P!');
 
                     const state = useGameStore.getState();
                     state.setPlayerName(playerName);
                     state.setIsMultiplayer(true);
-
-                    // Send Join packet
-                    const dim = state.dimension;
-                    const pos = state.playerPos;
-                    const rot = state.playerRot;
-                    const sub = state.isUnderwater;
-                    this.sendToHost({ type: 'join', payload: { name: playerName, dimension: dim, pos, rot, isUnderwater: sub } });
-
+                    (window as any).isMPClient = true;
                     this.startPositionSync();
                     resolve();
                 });
@@ -179,8 +331,82 @@ export class ConnectionManager {
         });
     }
 
+    private async joinWebSocket(url: string, playerName: string, password: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                if (this.ws?.readyState !== 1) {
+                    this.ws?.close();
+                    this.ws = null;
+                    console.error('[MP] Dedicated server connection timeout (5s)');
+                    reject(new Error('Połączenie przekroczyło limit czasu (5s)'));
+                }
+            }, 5000);
+
+            this.ws = new WebSocket(url);
+            this.ws.binaryType = 'arraybuffer';
+
+            this.ws.onopen = async () => {
+                clearTimeout(timeout);
+                this.status = 'connected';
+                console.log('[MP] Connected to Dedicated Server via WS');
+
+                const state = useGameStore.getState();
+                state.setPlayerName(playerName);
+                state.setIsMultiplayer(true);
+                (window as any).isMPClient = true;
+
+                if (!this.ws) return;
+
+                // Ensure auth session for online servers
+                if (!this.authSession) await this.claimSession(playerName);
+
+                this.ws.send(encodePacket({
+                    type: 'join',
+                    payload: {
+                        name: playerName,
+                        password,
+                        version: PROTOCOL_VERSION,
+                        token: this.authSession?.token || 'offline',
+                        uuid: this.authSession?.uuid || `off-${Math.random().toString(36).substring(2, 6)}`,
+                        dimension: state.dimension,
+                        pos: state.playerPos,
+                        rot: state.playerRot,
+                        isUnderwater: state.isUnderwater
+                    }
+                }));
+                this.startPositionSync();
+                resolve();
+            };
+
+            this.ws.onmessage = (event) => {
+                const packet = decodePacket<ServerPacket>(event.data);
+                if (packet) this.handlePacket(packet);
+            };
+
+            this.ws.onclose = () => {
+                clearTimeout(timeout);
+                console.warn('[MP] WebSocket closed');
+                this.status = 'disconnected';
+                this.disconnect();
+            };
+
+            this.ws.onerror = (err) => {
+                clearTimeout(timeout);
+                console.error('[MP] WebSocket error:', err);
+                this.status = 'error';
+                reject(new Error('Błąd połączenia z serwerem'));
+            };
+        });
+    }
+
     disconnect(): void {
+        if (this.ws) {
+            this.ws.close();
+            this.ws = null;
+        }
         this.stopPositionSync();
+        this.stopWorldSync();
+        this.stopLobbyHeartbeat();
         if (this.hostConn) {
             this.hostConn.close();
             this.hostConn = null;
@@ -193,6 +419,10 @@ export class ConnectionManager {
             this.peer.destroy();
             this.peer = null;
         }
+        if (this.currentLobbyId) {
+            fetch(`/api/multiplayer/host/${this.currentLobbyId}`, { method: 'DELETE' }).catch(() => { });
+            this.currentLobbyId = null;
+        }
         this.status = 'disconnected';
         this.role = 'none';
 
@@ -203,105 +433,33 @@ export class ConnectionManager {
 
     // ── HOST Logic: Broadcast and Relay ─────────────────────
 
+    private sendToPeer(peerId: string, packet: ServerPacket): void {
+        const conn = this.connections.get(peerId);
+        if (conn && conn.open) {
+            packet.seq = this.outSeq++;
+            packet.ts = Date.now();
+            conn.send(encodePacket(packet as any));
+        }
+    }
+
     private broadcast(packet: ServerPacket, excludePeer?: string): void {
+        packet.seq = this.outSeq++;
+        packet.ts = Date.now();
         const encoded = encodePacket(packet as any);
+
+        // Broadcast via PeerJS
         for (const [id, conn] of this.connections) {
             if (id !== excludePeer && conn.open) {
                 conn.send(encoded);
             }
         }
-    }
 
-    private handleClientPacket(peerId: string, packet: ClientPacket): void {
-        const state = useGameStore.getState();
-        // The host receives packets from clients, acts as the server, and relays them.
-
-        switch (packet.type) {
-            case 'join': {
-                const name = packet.payload.name.substring(0, 16);
-                const dim = packet.payload.dimension || 'overworld';
-                const startPos: [number, number, number] = packet.payload.pos || [0, 80, 0];
-
-                // Add to local state (Host's view of the world)
-                state.addConnectedPlayer(peerId, name, startPos, [0, 0], dim, packet.payload.isUnderwater);
-                state.addChatMessage('System', `${name} joined the game.`, 'system');
-
-                // Tell the new client about existing players
-                // In P2P, the host IS a player, so send the host's info too!
-                const playersObj: any[] = [];
-                // 1. Host
-                playersObj.push({
-                    id: 'host',
-                    name: state.playerName,
-                    pos: state.playerPos,
-                    rot: state.playerRot,
-                    dimension: state.dimension,
-                    isUnderwater: state.isUnderwater
-                });
-                // 2. Other clients
-                for (const [id, p] of Object.entries(state.connectedPlayers)) {
-                    if (id !== peerId) {
-                        playersObj.push({
-                            id, name: p.name, pos: p.pos, rot: p.rot, dimension: p.dimension, isUnderwater: p.isUnderwater
-                        });
-                    }
+        // Broadcast via Relay fallback
+        if (this.relayWs?.readyState === 1) {
+            for (const id of this.relayClientIds) {
+                if (id !== excludePeer) {
+                    this.sendViaRelay(id, packet);
                 }
-
-                // Send welcome to the new client
-                const welcomePkt: ServerPacket = {
-                    type: 'welcome',
-                    payload: { playerId: peerId, players: playersObj, worldSeed: state.worldSeed }
-                };
-                this.connections.get(peerId)?.send(encodePacket(welcomePkt as any));
-
-                // Broadcast join to others
-                const joinPkt: ServerPacket = {
-                    type: 'player_join',
-                    payload: { id: peerId, name, pos: startPos, rot: [0, 0], dimension: dim, isUnderwater: packet.payload.isUnderwater }
-                };
-                this.broadcast(joinPkt, peerId);
-                break;
-            }
-
-            case 'move': {
-                const { pos, rot, dimension, isUnderwater } = packet.payload;
-                state.addConnectedPlayer(peerId, state.connectedPlayers[peerId]?.name || 'Unknown', pos, rot, dimension, isUnderwater);
-
-                // Relay
-                this.broadcast({
-                    type: 'player_move',
-                    payload: { id: peerId, pos, rot, dimension, isUnderwater: packet.payload.isUnderwater }
-                }, peerId);
-                break;
-            }
-
-            case 'block_place':
-            case 'block_break': {
-                const { x, y, z } = packet.payload;
-                const bt = packet.type === 'block_place' ? packet.payload.blockType : 0;
-
-                // Apply locally
-                if (bt === 0) state.removeBlock(x, y, z, true);
-                else state.addBlock(x, y, z, bt, true);
-
-                const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
-                state.bumpVersion(cx, cz);
-
-                // Relay
-                this.broadcast({
-                    type: 'block_update',
-                    payload: { x, y, z, blockType: bt }
-                }, peerId);
-                break;
-            }
-
-            case 'chat': {
-                state.addChatMessage(state.connectedPlayers[peerId]?.name || 'Unknown', packet.payload.text, 'player');
-                this.broadcast({
-                    type: 'chat_broadcast',
-                    payload: { sender: state.connectedPlayers[peerId]?.name || 'Unknown', text: packet.payload.text }
-                }, peerId);
-                break;
             }
         }
     }
@@ -310,8 +468,15 @@ export class ConnectionManager {
     // Called by the local game (Player.tsx, BlockActions.tsx)
 
     private sendToHost(packet: ClientPacket): void {
-        if (this.role === 'client' && this.hostConn?.open) {
-            this.hostConn.send(encodePacket(packet as any));
+        packet.seq = this.outSeq++;
+        packet.ts = Date.now();
+        const encoded = encodePacket(packet);
+        if (this.ws) {
+            this.ws.send(encoded);
+        } else if (this.isUsingRelay) {
+            this.sendViaRelay(this.currentLobbyId!, packet);
+        } else if (this.hostConn?.open) {
+            this.hostConn.send(encoded);
         } else if (this.role === 'host') {
             // If we are the host, our local actions are instantly broadcasted as SERVER packets
             switch (packet.type) {
@@ -329,12 +494,16 @@ export class ConnectionManager {
                         payload: { x: packet.payload.x, y: packet.payload.y, z: packet.payload.z, blockType: bt }
                     });
                     break;
-                case 'chat':
-                    const state = useGameStore.getState();
+                case 'chat': {
+                    const store = useGameStore.getState();
                     this.broadcast({
                         type: 'chat_broadcast',
-                        payload: { sender: state.playerName, text: packet.payload.text }
+                        payload: { sender: store.playerName, text: (packet.payload as any).text }
                     });
+                    break;
+                }
+                case 'ping':
+                    // Just echo for host testing
                     break;
             }
         }
@@ -344,68 +513,229 @@ export class ConnectionManager {
         const state = useGameStore.getState();
         const dim = state.dimension;
         const sub = state.isUnderwater;
-        this.sendToHost({ type: 'move', payload: { pos, rot, dimension: dim, isUnderwater: sub } });
+        const health = state.health;
+        this.sendToHost({ type: 'move', payload: { pos, rot, dimension: dim, isUnderwater: sub, health } as any });
     }
 
-    sendBlockPlace(x: number, y: number, z: number, blockType: number): void {
-        this.sendToHost({ type: 'block_place', payload: { x, y, z, blockType } });
+    sendBlockUpdate(x: number, y: number, z: number, blockType: number): void {
+        // Rate Limiting: Max 15 actions per second
+        const now = Date.now();
+        if (now - this.lastActionReset > 1000) {
+            this.actionCounter = 0;
+            this.lastActionReset = now;
+        }
+        if (this.actionCounter > 15) {
+            console.warn('[MP] Action rate limit reached!');
+            return;
+        }
+        this.actionCounter++;
+
+        // Distance Validation: Max 8 blocks reach
+        const playerPos = useGameStore.getState().playerPos;
+        const distSq = Math.pow(playerPos[0] - x, 2) + Math.pow(playerPos[1] - y, 2) + Math.pow(playerPos[2] - z, 2);
+        if (distSq > 64) { // 8^2
+            console.warn('[MP] Block update out of reach!');
+            return;
+        }
+
+        const type = blockType === 0 ? 'block_break' : 'block_place';
+        this.sendToHost({
+            type: type as any,
+            payload: { x, y, z, blockType }
+        });
     }
 
     sendBlockBreak(x: number, y: number, z: number): void {
-        this.sendToHost({ type: 'block_break', payload: { x, y, z } });
+        this.sendBlockUpdate(x, y, z, 0);
     }
 
     sendChat(text: string): void {
-        if (text.length > MAX_CHAT_LENGTH) text = text.slice(0, MAX_CHAT_LENGTH);
         this.sendToHost({ type: 'chat', payload: { text } });
+    }
+
+    sendWorldEvent(event: string, x: number, y: number, z: number, data?: any): void {
+        this.sendToHost({ type: 'world_event', payload: { event, x, y, z, data } });
+    }
+
+    sendAction(actionType: 'eat' | 'hit' | 'swing'): void {
+        this.sendToHost({ type: 'action', payload: { actionType } as any });
     }
 
     sendPing(): void {
         this.sendToHost({ type: 'ping', payload: { ts: Date.now() } });
     }
 
+    getPing(): number {
+        return this.ping;
+    }
+
     // ── CLIENT Receive Logic ────────────────────────────────
 
-    private handlePacket(packet: ServerPacket): void {
+    private handlePacket(packet: ServerPacket | ClientPacket, senderId?: string): void {
+        if (senderId) {
+            if (!this.connections.has(senderId)) {
+                this.relayClientIds.add(senderId);
+            }
+
+            // Sequence Check
+            if (packet.seq !== undefined) {
+                const last = this.lastInSeq.get(senderId) || -1;
+                if (packet.seq <= last) return; // Ignore old/duplicate packet
+                this.lastInSeq.set(senderId, packet.seq);
+            }
+        }
+
         const store = useGameStore.getState();
 
         switch (packet.type) {
-            case 'welcome':
+            case 'welcome': {
+                const { playerId, nid, players, worldSeed, time, weather, weatherIntensity } = packet.payload;
                 store.setPlayerName(store.playerName);
-                if (packet.payload.worldSeed !== undefined) {
-                    store.setWorldSeed(packet.payload.worldSeed);
-                    console.log(`[MP] Sycned world seed to ${packet.payload.worldSeed}`);
+                if (playerId) this.ownId = playerId;
+                if (nid !== undefined) this.ownNid = nid;
+
+                if (worldSeed !== undefined) {
+                    store.setWorldSeed(worldSeed);
+                    console.log(`[MP] Sycned world seed to ${worldSeed}`);
                 }
-                console.log(`[MP] Welcome! ID: ${packet.payload.playerId}, ${packet.payload.players.length} players online`);
-                for (const p of packet.payload.players) {
-                    store.addConnectedPlayer(p.id, p.name, p.pos, p.rot, p.dimension, p.isUnderwater);
+                console.log(`[MP] Welcome! ID: ${playerId} (NID: ${this.ownNid}), ${players.length} players online`);
+                for (const p of players) {
+                    store.addConnectedPlayer(p.id, p.name, p.pos, p.rot, p.dimension as Dimension, p.isUnderwater);
+                    if (p.nid !== undefined) this.nidToUuid.set(p.nid, p.id);
+                }
+                if (time !== undefined) store.setDayTime(time);
+                if (weather) store.setWeather(weather as any, weatherIntensity);
+                break;
+            }
+
+            case 'join': {
+                if (this.role === 'host' && senderId) {
+                    const { name, pos, rot, dimension, isUnderwater, nid } = (packet as any).payload;
+                    store.addConnectedPlayer(senderId, name, pos || [0, 64, 0], rot || [0, 0], (dimension as Dimension) || 'overworld', !!isUnderwater);
+                    if (nid !== undefined) this.nidToUuid.set(nid, senderId);
+
+                    this.sendViaRelay(senderId, {
+                        type: 'welcome',
+                        payload: {
+                            playerId: senderId,
+                            nid: nid,
+                            players: Object.entries(store.connectedPlayers).map(([id, p]) => ({ id, ...p } as any)),
+                            time: store.dayTime,
+                            weather: store.weather
+                        }
+                    } as any);
+
+                    this.broadcast({
+                        type: 'player_join',
+                        payload: { id: senderId, nid: nid, name, pos: pos || [0, 64, 0], rot: rot || [0, 0], dimension: dimension || 'overworld', isUnderwater: !!isUnderwater }
+                    }, senderId);
                 }
                 break;
+            }
 
-            case 'player_join':
-                store.addConnectedPlayer(
-                    packet.payload.id,
-                    packet.payload.name,
-                    packet.payload.pos,
-                    packet.payload.rot,
-                    packet.payload.dimension,
-                    packet.payload.isUnderwater
-                );
-                store.addChatMessage('System', `${packet.payload.name} joined!`, 'system');
+            case 'move': {
+                if (this.role === 'host' && senderId) {
+                    const { pos, rot, dimension, isUnderwater } = packet.payload;
+                    const p = store.connectedPlayers[senderId];
+                    if (!p) return;
+
+                    store.addConnectedPlayer(senderId, p.name, pos, rot, dimension as Dimension, isUnderwater, p.health, this.lastLatency.get(senderId) || 0);
+
+                    this.broadcast({
+                        type: 'player_move',
+                        payload: { id: senderId, nid: p.nid, pos, rot, dimension, isUnderwater, health: p.health, latency: this.lastLatency.get(senderId) || 0 }
+                    }, senderId);
+                }
                 break;
+            }
 
-            case 'player_leave':
+            case 'entity_sync': {
+                if (this.role === 'host') this.broadcast(packet as any, senderId);
+                break;
+            }
+
+            case 'entity_remove': {
+                if (this.role === 'host') this.broadcast(packet as any, senderId);
+                break;
+            }
+
+            case 'relay_signal': {
+                console.log(`[MP] Relay signal from ${packet.payload.from}`);
+                break;
+            }
+
+            case 'player_join': {
+                const { id, nid, name, pos, rot, dimension, isUnderwater } = packet.payload;
+                store.addConnectedPlayer(id, name, pos, rot, dimension as Dimension, isUnderwater, 20, 0);
+                if (nid !== undefined) {
+                    this.nidToUuid.set(nid, id);
+                    if (store.connectedPlayers[id]) {
+                        store.connectedPlayers[id].nid = nid;
+                    }
+                }
+                store.addChatMessage('System', `${name} joined!`, 'system');
+                break;
+            }
+
+            case 'player_leave': {
                 store.removeConnectedPlayer(packet.payload.id);
                 store.addChatMessage('System', `A player left.`, 'system');
                 break;
+            }
 
-            case 'player_move':
-                const { id, pos, rot, dimension } = packet.payload;
-                if (store.connectedPlayers[id]) {
-                    const prev = store.connectedPlayers[id];
-                    store.addConnectedPlayer(id, prev.name, pos, rot ?? prev.rot, dimension ?? prev.dimension, packet.payload.isUnderwater);
+            case 'ping': {
+                if (senderId) {
+                    this.sendToPeer(senderId, { type: 'pong', payload: { ts: packet.payload.ts } });
                 }
                 break;
+            }
+
+            case 'pong': {
+                if (senderId) {
+                    const rtt = Date.now() - packet.payload.ts;
+                    this.lastLatency.set(senderId, rtt);
+                    const existing = store.connectedPlayers[senderId];
+                    if (existing) {
+                        store.addConnectedPlayer(senderId, undefined, undefined, undefined, undefined, undefined, undefined, rtt);
+                    }
+                }
+                break;
+            }
+
+            case 'server_warning': {
+                store.setServerWarning({
+                    message: packet.payload.message,
+                    severity: packet.payload.severity || 'medium'
+                });
+                break;
+            }
+
+            case 'mod_info': {
+                console.log('[MP] Server Mod Meta:', (packet as any).payload.mods);
+                break;
+            }
+
+            case 'world_event': {
+                const { event, x, y, z, data } = packet.payload;
+                if (event === 'block_break') {
+                    import('../audio/sounds').then(({ playSound }) => playSound('break', [x, y, z]));
+                    import('../core/particles').then(({ emitBlockBreak }) => emitBlockBreak(x, y, z, data || 0));
+                } else if (event === 'explosion') {
+                    import('../audio/sounds').then(({ playSound }) => playSound('explode', [x, y, z]));
+                    import('../core/particles').then(({ emitExplosion }) => emitExplosion(x, y, z));
+                }
+                break;
+            }
+
+            case 'player_move': {
+                const { id, nid, pos, rot, dimension, isUnderwater, latency, ts, health } = packet.payload;
+                const resolvedId = id || (nid !== undefined ? this.nidToUuid.get(nid) : null);
+                if (resolvedId && store.connectedPlayers[resolvedId]) {
+                    const prev = store.connectedPlayers[resolvedId];
+                    store.addConnectedPlayer(resolvedId, prev.name, pos, rot || prev.rot, (dimension as Dimension) || prev.dimension, isUnderwater, health, latency, ts);
+                }
+                break;
+            }
 
             case 'block_update': {
                 const { x, y, z, blockType } = packet.payload;
@@ -416,13 +746,77 @@ export class ConnectionManager {
                 break;
             }
 
-            case 'chat_broadcast':
+            case 'chat_broadcast': {
                 store.addChatMessage(packet.payload.sender, packet.payload.text, 'player');
                 break;
+            }
 
-            case 'pong': {
-                const latency = Date.now() - packet.payload.ts;
-                console.log(`[MP] Ping: ${latency}ms`);
+            case 'player_action': {
+                const { id, actionType } = packet.payload;
+                if (store.connectedPlayers[id]) {
+                    const s = useGameStore.getState();
+                    const players = { ...s.connectedPlayers };
+                    if (players[id]) {
+                        players[id] = { ...players[id], lastAction: { type: actionType, time: Date.now() } };
+                        useGameStore.setState({ connectedPlayers: players });
+                    }
+                }
+                break;
+            }
+
+            case 'world_sync': {
+                const { time, weather, weatherIntensity } = packet.payload;
+                if (time !== undefined) store.setDayTime(time);
+                if (weather) store.setWeather(weather as any, weatherIntensity);
+                break;
+            }
+
+            case 'peer_list': {
+                const ids: string[] = (packet.payload as any).ids;
+                if (ids) {
+                    ids.forEach(id => {
+                        if (id !== this.ownId && !this.connections.has(id)) {
+                            this.connectToPeer(id);
+                        }
+                    });
+                }
+                break;
+            }
+
+            case 'handshake': {
+                if (senderId) {
+                    this.sendToPeer(senderId, { type: 'handshake_ack' });
+                }
+                break;
+            }
+
+            case 'inventory_update': {
+                if (this.role === 'host') this.broadcast(packet, senderId);
+                break;
+            }
+
+            case 'error': {
+                console.error('[MP] Server error:', packet.payload.message);
+                break;
+            }
+
+            case 'world_data': {
+                const { blocks } = packet.payload;
+                if (blocks && Array.isArray(blocks)) {
+                    blocks.forEach(b => {
+                        if (b.type === 0) store.removeBlock(b.x, b.y, b.z, true);
+                        else store.addBlock(b.x, b.y, b.z, b.type, true);
+                        const cx = Math.floor(b.x / 16), cz = Math.floor(b.z / 16);
+                        store.bumpVersion(cx, cz);
+                    });
+                }
+                break;
+            }
+
+            case 'chunk_data': {
+                const { cx, cz, data } = packet.payload;
+                // Handle complex chunk sync if needed
+                store.bumpVersion(cx, cz);
                 break;
             }
         }
@@ -456,6 +850,137 @@ export class ConnectionManager {
             clearInterval(this.positionTimer);
             this.positionTimer = null;
         }
+    }
+
+    // ── World Sync (Host → Clients) ───────────────────────
+
+    private startWorldSync(): void {
+        this.syncTimer = setInterval(() => {
+            const state = useGameStore.getState();
+            this.broadcast({
+                type: 'world_sync' as any,
+                payload: {
+                    time: state.dayTime,
+                    weather: state.weather,
+                    weatherIntensity: state.weatherIntensity
+                }
+            } as any);
+        }, 5000); // Sync every 5s
+    }
+
+    private stopWorldSync(): void {
+        if (this.syncTimer) {
+            clearInterval(this.syncTimer);
+            this.syncTimer = null;
+        }
+    }
+
+
+    // ── Lobby Registration (Host → index.js) ───────────────
+
+    private async connectToRelay(myId: string): Promise<void> {
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                console.warn('[MP] Relay connection timeout (2s). Proceeding in offline/direct mode.');
+                resolve();
+            }, 2000);
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            this.relayWs = new WebSocket(`${protocol}//${window.location.host}/relay`);
+
+            this.relayWs.onopen = () => {
+                clearTimeout(timeout);
+                this.relayWs?.send(JSON.stringify({ type: 'register', id: myId }));
+                console.log('[MP] Registered with Replicator Relay.');
+                resolve();
+            };
+
+            this.relayWs.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'tunneled' && msg.from) {
+                        const packet = decodePacket(msg.payload);
+                        if (packet) this.handlePacket(packet, msg.from);
+                    }
+                } catch (e) { }
+            };
+
+            this.relayWs.onerror = () => {
+                clearTimeout(timeout);
+                console.warn('[MP] Relay connection failed. Proceeding without Replicator Relay.');
+                resolve();
+            };
+        });
+    }
+
+    private sendViaRelay(to: string, packet: any): void {
+        if (this.relayWs?.readyState === 1) {
+            const encoded = encodePacket(packet);
+            const payload = encoded instanceof ArrayBuffer ? Array.from(new Uint8Array(encoded)) : encoded;
+            this.relayWs.send(JSON.stringify({
+                type: 'tunnel',
+                to,
+                payload
+            }));
+        }
+    }
+
+    private async registerLobby(id: string, name: string, hasPassword: boolean, isOnline?: boolean, isLegacy?: boolean): Promise<void> {
+        try {
+            const state = useGameStore.getState();
+            const players = Object.keys(state.connectedPlayers).length + 1; // +1 for host
+            await fetch('/api/multiplayer/host', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, name, players, hasPassword, isOnlineMode: !!isOnline, isLegacy: !!isLegacy, version: PROTOCOL_VERSION })
+            });
+        } catch (e) {
+            console.warn('[MP] Failed to register lobby:', e);
+        }
+    }
+
+    private startLobbyHeartbeat(id: string, name: string, hasPassword: boolean, isOnline: boolean, isLegacy: boolean): void {
+        this.registerLobby(id, name, hasPassword, isOnline, isLegacy);
+        this.lobbyTimer = setInterval(async () => {
+            this.registerLobby(id, name, hasPassword, isOnline, isLegacy);
+
+            // Detailed health report
+            const state = useGameStore.getState();
+            const players = Object.keys(state.connectedPlayers).length + 1; // +1 for host
+            await fetch('/api/multiplayer/report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id,
+                    players: players,
+                    load: 0,
+                    uptime: 0,
+                    isOnlineMode: isOnline,
+                    isLegacy: isLegacy
+                })
+            }).catch(() => { });
+        }, 20000); // 20s heartbeat
+    }
+
+    private stopLobbyHeartbeat(): void {
+        if (this.lobbyTimer) {
+            clearInterval(this.lobbyTimer);
+            this.lobbyTimer = null;
+        }
+    }
+
+    private connectToPeer(id: string): void {
+        if (this.role !== 'host') return;
+        console.log(`[MP] Connecting to peer: ${id}`);
+        const conn = this.peer!.connect(id);
+        conn.on('open', () => {
+            this.connections.set(id, conn);
+            conn.send(encodePacket({ type: 'handshake' } as any));
+        });
+        conn.on('data', (data: any) => {
+            const packet = decodePacket<ClientPacket>(data);
+            if (packet) this.handlePacket(packet, id);
+        });
     }
 }
 

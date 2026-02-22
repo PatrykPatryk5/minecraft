@@ -5,7 +5,7 @@
 import React, { useEffect, useCallback, useState } from 'react';
 import useGameStore from '../store/gameStore';
 import type { GameMode, Difficulty } from '../store/gameStore';
-import { startLANServer, stopLANServer, getLANState } from '../multiplayer/LANServer';
+import { getConnection } from '../multiplayer/ConnectionManager';
 import { exportWorldToFile } from '../core/storage';
 
 const PauseMenu: React.FC = () => {
@@ -22,7 +22,7 @@ const PauseMenu: React.FC = () => {
     const playerName = useGameStore((s) => s.playerName);
 
     const [lanActive, setLanActive] = useState(false);
-    const [lanPort, setLanPort] = useState(0);
+    const [lanId, setLanId] = useState('');
     const [showLanPanel, setShowLanPanel] = useState(false);
 
     const handleEscape = useCallback((e: KeyboardEvent) => {
@@ -48,7 +48,7 @@ const PauseMenu: React.FC = () => {
 
     const returnToMenu = () => {
         if (lanActive) {
-            stopLANServer();
+            getConnection().disconnect();
             setLanActive(false);
         }
         useGameStore.getState().saveGame();
@@ -63,15 +63,16 @@ const PauseMenu: React.FC = () => {
         document.body.requestPointerLock?.();
     };
 
-    const toggleLAN = () => {
+    const toggleLAN = async () => {
+        const conn = getConnection();
         if (lanActive) {
-            stopLANServer();
+            conn.disconnect();
             setLanActive(false);
-            setLanPort(0);
+            setLanId('');
         } else {
-            const { port } = startLANServer(playerName);
+            const id = await conn.hostGame(playerName);
             setLanActive(true);
-            setLanPort(port);
+            setLanId(id);
         }
     };
 
@@ -90,14 +91,12 @@ const PauseMenu: React.FC = () => {
 
                     {lanActive && (
                         <div style={{ margin: '8px 0', padding: '8px 12px', background: 'rgba(0,200,0,0.15)', borderRadius: 4, fontSize: '0.85em' }}>
-                            <div>✅ <strong>Serwer LAN aktywny</strong></div>
+                            <div>✅ <strong>Serwer aktywny (LAN/WAN)</strong></div>
                             <div style={{ margin: '4px 0' }}>
-                                Port: <code>{lanPort}</code>
+                                Kod dołączenia: <code>{lanId}</code>
                             </div>
                             <div style={{ color: '#aaa', fontSize: '0.8em' }}>
-                                Inni gracze łączą się przez:<br />
-                                <code>ws://TWOJE_IP:{lanPort}</code><br />
-                                Sprawdź swoje IP: <code>ipconfig</code>
+                                Inni gracze mogą dołączyć wpisując ten kod w Menu Głównym!
                             </div>
                         </div>
                     )}

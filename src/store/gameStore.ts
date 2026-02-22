@@ -290,12 +290,27 @@ export interface GameState {
     setPlayerName: (n: string) => void;
     isMultiplayer: boolean;
     setIsMultiplayer: (v: boolean) => void;
-    connectedPlayers: Record<string, { name: string; pos: [number, number, number]; rot?: [number, number]; dimension?: string; isUnderwater?: boolean }>;
-    addConnectedPlayer: (id: string, name: string, pos: [number, number, number], rot?: [number, number], dimension?: string, isUnderwater?: boolean) => void;
+    ping: number;
+    setPing: (v: number) => void;
+    connectedPlayers: Record<string, {
+        name: string;
+        pos: [number, number, number];
+        rot?: [number, number];
+        dimension?: Dimension;
+        isUnderwater?: boolean;
+        health?: number;
+        latency?: number;
+        ts?: number;
+        lastAction?: { type: string; time: number };
+        nid?: number;
+    }>;
+    addConnectedPlayer: (id: string, name?: string, pos?: [number, number, number], rot?: [number, number], dimension?: Dimension, isUnderwater?: boolean, health?: number, latency?: number, ts?: number, nid?: number) => void;
     removeConnectedPlayer: (id: string) => void;
     clearConnectedPlayers: () => void;
     chatMessages: { sender: string; text: string; time: number; type?: 'info' | 'error' | 'success' | 'system' | 'player' }[];
     addChatMessage: (sender: string, text: string, type?: 'info' | 'error' | 'success' | 'system' | 'player') => void;
+    serverWarning: { message: string; severity: 'low' | 'medium' | 'high' | 'critical' } | null;
+    setServerWarning: (warning: { message: string; severity: 'low' | 'medium' | 'high' | 'critical' } | null) => void;
 
     // ── Armor ──────────────────────────────────────────────
     armor: ArmorSlots;
@@ -572,7 +587,7 @@ const useGameStore = create<GameState>((set, get) => ({
 
         if (!fromNetwork && s.isMultiplayer) {
             import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
-                for (const b of blocks) getConnection().sendBlockPlace(b.x, b.y, b.z, b.typeId);
+                for (const b of blocks) getConnection().sendBlockUpdate(b.x, b.y, b.z, b.typeId);
             });
         }
     },
@@ -739,12 +754,15 @@ const useGameStore = create<GameState>((set, get) => ({
 
         // Broadcast if local multiplayer
         if (!fromNetwork && s.isMultiplayer && blocks.length > 0) {
-            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
-                const netBatch = blocks.length > 512 ? blocks.slice(0, 512) : blocks;
-                for (const [x, y, z] of netBatch) {
-                    getConnection().sendBlockBreak(x, y, z);
+            const netBatch = blocks.length > 512 ? blocks.slice(0, 512) : blocks;
+            for (const [x, y, z] of netBatch) {
+                if (s.isMultiplayer) {
+                    import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                        getConnection().sendBlockUpdate(x, y, z, 0); // 0 for air
+                        getConnection().sendWorldEvent('block_break', x, y, z);
+                    });
                 }
-            });
+            }
         }
     },
 
@@ -1132,11 +1150,29 @@ const useGameStore = create<GameState>((set, get) => ({
     playerName: 'Player',
     setPlayerName: (n) => set({ playerName: n }),
     isMultiplayer: false,
+    ping: 0,
     setIsMultiplayer: (v) => set({ isMultiplayer: v }),
+    setPing: (v) => set({ ping: v }),
     connectedPlayers: {},
-    addConnectedPlayer: (id, name, pos, rot, dimension, isUnderwater) => set((s) => ({
-        connectedPlayers: { ...s.connectedPlayers, [id]: { name, pos, rot, dimension, isUnderwater } },
-    })),
+    addConnectedPlayer: (id, name, pos, rot, dimension, isUnderwater, health, latency, ts, nid) => {
+        set((s) => {
+            const next = { ...s.connectedPlayers };
+            const existing = next[id] || {};
+            next[id] = {
+                name: name !== undefined ? name : (existing.name || 'Player'),
+                pos: pos !== undefined ? pos : (existing.pos || [0, 80, 0]),
+                rot: rot !== undefined ? rot : (existing.rot || [0, 0]),
+                dimension: dimension !== undefined ? dimension : (existing.dimension || 'overworld'),
+                isUnderwater: isUnderwater !== undefined ? isUnderwater : (existing.isUnderwater || false),
+                health: health !== undefined ? health : (existing.health || 20),
+                latency: latency !== undefined ? latency : existing.latency,
+                ts: ts !== undefined ? ts : existing.ts,
+                lastAction: existing.lastAction,
+                nid: nid !== undefined ? nid : existing.nid
+            };
+            return { connectedPlayers: next };
+        });
+    },
     removeConnectedPlayer: (id) => set((s) => {
         const { [id]: _, ...rest } = s.connectedPlayers;
         return { connectedPlayers: rest };
@@ -1146,6 +1182,8 @@ const useGameStore = create<GameState>((set, get) => ({
     addChatMessage: (sender, text, type = 'info') => set((s) => ({
         chatMessages: [...s.chatMessages.slice(-99), { sender, text, time: Date.now(), type }],
     })),
+    serverWarning: null,
+    setServerWarning: (w) => set({ serverWarning: w }),
 
     // ── Armor ──────────────────────────────────────────────
     armor: emptyArmor(),
