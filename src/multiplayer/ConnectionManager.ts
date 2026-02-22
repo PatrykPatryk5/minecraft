@@ -314,7 +314,7 @@ export class ConnectionManager {
                 conn.on('close', () => {
                     this.status = 'disconnected';
                     console.log('[MP] Disconnected from Host');
-                    this.disconnect();
+                    this.handleHostDisconnect();
                 });
 
                 conn.on('error', (err) => {
@@ -382,7 +382,12 @@ export class ConnectionManager {
                 clearTimeout(timeout);
                 console.warn('[MP] WebSocket closed');
                 this.status = 'disconnected';
-                this.disconnect();
+                if (!this.ws) return; // Already disconnected manually
+                if (this.role === 'client') {
+                    this.handleHostDisconnect();
+                } else {
+                    this.disconnect();
+                }
             };
 
             this.ws.onerror = (err) => {
@@ -394,16 +399,27 @@ export class ConnectionManager {
         });
     }
 
-    disconnect(): void {
+    disconnect(reason: string = 'manual'): void {
+        console.log(`[MP] Disconnecting session. Reason: ${reason}`);
         const state = useGameStore.getState();
+        this.status = 'disconnected';
+
         if (this.ws) {
             this.ws.close();
             this.ws = null;
         }
+        if (this.relayWs) {
+            this.relayWs.onclose = null; // Prevent reconnect loop
+            this.relayWs.close();
+            this.relayWs = null;
+        }
+        this.relayClientIds.clear();
+
         this.stopPositionSync();
         this.stopWorldSync();
         this.stopLobbyHeartbeat();
         this.stopPingHeartbeat();
+
         if (this.hostConn) {
             this.hostConn.close();
             this.hostConn = null;
@@ -420,21 +436,82 @@ export class ConnectionManager {
             fetch(`/api/multiplayer/host/${this.currentLobbyId}`, { method: 'DELETE' }).catch(() => { });
             this.currentLobbyId = null;
         }
-        if (this.status !== 'disconnected') {
-            state.setServerWarning({
-                message: 'Połączenie z serwerem zostało przerwane!',
-                severity: 'critical'
-            });
-        }
-
-        this.status = 'disconnected';
-        this.role = 'none';
-
+        state.setServerWarning(null); // Clear warnings on manual disconnect
         state.setIsMultiplayer(false);
         state.clearConnectedPlayers();
+        this.nidToUuid.clear();
+        this.role = 'none';
     }
 
     // ── HOST Logic: Broadcast and Relay ─────────────────────
+
+    private handleHostDisconnect(): void {
+        const state = useGameStore.getState();
+        if (this.role !== 'client') return;
+
+        console.warn('[MP] Host disconnected! Starting Host Migration election...');
+        state.addChatMessage('System', '§cPołączenie z hostem przerwane! Szukanie nowego hosta...', 'system');
+
+        // Election algorithm: Sort all player IDs (including own) and pick the first one
+        const playerIds = [state.playerId, ...Object.keys(state.connectedPlayers)].sort();
+        const winnerId = playerIds[0];
+
+        if (winnerId === state.playerId) {
+            console.log('[MP] I am the new host! Re-hosting...');
+            state.addChatMessage('System', '§aZostałeś nowym hostem! Sesja jest kontynuowana.', 'system');
+            this.promoteToHost();
+        } else {
+            console.log(`[MP] New host elected: ${winnerId}. Waiting for signal...`);
+            // Set a timeout for the migration signal
+            setTimeout(() => {
+                if (this.status === 'disconnected') {
+                    state.addChatMessage('System', '§cMigracja nie powiodła się. Powrót do menu.', 'system');
+                    this.disconnect();
+                    state.setScreen('mainMenu');
+                }
+            }, 10000);
+        }
+    }
+
+    private async promoteToHost(): Promise<void> {
+        const state = useGameStore.getState();
+        const oldLobbyId = this.currentLobbyId;
+
+        // Disconnect from old host logic bits (but keep world state!)
+        this.stopPositionSync();
+        this.stopPingHeartbeat();
+        this.hostConn = null;
+        this.ws = null;
+
+        // Re-host
+        await this.hostGame(state.playerName, true, '', false, false);
+
+        // Inform peers via Relay (using old lobby ID as the topic/broadcast target)
+        if (this.relayWs?.readyState === 1 && oldLobbyId) {
+            this.relayWs.send(JSON.stringify({
+                type: 'tunnel',
+                to: oldLobbyId, // Broadcast to old lobby
+                payload: encodePacket({ type: 'host_migration', payload: { newHostId: this.ownId } } as any)
+            }));
+
+            // Also broadcast specifically to all known peers via relay if needed
+            // But usually the above tunnel to the lobby ID works if relay supports it
+        }
+    }
+
+    private handleMigrationSignal(newHostId: string): void {
+        const state = useGameStore.getState();
+        if (this.status !== 'disconnected') return;
+
+        console.log(`[MP] Received migration signal! New host: ${newHostId}`);
+        state.addChatMessage('System', '§bPodłączanie do nowego hosta...', 'system');
+
+        this.joinGame(newHostId, state.playerName).catch(err => {
+            console.error('[MP] Failed to join new host:', err);
+            this.disconnect();
+            state.setScreen('mainMenu');
+        });
+    }
 
     private sendToPeer(peerId: string, packet: ServerPacket): void {
         const conn = this.connections.get(peerId);
@@ -596,16 +673,24 @@ export class ConnectionManager {
                 console.log(`[MP] Welcome! My ID: ${playerId} (Nid: ${nid})`);
 
                 if (worldSeed !== undefined) {
+                    console.log(`[MP] Syncing world: Resetting before seed ${worldSeed}`);
+                    store.resetWorld(); // CRITICAL: Clear local chunks before setting new seed
                     store.setWorldSeed(worldSeed);
-                    console.log(`[MP] Synced world seed to ${worldSeed}`);
                 }
                 if (time !== undefined) store.setDayTime(time);
                 if (weather !== undefined) store.setWeather(weather as any, weatherIntensity);
 
                 // Add existing players
+                // If this is P2P (not Dedicated), and host is not in list, add host
+                if (this.role === 'client' && !this.ws && !players.find(p => p.id === 'host')) {
+                    this.nidToUuid.set(0, 'host');
+                    // We don't necessarily need to add 'host' to store.connectedPlayers here if it's already in the players array sent by host
+                }
+
                 for (const p of players) {
                     store.addConnectedPlayer(p.id, p.name, p.pos, p.rot, p.dimension as Dimension, p.isUnderwater, p.health, p.latency, p.ts, p.nid);
                     if (p.nid !== undefined) this.nidToUuid.set(p.nid, p.id);
+                    if (p.id === 'host' && p.nid === undefined) this.nidToUuid.set(0, 'host');
                 }
 
                 // Finalize join
@@ -636,7 +721,10 @@ export class ConnectionManager {
                             playerId: senderId,
                             nid: nid,
                             worldSeed: store.worldSeed,
-                            players: Object.entries(store.connectedPlayers).map(([id, p]) => ({ id, ...p } as any)),
+                            players: [
+                                { id: 'host', name: store.playerName, pos: store.playerPos, rot: store.playerRot, dimension: store.dimension, isUnderwater: store.isUnderwater, health: store.health, nid: 0 },
+                                ...Object.entries(store.connectedPlayers).map(([id, p]) => ({ id, ...p } as any))
+                            ],
                             time: store.dayTime,
                             weather: store.weather
                         }
@@ -930,10 +1018,22 @@ export class ConnectionManager {
                 try {
                     const msg = JSON.parse(event.data);
                     if (msg.type === 'tunneled' && msg.from) {
+                        if (this.role === 'host') {
+                            this.relayClientIds.add(msg.from);
+                        }
                         const packet = decodePacket(msg.payload);
                         if (packet) this.handlePacket(packet, msg.from);
+                    } else if (msg.type === 'host_migration') {
+                        this.handleMigrationSignal(msg.payload.newHostId);
                     }
                 } catch (e) { }
+            };
+
+            this.relayWs.onclose = () => {
+                console.warn('[MP] Relay connection closed. Reconnecting in 5s...');
+                setTimeout(() => {
+                    if (this.peerId) this.connectToRelay(this.peerId);
+                }, 5000);
             };
 
             this.relayWs.onerror = () => {
