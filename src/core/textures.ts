@@ -1814,13 +1814,21 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.MUSIC_DISC_2:
         case BlockType.MUSIC_DISC_3:
         case BlockType.MUSIC_DISC_4:
+        case BlockType.MUSIC_DISC_5:
+        case BlockType.MUSIC_DISC_6:
+        case BlockType.MUSIC_DISC_7:
+        case BlockType.MUSIC_DISC_8:
             ctx.clearRect(0, 0, 16, 16);
             // Disc shape
             const colors = {
                 [BlockType.MUSIC_DISC_1]: [29, 185, 84],
                 [BlockType.MUSIC_DISC_2]: [255, 85, 85],
                 [BlockType.MUSIC_DISC_3]: [96, 165, 250],
-                [BlockType.MUSIC_DISC_4]: [251, 191, 36]
+                [BlockType.MUSIC_DISC_4]: [251, 191, 36],
+                [BlockType.MUSIC_DISC_5]: [255, 215, 0],   // Gold/Yellow
+                [BlockType.MUSIC_DISC_6]: [56, 189, 248],  // Sky Blue
+                [BlockType.MUSIC_DISC_7]: [168, 85, 247],  // Purple
+                [BlockType.MUSIC_DISC_8]: [236, 72, 153]   // Pink
             };
             const discCol = colors[blockId as keyof typeof colors] || [255, 255, 255];
 

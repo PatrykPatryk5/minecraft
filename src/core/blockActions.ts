@@ -268,10 +268,14 @@ export function handleBlockAction(
 
             if (info?.isMusicDisc) {
                 // Map held item to track name
-                let track: 'muzo' | 'retro' | 'creepy' | 'chill' = 'muzo';
+                let track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'disco' | 'ambient' | 'techno' | 'synth' = 'muzo';
                 if (heldItem === BlockType.MUSIC_DISC_2) track = 'retro';
                 if (heldItem === BlockType.MUSIC_DISC_3) track = 'creepy';
                 if (heldItem === BlockType.MUSIC_DISC_4) track = 'chill';
+                if (heldItem === BlockType.MUSIC_DISC_5) track = 'disco';
+                if (heldItem === BlockType.MUSIC_DISC_6) track = 'ambient';
+                if (heldItem === BlockType.MUSIC_DISC_7) track = 'techno';
+                if (heldItem === BlockType.MUSIC_DISC_8) track = 'synth';
 
                 // Play disc
                 import('../audio/sounds').then(({ playMusicDisc }) => {

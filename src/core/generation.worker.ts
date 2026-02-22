@@ -55,8 +55,8 @@ export class TerrainWorker {
             return id > 0 && (BLOCK_DATA[id]?.solid ?? false);
         };
 
-        const solid = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[] };
-        const water = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[] };
+        const solid = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[], lightEmit: [] as number[] };
+        const water = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[], lightEmit: [] as number[] };
         let solidIdx = 0;
         let waterIdx = 0;
 
@@ -139,11 +139,12 @@ export class TerrainWorker {
                             target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
                             target.uvs.push(atlasUV.u + face.uv[i][0] * atlasUV.su, atlasUV.v + face.uv[i][1] * atlasUV.sv);
                             let br = 1.0;
-                            const isLightSource = BLOCK_DATA[bt]?.light && BLOCK_DATA[bt]?.light! > 0;
+                            const isLightSource = (BLOCK_DATA[bt]?.light ?? 0) > 0;
+                            const isNeighborLight = (BLOCK_DATA[nbt]?.light ?? 0) > 0;
 
                             if (lod === 0 && !isWater) {
-                                // Keep light sources and grass (partially) bright to eliminate black corner artifacts or show emission.
-                                if (isLightSource) {
+                                // Keep light sources and their immediate neighbors bright
+                                if (isLightSource || isNeighborLight) {
                                     br = 1.0;
                                 } else if (bt === BlockType.GRASS) {
                                     br = face.name === 'top' ? 1.0 : 0.9;
@@ -165,6 +166,7 @@ export class TerrainWorker {
                             const isTopVert = corner[1] > 0;
                             target.isFlora.push(isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0);
                             target.isLiquid.push(isLiquidBlock && isTopVert && liquidHeight < 1.0 ? 1.0 : 0.0);
+                            target.lightEmit.push(isLightSource ? 1.0 : 0.0);
                         }
 
                         if (lod === 0 && !isWater && (cornerAO[0] + cornerAO[2] > cornerAO[1] + cornerAO[3])) {

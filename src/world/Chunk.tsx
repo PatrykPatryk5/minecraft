@@ -27,6 +27,7 @@ function returnToPool(geo: THREE.BufferGeometry): void {
         geo.deleteAttribute('color');
         geo.deleteAttribute('isFlora');
         geo.deleteAttribute('isLiquid');
+        geo.deleteAttribute('lightEmit');
         geo.setIndex(null);
         geoPool.push(geo);
     } else {
@@ -115,6 +116,9 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                     if (data.isLiquid && data.isLiquid.length > 0) {
                         g.setAttribute('isLiquid', new THREE.BufferAttribute(data.isLiquid, 1));
                     }
+                    if (data.lightEmit && data.lightEmit.length > 0) {
+                        g.setAttribute('lightEmit', new THREE.BufferAttribute(data.lightEmit, 1));
+                    }
                     g.setIndex(new THREE.BufferAttribute(data.indices, 1));
                     g.computeBoundingSphere();
                     return g;
@@ -163,9 +167,11 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                         #include <common>
                         attribute float isFlora;
                         attribute float isLiquid;
+                        attribute float lightEmit;
                         uniform float uTime;
                         uniform vec2 uChunkOffset;
                         varying float vShade;
+                        varying float vLightEmit;
                         `
                     );
 
@@ -191,14 +197,17 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
 
                         // Minecraft-like directional shading + Top Highlight
                         vShade = 1.0;
-                        if (normal.y > 0.5) {
+                        vLightEmit = lightEmit;
+                        if (lightEmit > 0.0) {
+                           vShade = 1.0; // No shading for light sources
+                        } else if (normal.y > 0.5) {
                            vShade = 1.05; // Slightly brighter top
                         } else if (normal.y < -0.5) {
-                           vShade = 0.85; // Less dark bottom (was 0.5)
+                           vShade = 0.85; // Less dark bottom
                         } else if (abs(normal.z) > 0.5) {
-                           vShade = 0.95; // North/South (was 0.8)
+                           vShade = 0.95; // North/South
                         } else if (abs(normal.x) > 0.5) {
-                           vShade = 0.9; // East/West (was 0.6)
+                           vShade = 0.9; // East/West
                         }
                         `
                     );
@@ -208,6 +217,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                         `
                         #include <common>
                         varying float vShade;
+                        varying float vLightEmit;
                         `
                     );
 
@@ -252,9 +262,11 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                                 `
                                 #include <common>
                                 attribute float isLiquid;
+                                attribute float lightEmit;
                                 uniform float uTime;
                                 uniform vec2 uChunkOffset;
                                 varying float vShade;
+                                varying float vLightEmit;
                                 `
                             );
 
@@ -272,7 +284,10 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
 
                                 // Minecraft-like directional shading for water
                                 vShade = 1.0;
-                                if (normal.y > 0.5) {
+                                vLightEmit = lightEmit;
+                                if (lightEmit > 0.0) {
+                                   vShade = 1.0;
+                                } else if (normal.y > 0.5) {
                                    vShade = 1.0;
                                 } else if (normal.y < -0.5) {
                                    vShade = 0.6;
@@ -289,6 +304,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                                 `
                                 #include <common>
                                 varying float vShade;
+                                varying float vLightEmit;
                                 `
                             );
 

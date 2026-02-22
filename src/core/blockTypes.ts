@@ -315,6 +315,10 @@ export enum BlockType {
     MUSIC_DISC_3 = 508,
     MUSIC_DISC_4 = 509,
     JUKEBOX_PLAYING = 507, // Changed ID
+    MUSIC_DISC_5 = 515,
+    MUSIC_DISC_6 = 516,
+    MUSIC_DISC_7 = 517,
+    MUSIC_DISC_8 = 518,
 
     // ─── Deep Dark & Lush ──────────────────────────────
     SCULK = 700,
@@ -430,7 +434,7 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.TNT]: { name: 'TNT', color: '#cc3333', top: '#ddaa44', transparent: false, solid: true, breakTime: 0.0 },
     [BlockType.BOOKSHELF]: { name: 'Biblioteczka', color: '#b8945f', transparent: false, solid: true, breakTime: 1.5, tool: 'axe' },
     [BlockType.TRAPDOOR]: { name: 'Klapa', color: '#806030', transparent: true, solid: true, breakTime: 3.0, tool: 'axe' },
-    [BlockType.LAVA]: { name: 'Lawa', color: '#cc6622', transparent: true, solid: false, breakTime: 999, light: 15 },
+    [BlockType.LAVA]: { name: 'Lawa', color: '#cc6622', transparent: true, solid: false, breakTime: 999, light: 15, emissive: true },
     [BlockType.BED]: { name: 'Łóżko (Dół)', color: '#cc2222', top: '#cc2222', transparent: true, solid: true, breakTime: 0.2 },
     [BlockType.BED_HEAD]: { name: 'Łóżko (Góra)', color: '#cc2222', top: '#eeeeee', transparent: true, solid: true, breakTime: 0.2 },
     [BlockType.FENCE_OAK]: { name: 'Płot Dębowy', color: '#b8945f', transparent: true, solid: true, breakTime: 2.0, tool: 'axe' },
@@ -693,6 +697,10 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.MUSIC_DISC_2]: { name: 'Płyta Muzyczna (Retro)', color: '#ff5555', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
     [BlockType.MUSIC_DISC_3]: { name: 'Płyta Muzyczna (Creepy)', color: '#60a5fa', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
     [BlockType.MUSIC_DISC_4]: { name: 'Płyta Muzyczna (Chill)', color: '#fbbf24', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_5]: { name: 'Płyta Muzyczna (Disco)', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_6]: { name: 'Płyta Muzyczna (Ambient)', color: '#a0e0ff', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_7]: { name: 'Płyta Muzyczna (Techno)', color: '#b820b8', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_8]: { name: 'Płyta Muzyczna (Synth)', color: '#ff69b4', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
     [BlockType.JUKEBOX_PLAYING]: { name: 'Szafa grająca (gra)', color: '#4d3b3b', transparent: false, solid: true, breakTime: 0.8, tool: 'axe' },
 
     // ─── Deep Dark ──────────────────────────────────────
