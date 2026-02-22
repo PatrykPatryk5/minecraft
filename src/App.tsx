@@ -39,6 +39,7 @@ import FallingBlocksManager from './entities/FallingBlocks';
 import ArrowsManager from './entities/Arrows';
 import TNTManager from './entities/TNTPrimed';
 import PreJoinShield from './ui/PreJoinShield';
+import TabList from './ui/TabList';
 
 
 const UnderwaterOverlay = () => {
@@ -227,6 +228,9 @@ const App: React.FC = () => {
 
             {/* Chat */}
             {isPlaying && <ChatBox />}
+
+            {/* Tab List */}
+            {isPlaying && <TabList />}
 
             {/* Credits */}
             {screen === 'credits' && <CreditsScreen />}

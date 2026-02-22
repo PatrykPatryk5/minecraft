@@ -157,4 +157,4 @@ export function encodePacket(packet) {
     return buffer;
 }
 
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;

@@ -1,6 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import useGameStore from '../store/gameStore';
 import { getConnection } from '../multiplayer/ConnectionManager';
+import { PROTOCOL_VERSION } from '../multiplayer/protocol';
+
+interface RecentServer {
+    id: string;
+    name: string;
+    lastJoined: number;
+}
 
 const MultiplayerScreen: React.FC = () => {
     const screen = useGameStore((s) => s.screen);
@@ -15,6 +22,7 @@ const MultiplayerScreen: React.FC = () => {
     const [isPublic, setIsPublic] = useState(true);
     const [password, setPassword] = useState('');
     const [lobbies, setLobbies] = useState<any[]>([]);
+    const [recentServers, setRecentServers] = useState<RecentServer[]>([]);
 
     const fetchLobbies = async () => {
         try {
@@ -26,9 +34,34 @@ const MultiplayerScreen: React.FC = () => {
         }
     };
 
-    React.useEffect(() => {
+    const loadRecentServers = () => {
+        const stored = localStorage.getItem('mc_recent_servers');
+        if (stored) {
+            try {
+                setRecentServers(JSON.parse(stored));
+            } catch (e) {
+                setRecentServers([]);
+            }
+        }
+    };
+
+    const saveRecentServer = (id: string, name: string) => {
+        const existing = [...recentServers];
+        const index = existing.findIndex(s => s.id === id);
+        if (index !== -1) {
+            existing[index].lastJoined = Date.now();
+        } else {
+            existing.unshift({ id, name, lastJoined: Date.now() });
+        }
+        const updated = existing.sort((a, b) => b.lastJoined - a.lastJoined).slice(0, 5);
+        setRecentServers(updated);
+        localStorage.setItem('mc_recent_servers', JSON.stringify(updated));
+    };
+
+    useEffect(() => {
         if (screen === 'multiplayer') {
             fetchLobbies();
+            loadRecentServers();
             const timer = setInterval(fetchLobbies, 10000);
             return () => clearInterval(timer);
         }
@@ -52,7 +85,7 @@ const MultiplayerScreen: React.FC = () => {
         setConnecting(false);
     };
 
-    const handleJoin = async (id?: string, hasPass?: boolean) => {
+    const handleJoin = async (id?: string, name?: string, hasPass?: boolean) => {
         const targetId = id || hostIdInput;
         if (!playerName.trim() || !targetId.trim()) return;
 
@@ -69,6 +102,7 @@ const MultiplayerScreen: React.FC = () => {
             const conn = getConnection();
             await conn.joinGame(targetId, playerName, joinPass);
             setStatus('Połączono!');
+            saveRecentServer(targetId, name || 'Nieznany Serwer');
             useGameStore.getState().resetWorld();
             setScreen('playing');
         } catch (e: any) {
@@ -86,156 +120,170 @@ const MultiplayerScreen: React.FC = () => {
     return (
         <div className="main-menu">
             <div className="menu-bg" />
-            <div className="menu-content" style={{ width: '400px' }}>
-                <div className="screen-title">🌐 Tryb Multiplayer</div>
+            <div className="menu-content" style={{ width: '500px', maxHeight: '90vh', overflowY: 'auto' }}>
+                <div className="screen-title" style={{ fontSize: '32px', marginBottom: '20px' }}>Multiplayer</div>
 
-                <div className="form-group">
-                    <label>Nazwa gracza</label>
+                <div className="form-group" style={{ marginBottom: '25px' }}>
+                    <label style={{ color: '#ccc', textShadow: '1px 1px #000' }}>Nazwa gracza</label>
                     <input
                         className="mc-input"
                         value={playerName}
                         onChange={(e) => setPlayerName(e.target.value)}
                         maxLength={16}
                         placeholder="Steve"
+                        style={{ height: '40px', fontSize: '18px' }}
                     />
                 </div>
 
                 {!hostedId ? (
-                    <>
-                        <div className="form-group" style={{ marginTop: '20px' }}>
-                            <label>Dostępne Serwery Publiczne</label>
-                            <div style={{
-                                background: 'rgba(0,0,0,0.5)',
-                                borderRadius: 8,
-                                padding: 8,
-                                maxHeight: '150px',
-                                overflowY: 'auto',
-                                marginBottom: 10
-                            }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                        {/* Public Lobbies */}
+                        <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                <label style={{ color: '#aaa', fontSize: '14px' }}>Dostępne Serwery</label>
+                                <button className="mc-btn" onClick={() => fetchLobbies()} style={{ padding: '4px 8px', fontSize: '12px', minWidth: 'auto' }}>
+                                    Odśwież
+                                </button>
+                            </div>
+                            <div className="mc-container" style={{ maxHeight: '180px', overflowY: 'auto', background: 'rgba(0,0,0,0.4)', padding: '5px' }}>
                                 {lobbies.length === 0 ? (
-                                    <div style={{ textAlign: 'center', padding: 10, color: '#888' }}>
-                                        Brak aktywnych serwerów...
+                                    <div style={{ textAlign: 'center', padding: '20px', color: '#666', fontSize: '14px' }}>
+                                        Brak aktywnych serwerów publicznych...
                                     </div>
                                 ) : (
                                     lobbies.map((lobby) => (
                                         <div
                                             key={lobby.id}
-                                            onClick={() => handleJoin(lobby.id, lobby.hasPassword)}
+                                            className="server-entry"
+                                            onClick={() => handleJoin(lobby.id, lobby.name, lobby.hasPassword)}
                                             style={{
-                                                display: 'flex',
-                                                justifyContent: 'space-between',
-                                                padding: '8px 12px',
+                                                padding: '10px',
                                                 background: 'rgba(255,255,255,0.05)',
-                                                marginBottom: 4,
-                                                borderRadius: 4,
+                                                border: '1px solid rgba(255,255,255,0.1)',
+                                                marginBottom: '5px',
                                                 cursor: 'pointer',
-                                                border: '1px solid transparent',
-                                                transition: 'all 0.2s'
+                                                display: 'flex',
+                                                justifyContent: 'space-between'
                                             }}
-                                            onMouseEnter={(e) => e.currentTarget.style.borderColor = '#55ff55'}
-                                            onMouseLeave={(e) => e.currentTarget.style.borderColor = 'transparent'}
                                         >
-                                            <span style={{ color: '#fff' }}>
-                                                {lobby.isPermanent ? '⚡ [DEDYK] ' : ''}
-                                                {lobby.hasPassword ? '🔒 ' : '🏠 '}
-                                                {lobby.name} (v{lobby.version || '?'})
-                                            </span>
-                                            {window.location.protocol === 'https:' && lobby.id && lobby.id.startsWith('ws://') && (
-                                                <span style={{ color: '#ff5555', fontSize: '10px', marginLeft: '10px', animation: 'blink 1s infinite' }}>
-                                                    ⚠️ NIEBEZPIECZNE (WS)
-                                                </span>
-                                            )}
-                                            <span style={{ color: '#aaa' }}>👤 {lobby.players} graczy</span>
+                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                <span style={{ color: '#fff', fontSize: '16px' }}>{lobby.hasPassword ? '🔒 ' : ''}{lobby.name}</span>
+                                                <span style={{ color: '#888', fontSize: '12px' }}>v{lobby.version || '1.0'} • {lobby.isPermanent ? 'Dedykowany' : 'P2P'}</span>
+                                            </div>
+                                            <div style={{ textAlign: 'right' }}>
+                                                <div style={{ color: '#55ff55' }}>👤 {lobby.players}</div>
+                                                {lobby.id.startsWith('ws://') && window.location.protocol === 'https:' && (
+                                                    <div style={{ color: '#ff5555', fontSize: '9px' }}>INSECURE</div>
+                                                )}
+                                            </div>
                                         </div>
                                     ))
                                 )}
                             </div>
-                            <button className="mc-btn" onClick={() => fetchLobbies()} style={{ fontSize: '0.8em', marginBottom: 10 }}>
-                                🔄 Odśwież listę
-                            </button>
                         </div>
 
-                        <div className="form-group">
-                            <label>DOŁĄCZ RĘCZNIE (KOD)</label>
-                            <input
-                                className="mc-input"
-                                value={hostIdInput}
-                                onChange={(e) => setHostIdInput(e.target.value)}
-                                placeholder="Wpisz kod hosta (np. muzo-xzy)"
-                            />
-                            <button className="mc-btn primary" onClick={() => handleJoin()} disabled={connecting} style={{ marginTop: 8 }}>
-                                {connecting ? '⏳ Łączenie...' : '🚀 Dołącz do znajomego'}
-                            </button>
-                        </div>
-
-                        <div style={{ textAlign: 'center', margin: '20px 0', color: '#ccc' }}>--- ALBO ---</div>
-
-                        <div className="form-group">
-                            <label>STWÓRZ WŁASNĄ GRĘ</label>
-
-                            <div className="toggle-group" style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
-                                <button
-                                    className={`mc-btn ${isPublic ? 'primary' : ''}`}
-                                    style={{ flex: 1, padding: '5px' }}
-                                    onClick={() => setIsPublic(true)}
-                                >
-                                    🌎 WAN (Public)
-                                </button>
-                                <button
-                                    className={`mc-btn ${!isPublic ? 'primary' : ''}`}
-                                    style={{ flex: 1, padding: '5px' }}
-                                    onClick={() => setIsPublic(false)}
-                                >
-                                    🏠 LAN (Private)
-                                </button>
+                        {/* Recent Servers */}
+                        {recentServers.length > 0 && (
+                            <div>
+                                <label style={{ color: '#aaa', fontSize: '14px', marginBottom: '8px', display: 'block' }}>Ostatnio odwiedzane</label>
+                                <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '5px' }}>
+                                    {recentServers.map(s => (
+                                        <div
+                                            key={s.id}
+                                            onClick={() => handleJoin(s.id, s.name)}
+                                            style={{
+                                                padding: '8px 12px',
+                                                background: 'rgba(85, 255, 85, 0.1)',
+                                                border: '1px solid rgba(85, 255, 85, 0.2)',
+                                                borderRadius: '2px',
+                                                cursor: 'pointer',
+                                                whiteSpace: 'nowrap',
+                                                fontSize: '13px',
+                                                color: '#fff'
+                                            }}
+                                        >
+                                            {s.name}
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
+                        )}
 
-                            {isPublic && (
-                                <div style={{ marginBottom: 10 }}>
-                                    <label style={{ fontSize: '0.8em', color: '#aaa' }}>Opcjonalne hasło (zabezpiecz serwer):</label>
+                        <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '20px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                                <div>
+                                    <label style={{ color: '#aaa', fontSize: '12px', marginBottom: '5px', display: 'block' }}>Ręczne Dołączenie (KOD)</label>
                                     <input
                                         className="mc-input"
-                                        type="password"
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
-                                        placeholder="Brak hasła"
-                                        style={{ height: '30px', fontSize: '0.9em' }}
+                                        value={hostIdInput}
+                                        onChange={(e) => setHostIdInput(e.target.value)}
+                                        placeholder="KOD-123"
+                                        style={{ height: '35px' }}
                                     />
+                                    <button className="mc-btn primary" onClick={() => handleJoin()} disabled={connecting} style={{ marginTop: '10px', width: '100%' }}>
+                                        {connecting ? 'Łączenie...' : 'Dołącz'}
+                                    </button>
                                 </div>
-                            )}
-
-                            <button className="mc-btn" onClick={handleHost} disabled={connecting} style={{ width: '100%' }}>
-                                {connecting ? '⏳ Uruchamianie...' : '🏠 Zostań Hostem'}
-                            </button>
+                                <div>
+                                    <label style={{ color: '#aaa', fontSize: '12px', marginBottom: '5px', display: 'block' }}>Stwórz własny serwer</label>
+                                    <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+                                        <button className={`mc-btn ${isPublic ? 'active' : ''}`} onClick={() => setIsPublic(true)} style={{ flex: 1, padding: '4px', minWidth: 'auto', fontSize: '11px' }}>WAN</button>
+                                        <button className={`mc-btn ${!isPublic ? 'active' : ''}`} onClick={() => setIsPublic(false)} style={{ flex: 1, padding: '4px', minWidth: 'auto', fontSize: '11px' }}>LAN</button>
+                                    </div>
+                                    <button className="mc-btn" onClick={handleHost} disabled={connecting} style={{ width: '100%' }}>
+                                        Hostuj
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                    </>
+                    </div>
                 ) : (
-                    <div style={{ background: 'rgba(0,0,0,0.5)', padding: 16, borderRadius: 8, marginTop: 20 }}>
-                        <h3 style={{ margin: '0 0 10px 0', color: '#55ff55' }}>Serwer Działa!</h3>
-                        <p style={{ margin: '0 0 5px 0' }}>Podaj ten kod znajomym, aby mogli dołączyć:</p>
-                        <h2 style={{ background: '#000', padding: 10, userSelect: 'all', cursor: 'pointer', textAlign: 'center' }}>
+                    <div className="mc-container" style={{ textAlign: 'center', padding: '30px' }}>
+                        <h2 style={{ color: '#55ff55', marginTop: 0 }}>Serwer Gotowy!</h2>
+                        <p style={{ color: '#ccc', marginBottom: '20px' }}>Udostępnij ten kod innym:</p>
+                        <div style={{ background: '#000', padding: '15px', fontSize: '24px', letterSpacing: '4px', color: '#fff', border: '2px dashed #55ff55', marginBottom: '30px' }}>
                             {hostedId}
-                        </h2>
-                        <button className="mc-btn primary" onClick={handlePlayAsHost} style={{ marginTop: 15, width: '100%' }}>
-                            ▶ Rozpocznij Grę
+                        </div>
+                        <button className="mc-btn primary" onClick={handlePlayAsHost} style={{ width: '100%', height: '50px', fontSize: '20px' }}>
+                            Rozpocznij Grę
                         </button>
                     </div>
                 )}
 
                 {status && (
-                    <div style={{ color: status.includes('Błąd') || status.includes('Nie udało') ? '#ff6666' : '#66ff66', textAlign: 'center', marginTop: '15px' }}>
+                    <div style={{
+                        marginTop: '20px',
+                        padding: '10px',
+                        textAlign: 'center',
+                        color: status.includes('Błąd') ? '#ff5555' : '#55ff55',
+                        background: 'rgba(0,0,0,0.3)',
+                        borderRadius: '4px',
+                        fontSize: '14px'
+                    }}>
                         {status}
                     </div>
                 )}
 
-                <div className="menu-buttons" style={{ marginTop: 24 }}>
-                    <button className="mc-btn" onClick={() => setScreen('mainMenu')}>← Wstecz</button>
-                </div>
-
-                <div style={{ marginTop: 24, padding: 12, background: 'rgba(0,0,0,0.3)', borderRadius: 4, fontSize: '0.8em', color: '#aaa' }}>
-                    <strong>Standardowy Multiplayer:</strong> Gra działa bezpośrednio (P2P). Jeśli jesteście w różnych sieciach, połączenie przejdzie przez serwer pośredniczący (STUN/TURN).
+                <div style={{ marginTop: '30px', display: 'flex', justifyContent: 'center' }}>
+                    <button className="mc-btn" onClick={() => setScreen('mainMenu')} style={{ width: '200px' }}>Wstecz</button>
                 </div>
             </div>
+
+            <style>{`
+                .server-entry:hover {
+                    background: rgba(255,255,255,0.1) !important;
+                    border-color: #55ff55 !important;
+                }
+                .mc-btn.active {
+                    background-color: #555555;
+                    border-color: #ffffff;
+                }
+                .mc-container {
+                    background: rgba(0,0,0,0.5);
+                    border: 2px solid #555;
+                    padding: 10px;
+                }
+            `}</style>
         </div>
     );
 };

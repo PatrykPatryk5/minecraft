@@ -206,7 +206,7 @@ export class ConnectionManager {
                 conn.on('close', () => {
                     console.log(`[MP] Client ${conn.peer} left.`);
                     this.connections.delete(conn.peer);
-                    this.broadcast({ type: 'player_leave', payload: { id: conn.peer } }, conn.peer);
+                    this.broadcastPacket({ type: 'player_leave', payload: { id: conn.peer } }, conn.peer);
                     this.handlePacket({ type: 'player_leave', payload: { id: conn.peer } }); // Notify host's local state
                 });
 
@@ -541,7 +541,7 @@ export class ConnectionManager {
         this.sendViaRelay(playerId, packet);
     }
 
-    private broadcast(packet: ServerPacket, excludePeer?: string): void {
+    private broadcastPacket(packet: ServerPacket, excludePeer?: string): void {
         packet.seq = this.outSeq++;
         packet.ts = Date.now();
         const encoded = encodePacket(packet as any);
@@ -580,7 +580,7 @@ export class ConnectionManager {
             // If we are the host, our local actions are instantly broadcasted as SERVER packets
             switch (packet.type) {
                 case 'move':
-                    this.broadcast({
+                    this.broadcastPacket({
                         type: 'player_move',
                         payload: { id: 'host', nid: 0, pos: packet.payload.pos, rot: packet.payload.rot, dimension: packet.payload.dimension, isUnderwater: packet.payload.isUnderwater }
                     });
@@ -588,14 +588,14 @@ export class ConnectionManager {
                 case 'block_place':
                 case 'block_break':
                     const bt = packet.type === 'block_place' ? packet.payload.blockType : 0;
-                    this.broadcast({
+                    this.broadcastPacket({
                         type: 'block_update',
                         payload: { x: packet.payload.x, y: packet.payload.y, z: packet.payload.z, blockType: bt }
                     });
                     break;
                 case 'chat': {
                     const store = useGameStore.getState();
-                    this.broadcast({
+                    this.broadcastPacket({
                         type: 'chat_broadcast',
                         payload: { sender: store.playerName, text: (packet.payload as any).text }
                     });
@@ -652,9 +652,13 @@ export class ConnectionManager {
         this.sendToHost({ type: 'entity_sync', payload: { type, id, pos, vel, data } });
     }
 
+    sendEntityRemove(type: 'item' | 'tnt' | 'arrow', id: string): void {
+        this.sendToHost({ type: 'entity_remove', payload: { id } });
+    }
+
     sendWorldSync(payload: { time?: number, weather?: string, weatherIntensity?: number }): void {
         if (this.role !== 'host') return;
-        this.broadcast({ type: 'world_sync', payload });
+        this.broadcastPacket({ type: 'world_sync', payload });
     }
 
     getPing(): number {
@@ -750,7 +754,7 @@ export class ConnectionManager {
 
                     this.sendToPlayer(senderId, welcomePacket);
 
-                    this.broadcast({
+                    this.broadcastPacket({
                         type: 'player_join',
                         payload: { id: senderId, nid: nid, name, pos: pos || [0, 64, 0], rot: rot || [0, 0], dimension: dimension || 'overworld', isUnderwater: !!isUnderwater }
                     }, senderId);
@@ -766,7 +770,7 @@ export class ConnectionManager {
 
                     store.addConnectedPlayer(senderId, p.name, pos, rot, dimension as Dimension, isUnderwater, p.health, this.lastLatency.get(senderId) || 0);
 
-                    this.broadcast({
+                    this.broadcastPacket({
                         type: 'player_move',
                         payload: { id: senderId, nid: p.nid, pos, rot, dimension, isUnderwater, health: p.health, latency: this.lastLatency.get(senderId) || 0 }
                     }, senderId);
@@ -789,7 +793,7 @@ export class ConnectionManager {
                     store.bumpVersion(cx, cz);
 
                     // Broadcast to all other clients
-                    this.broadcast({
+                    this.broadcastPacket({
                         type: 'block_update',
                         payload: { x, y, z, blockType }
                     }, senderId);
@@ -804,7 +808,7 @@ export class ConnectionManager {
                     const senderName = p ? p.name : 'Unknown';
 
                     store.addChatMessage(senderName, text, 'player');
-                    this.broadcast({
+                    this.broadcastPacket({
                         type: 'chat_broadcast',
                         payload: { sender: senderName, text }
                     }, senderId);
@@ -815,7 +819,7 @@ export class ConnectionManager {
             case 'action': {
                 if (this.role === 'host' && senderId) {
                     const { actionType } = (packet.payload as any);
-                    this.broadcast({
+                    this.broadcastPacket({
                         type: 'player_action',
                         payload: { id: senderId, actionType }
                     }, senderId);
@@ -824,24 +828,25 @@ export class ConnectionManager {
             }
 
             case 'entity_sync': {
-                if (this.role === 'host') this.broadcast(packet as any, senderId);
+                if (this.role === 'host') this.broadcastPacket(packet as any, senderId);
 
                 const { type, id, pos, vel, data } = packet.payload;
-                if (type === 'item') {
-                    // Check if already exists
-                    if (!store.droppedItems.find(i => i.id === id)) {
-                        store.addDroppedItem(data, pos, vel || [0, 0, 0], id);
-                    }
-                } else if (type === 'tnt') {
-                    if (!store.primedTNT.find(t => t.id === id)) {
-                        store.spawnTNT(pos, data || 80, true);
-                    }
-                }
+                if (type === 'item') store.addDroppedItem(data, pos, vel, id);
+                if (type === 'tnt') store.spawnTNT(pos, data || 80, true);
                 break;
             }
 
             case 'entity_remove': {
-                if (this.role === 'host') this.broadcast(packet as any, senderId);
+                if (this.role === 'host') this.broadcastPacket(packet as any, senderId);
+                const { id } = packet.payload;
+                store.removeDroppedItem(id, true);
+                store.removeTNT(id, true);
+                store.removeArrow(id, true);
+                break;
+            }
+
+            case 'entity_velocity': {
+                if (this.role === 'host') this.broadcastPacket(packet as any, senderId);
                 break;
             }
 
@@ -922,7 +927,7 @@ export class ConnectionManager {
 
                 // If we are host, broadcast to everyone else
                 if (this.role === 'host' && senderId) {
-                    this.broadcast(packet as any, senderId);
+                    this.broadcastPacket(packet as any, senderId);
                 }
 
                 if (event === 'block_break') {
@@ -1003,7 +1008,7 @@ export class ConnectionManager {
             }
 
             case 'inventory_update': {
-                if (this.role === 'host') this.broadcast(packet, senderId);
+                if (this.role === 'host') this.broadcastPacket(packet as any, senderId);
 
                 const { type, key, data } = packet.payload;
                 if (type === 'chest') {
@@ -1081,7 +1086,7 @@ export class ConnectionManager {
     private startWorldSync(): void {
         this.syncTimer = setInterval(() => {
             const state = useGameStore.getState();
-            this.broadcast({
+            this.broadcastPacket({
                 type: 'world_sync' as any,
                 payload: {
                     time: state.dayTime,

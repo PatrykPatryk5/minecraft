@@ -7,7 +7,7 @@
 
 // ─── Constants ───────────────────────────────────────────
 
-export const PROTOCOL_VERSION = 12; // Standard 1.2 - Int16 rotation precision
+export const PROTOCOL_VERSION = 13; // Standard 1.3 - Entity removal sync
 export const TICK_RATE = 20;
 export const POSITION_SYNC_INTERVAL = 33; // 30Hz for ultra-smooth movement
 export const MAX_CHAT_LENGTH = 256;

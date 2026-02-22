@@ -80,7 +80,10 @@ const DroppedItem: React.FC<{ id: string; type: number; initialPos: [number, num
 };
 
 const DroppedItemsManager: React.FC = () => {
-    const items = useGameStore((s) => s.droppedItems);
+    const currentDim = useGameStore((s) => s.dimension);
+    const allItems = useGameStore((s) => s.droppedItems);
+    const items = allItems.filter(i => (i.dimension || 'overworld') === currentDim);
+
     return (
         <>
             {items.map((item) => (

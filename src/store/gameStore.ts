@@ -86,6 +86,7 @@ export interface DroppedItem {
     id: string;
     type: number;
     pos: [number, number, number];
+    dimension?: string;
     velocity?: [number, number, number];
 }
 
@@ -150,11 +151,11 @@ export interface GameState {
 
     arrows: Record<string, ArrowEntity>;
     addArrow: (pos: [number, number, number], velocity: [number, number, number]) => void;
-    removeArrow: (id: string) => void;
+    removeArrow: (id: string, fromNetwork?: boolean) => void;
 
     primedTNT: TNTPrimedEntity[];
     spawnTNT: (pos: [number, number, number], fuse?: number, fromNetwork?: boolean) => void;
-    removeTNT: (id: string) => void;
+    removeTNT: (id: string, fromNetwork?: boolean) => void;
     updateTNT: (id: string, fuse: number) => void;
 
     setChunkData: (cx: number, cz: number, dimension: string, data: Uint16Array) => void;
@@ -320,7 +321,7 @@ export interface GameState {
     // ── Dropped Items ──────────────────────────────────────
     droppedItems: DroppedItem[];
     addDroppedItem: (type: number, pos: [number, number, number], velocity?: [number, number, number], networkId?: string) => void;
-    removeDroppedItem: (id: string) => void;
+    removeDroppedItem: (id: string, fromNetwork?: boolean) => void;
 
     // ── Falling/Gravity Blocks ─────────────────────────────
     fallingBlocks: FallingBlock[];
@@ -603,12 +604,17 @@ const useGameStore = create<GameState>((set, get) => ({
             arrows: { ...s.arrows, [id]: { id, pos, velocity } }
         }));
     },
-    removeArrow: (id) => {
+    removeArrow: (id, fromNetwork = false) => {
         set((s) => {
             const next = { ...s.arrows };
             delete next[id];
             return { arrows: next };
         });
+        if (!fromNetwork && get().isMultiplayer) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                getConnection().sendEntityRemove('arrow', id);
+            });
+        }
     },
 
     setBlockPower: (x, y, z, power) => {
@@ -1236,10 +1242,11 @@ const useGameStore = create<GameState>((set, get) => ({
 
     // ── Dropped Items ──────────────────────────────────────
     droppedItems: [],
-    addDroppedItem: (type: number, pos: [number, number, number], velocity: [number, number, number] = [0, 0, 0], networkId?: string) => {
+    addDroppedItem: (type: number, pos: [number, number, number], velocity: [number, number, number] = [0, 0, 0], networkId?: string, dimension?: string) => {
         const id = networkId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `item-${Math.random().toString(36).substring(2, 10)}`);
+        const itemDim = dimension || get().dimension;
         set((s) => ({
-            droppedItems: [...s.droppedItems, { id, type, pos, velocity }]
+            droppedItems: [...s.droppedItems, { id, type, pos, velocity, dimension: itemDim }]
         }));
         if (!networkId && get().isMultiplayer) {
             import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
@@ -1247,9 +1254,16 @@ const useGameStore = create<GameState>((set, get) => ({
             });
         }
     },
-    removeDroppedItem: (id) => set((s) => ({
-        droppedItems: s.droppedItems.filter(i => i.id !== id)
-    })),
+    removeDroppedItem: (id: string, fromNetwork: boolean = false) => {
+        set((s) => ({
+            droppedItems: s.droppedItems.filter(i => i.id !== id)
+        }));
+        if (!fromNetwork && get().isMultiplayer) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                getConnection().sendEntityRemove('item', id);
+            });
+        }
+    },
 
     // ── Falling/Gravity Blocks ─────────────────────────────
     fallingBlocks: [],
@@ -1274,9 +1288,16 @@ const useGameStore = create<GameState>((set, get) => ({
             });
         }
     },
-    removeTNT: (id) => set((s) => ({
-        primedTNT: s.primedTNT.filter(t => t.id !== id)
-    })),
+    removeTNT: (id: string, fromNetwork: boolean = false) => {
+        set((s) => ({
+            primedTNT: s.primedTNT.filter(t => t.id !== id)
+        }));
+        if (!fromNetwork && get().isMultiplayer) {
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
+                getConnection().sendEntityRemove('tnt', id);
+            });
+        }
+    },
     updateTNT: (id, fuse) => set((s) => ({
         primedTNT: s.primedTNT.map(t => t.id === id ? { ...t, fuse } : t)
     })),

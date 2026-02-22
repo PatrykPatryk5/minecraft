@@ -321,6 +321,10 @@ wss.on('connection', (ws) => {
                 broadcast(packet, playerId);
                 break;
 
+            case 'inventory_update':
+                broadcast(packet, playerId);
+                break;
+
             case 'ping':
                 ws.send(encodePacket({ type: 'pong', ts: Date.now(), payload: { ts: packet.payload.ts } }));
                 break;
