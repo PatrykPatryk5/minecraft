@@ -55,6 +55,8 @@ export class ConnectionManager {
     private relayWs: WebSocket | null = null;
     private relayClientIds: Set<string> = new Set();
     private isUsingRelay: boolean = false;
+    private joinResolve: (() => void) | null = null;
+    private joinReject: ((err: any) => void) | null = null;
     private config: any = null;
     private authSession: { token: string; uuid: string } | null = null;
     private outSeq: number = 0;
@@ -268,14 +270,19 @@ export class ConnectionManager {
                             name: playerName,
                             password,
                             version: PROTOCOL_VERSION,
-                            token: this.authSession?.token,
-                            uuid: this.authSession?.uuid
+                            token: this.authSession?.token || 'offline',
+                            uuid: this.authSession?.uuid || `off-${Math.random().toString(36).substring(2, 6)}`
                         }
                     });
-
-                    resolve();
                 }
             }, 5000);
+
+            this.joinResolve = resolve;
+            this.joinReject = (err) => {
+                clearTimeout(connectionTimeout);
+                this.disconnect();
+                reject(err);
+            };
 
             this.peer.on('open', (id) => {
                 const conn = this.peer!.connect(hostId, {
@@ -295,14 +302,8 @@ export class ConnectionManager {
                     this.status = 'connected';
                     this.currentLobbyId = hostId;
                     this.isUsingRelay = false;
-                    console.log('[MP] Connected to Host via P2P!');
-
-                    const state = useGameStore.getState();
-                    state.setPlayerName(playerName);
-                    state.setIsMultiplayer(true);
-                    (window as any).isMPClient = true;
-                    this.startPositionSync();
-                    resolve();
+                    console.log('[MP] P2P channel open, waiting for welcome...');
+                    // resolve/multiplayer state moved to welcome handler
                 });
 
                 conn.on('data', (data: any) => {
@@ -348,12 +349,7 @@ export class ConnectionManager {
             this.ws.onopen = async () => {
                 clearTimeout(timeout);
                 this.status = 'connected';
-                console.log('[MP] Connected to Dedicated Server via WS');
-
-                const state = useGameStore.getState();
-                state.setPlayerName(playerName);
-                state.setIsMultiplayer(true);
-                (window as any).isMPClient = true;
+                console.log('[MP] WS connected, sending join packet...');
 
                 if (!this.ws) return;
 
@@ -368,14 +364,13 @@ export class ConnectionManager {
                         version: PROTOCOL_VERSION,
                         token: this.authSession?.token || 'offline',
                         uuid: this.authSession?.uuid || `off-${Math.random().toString(36).substring(2, 6)}`,
-                        dimension: state.dimension,
-                        pos: state.playerPos,
-                        rot: state.playerRot,
-                        isUnderwater: state.isUnderwater
+                        dimension: useGameStore.getState().dimension,
+                        pos: useGameStore.getState().playerPos,
+                        rot: useGameStore.getState().playerRot,
+                        isUnderwater: useGameStore.getState().isUnderwater
                     }
                 }));
-                this.startPositionSync();
-                resolve();
+                // resolve/multiplayer state moved to welcome handler
             };
 
             this.ws.onmessage = (event) => {
@@ -590,21 +585,33 @@ export class ConnectionManager {
         switch (packet.type) {
             case 'welcome': {
                 const { playerId, nid, players, worldSeed, time, weather, weatherIntensity } = packet.payload;
-                store.setPlayerName(store.playerName);
-                if (playerId) this.ownId = playerId;
-                if (nid !== undefined) this.ownNid = nid;
+                this.ownId = playerId;
+                this.ownNid = nid || 0;
+                console.log(`[MP] Welcome! My ID: ${playerId} (Nid: ${nid})`);
 
                 if (worldSeed !== undefined) {
                     store.setWorldSeed(worldSeed);
-                    console.log(`[MP] Sycned world seed to ${worldSeed}`);
-                }
-                console.log(`[MP] Welcome! ID: ${playerId} (NID: ${this.ownNid}), ${players.length} players online`);
-                for (const p of players) {
-                    store.addConnectedPlayer(p.id, p.name, p.pos, p.rot, p.dimension as Dimension, p.isUnderwater);
-                    if (p.nid !== undefined) this.nidToUuid.set(p.nid, p.id);
+                    console.log(`[MP] Synced world seed to ${worldSeed}`);
                 }
                 if (time !== undefined) store.setDayTime(time);
-                if (weather) store.setWeather(weather as any, weatherIntensity);
+                if (weather !== undefined) store.setWeather(weather as any, weatherIntensity);
+
+                // Add existing players
+                for (const p of players) {
+                    store.addConnectedPlayer(p.id, p.name, p.pos, p.rot, p.dimension as Dimension, p.isUnderwater, p.health, p.latency, p.ts, p.nid);
+                    if (p.nid !== undefined) this.nidToUuid.set(p.nid, p.id);
+                }
+
+                // Finalize join
+                store.setIsMultiplayer(true);
+                (window as any).isMPClient = true;
+                this.startPositionSync();
+
+                if (this.joinResolve) {
+                    this.joinResolve();
+                    this.joinResolve = null;
+                    this.joinReject = null;
+                }
                 break;
             }
 
@@ -612,13 +619,16 @@ export class ConnectionManager {
                 if (this.role === 'host' && senderId) {
                     const { name, pos, rot, dimension, isUnderwater, nid } = (packet as any).payload;
                     store.addConnectedPlayer(senderId, name, pos || [0, 64, 0], rot || [0, 0], (dimension as Dimension) || 'overworld', !!isUnderwater);
-                    if (nid !== undefined) this.nidToUuid.set(nid, senderId);
+                    if (nid !== undefined) {
+                        this.nidToUuid.set(nid, senderId);
+                    }
 
                     this.sendViaRelay(senderId, {
                         type: 'welcome',
                         payload: {
                             playerId: senderId,
                             nid: nid,
+                            worldSeed: store.worldSeed,
                             players: Object.entries(store.connectedPlayers).map(([id, p]) => ({ id, ...p } as any)),
                             time: store.dayTime,
                             weather: store.weather
@@ -797,6 +807,11 @@ export class ConnectionManager {
 
             case 'error': {
                 console.error('[MP] Server error:', packet.payload.message);
+                if (this.joinReject) {
+                    this.joinReject(new Error(packet.payload.message));
+                    this.joinResolve = null;
+                    this.joinReject = null;
+                }
                 break;
             }
 

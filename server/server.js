@@ -37,6 +37,7 @@ const players = new Map();
 const worldBlocks = []; // Snapshot of placed blocks
 let worldTime = 0;
 let weather = 'clear';
+let worldSeed = Math.floor(Math.random() * 1000000);
 let nextNid = 1;
 
 // Lobby Registration
@@ -81,7 +82,7 @@ async function reportStatus() {
 // Persist world occasionally
 function saveWorld() {
     try {
-        fs.writeFileSync(WORLD_FILE, JSON.stringify(worldBlocks));
+        fs.writeFileSync(WORLD_FILE, JSON.stringify({ worldSeed, worldBlocks }));
         console.log('[SERVER] World saved.');
     } catch (e) { console.error('[SERVER] Save failed:', e); }
 }
@@ -90,8 +91,10 @@ function loadWorld() {
     try {
         if (fs.existsSync(WORLD_FILE)) {
             const data = JSON.parse(fs.readFileSync(WORLD_FILE));
-            worldBlocks.push(...data);
-            console.log(`[SERVER] Loaded ${worldBlocks.length} blocks.`);
+            if (data.worldSeed !== undefined) worldSeed = data.worldSeed;
+            if (data.worldBlocks) worldBlocks.push(...data.worldBlocks);
+            else if (Array.isArray(data)) worldBlocks.push(...data); // Legacy support
+            console.log(`[SERVER] Loaded world (Seed: ${worldSeed}, Blocks: ${worldBlocks.length}).`);
         }
     } catch (e) { }
 }
@@ -198,6 +201,7 @@ wss.on('connection', (ws) => {
                 payload: {
                     playerId,
                     nid: playerInfo.nid,
+                    worldSeed,
                     players: Array.from(players.values()).map(p => p.info),
                     time: worldTime,
                     weather
