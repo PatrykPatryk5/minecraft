@@ -159,14 +159,15 @@ export function encodePlayerMoveBinary(nid: number, pos: [number, number, number
     return buffer;
 }
 
-export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer): T | null {
+export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer | number[]): T | null {
     if (typeof data === 'string') {
         try {
             return JSON.parse(data) as T;
         } catch { return null; }
     } else if (Array.isArray(data)) {
         // Handle array-wrapped binary from JSON relay
-        return decodePacket(new Uint8Array(data).buffer);
+        const uint8 = new Uint8Array(data);
+        return decodePacket(uint8.buffer);
     } else {
         const buffer = data instanceof ArrayBuffer ? data : (data as Uint8Array).buffer;
         const view = new DataView(buffer, (data as any).byteOffset || 0, (data as any).byteLength || buffer.byteLength);

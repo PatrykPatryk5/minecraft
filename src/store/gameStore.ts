@@ -536,12 +536,15 @@ const useGameStore = create<GameState>((set, get) => ({
                 chunk = new Uint16Array(CHUNK_VOLUME);
             }
 
+            const idx = blockIndex(lx, b.y, lz);
+            if (chunk[idx] === (b.typeId & 0x0FFF)) continue; // OPTIMIZATION: skip if same type
+
             // If it's the original from state, copy it
             if (chunk === s.chunks[key]) {
                 chunk = new Uint16Array(chunk);
             }
 
-            chunk[blockIndex(lx, b.y, lz)] = b.typeId & 0x0FFF;
+            chunk[idx] = b.typeId & 0x0FFF;
             affectedChunks.set(key, chunk);
 
             // Bump versions

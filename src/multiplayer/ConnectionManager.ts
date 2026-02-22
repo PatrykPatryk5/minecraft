@@ -251,18 +251,25 @@ export class ConnectionManager {
             const myId = 'muzo-cli-' + Math.random().toString(36).substring(2, 6);
             this.peer = new Peer(myId, { debug: 1, config: this.config });
 
+            // Connect to Relay for fallback signaling/tunneling (non-blocking)
+            this.connectToRelay(myId);
+
             // If we have an online session, use it
             if (!this.authSession) await this.claimSession(playerName);
 
-            // Connect to Relay for fallback signaling/tunneling
-            await this.connectToRelay(myId);
-
             const connectionTimeout = setTimeout(() => {
                 if (this.status === 'connecting') {
-                    console.warn('[MP] P2P connection timed out, trying Replicator Relay fallback...');
+                    console.warn('[MP] P2P connection timed out (5s), switching to Replicator Relay fallback.');
                     this.isUsingRelay = true;
                     this.status = 'connected';
                     this.currentLobbyId = hostId;
+                    (window as any).isMPClient = true;
+
+                    // Clear any pending PeerJS attempts
+                    if (this.hostConn) {
+                        this.hostConn.close();
+                        this.hostConn = null;
+                    }
 
                     // Send join packet via Relay
                     this.sendViaRelay(hostId, {
@@ -275,6 +282,12 @@ export class ConnectionManager {
                             uuid: this.authSession?.uuid || `off-${Math.random().toString(36).substring(2, 6)}`
                         }
                     });
+
+                    if (this.joinResolve) {
+                        this.joinResolve();
+                        this.joinResolve = null;
+                        this.joinReject = null;
+                    }
                 }
             }, 5000);
 
@@ -478,25 +491,24 @@ export class ConnectionManager {
         const state = useGameStore.getState();
         const oldLobbyId = this.currentLobbyId;
 
-        // Disconnect from old host logic bits (but keep world state!)
+        console.log('[MP] Promoting to Host...');
+
+        // Disconnect client-side networking
         this.stopPositionSync();
-        this.stopPingHeartbeat();
         this.hostConn = null;
         this.ws = null;
+        this.role = 'host';
 
-        // Re-host
+        // Start hosting
         await this.hostGame(state.playerName, true, '', false, false);
 
-        // Inform peers via Relay (using old lobby ID as the topic/broadcast target)
+        // Inform peers via Relay room
         if (this.relayWs?.readyState === 1 && oldLobbyId) {
+            console.log('[MP] Broadcasting migration signal to room...');
             this.relayWs.send(JSON.stringify({
-                type: 'tunnel',
-                to: oldLobbyId, // Broadcast to old lobby
-                payload: encodePacket({ type: 'host_migration', payload: { newHostId: this.ownId } } as any)
+                type: 'host_migration',
+                payload: { newHostId: this.ownId }
             }));
-
-            // Also broadcast specifically to all known peers via relay if needed
-            // But usually the above tunnel to the lobby ID works if relay supports it
         }
     }
 
@@ -556,7 +568,9 @@ export class ConnectionManager {
         // Broadcast via Relay fallback
         if (this.relayWs?.readyState === 1) {
             for (const id of this.relayClientIds) {
-                if (id !== excludePeer) {
+                // Only use relay if P2P connection to this client is not open
+                const peerConn = this.connections.get(id);
+                if (id !== excludePeer && (!peerConn || !peerConn.open)) {
                     this.sendViaRelay(id, packet);
                 }
             }
@@ -877,6 +891,9 @@ export class ConnectionManager {
             case 'ping': {
                 if (senderId) {
                     this.sendToPeer(senderId, { type: 'pong', payload: { ts: packet.payload.ts } });
+                } else if (this.role === 'client') {
+                    // Host/Dedicated server is pinging us
+                    this.sendToHost({ type: 'pong', payload: { ts: packet.payload.ts } } as any);
                 }
                 break;
             }
@@ -1119,8 +1136,13 @@ export class ConnectionManager {
 
             this.relayWs.onopen = () => {
                 clearTimeout(timeout);
-                this.relayWs?.send(JSON.stringify({ type: 'register', id: myId }));
-                console.log('[MP] Registered with Replicator Relay.');
+                // Register with room ID (current lobby) for migration signaling
+                this.relayWs?.send(JSON.stringify({
+                    type: 'register',
+                    id: myId,
+                    roomId: this.currentLobbyId
+                }));
+                console.log(`[MP] Registered with Replicator Relay in room: ${this.currentLobbyId}`);
                 resolve();
             };
 
@@ -1156,8 +1178,13 @@ export class ConnectionManager {
 
     private sendViaRelay(to: string, packet: any): void {
         if (this.relayWs?.readyState === 1) {
-            const encoded = encodePacket(packet);
-            const payload = encoded instanceof ArrayBuffer ? Array.from(new Uint8Array(encoded)) : encoded;
+            let payload = encodePacket(packet);
+
+            // Special case: ArrayBuffer cannot be stringified by JSON.stringify
+            if (payload instanceof ArrayBuffer) {
+                payload = Array.from(new Uint8Array(payload)) as any;
+            }
+
             this.relayWs.send(JSON.stringify({
                 type: 'tunnel',
                 to,

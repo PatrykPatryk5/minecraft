@@ -105,6 +105,15 @@ function loadWorld() {
     setInterval(registerLobby, 20000);
     setInterval(reportStatus, 10000);
     setInterval(saveWorld, 60000);
+
+    // Ping Heartbeat (Every 5s)
+    setInterval(() => {
+        const pingPacket = encodePacket({ type: 'ping', payload: { ts: Date.now() } });
+        for (const player of players.values()) {
+            if (player.ws.readyState === 1) player.ws.send(pingPacket);
+        }
+    }, 5000);
+
     registerLobby();
 })();
 
@@ -269,6 +278,11 @@ wss.on('connection', (ws) => {
                 const bt = packet.type === 'block_place' ? packet.payload.blockType : 0;
                 // Update world snapshot
                 const blockIdx = worldBlocks.findIndex(b => b.x === packet.payload.x && b.y === packet.payload.y && b.z === packet.payload.z);
+
+                // Optimization: Skip if already this type
+                if (blockIdx !== -1 && worldBlocks[blockIdx].type === bt) return;
+                if (blockIdx === -1 && bt === 0) return;
+
                 if (bt === 0) {
                     if (blockIdx !== -1) worldBlocks.splice(blockIdx, 1);
                 } else {

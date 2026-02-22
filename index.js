@@ -9,7 +9,8 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const app = Fastify({
-    logger: true
+    logger: true,
+    bodyLimit: 52428800 // 50MB
 })
 
 const PORT = process.env.PORT || 3046
@@ -63,13 +64,20 @@ app.post('/api/auth/verify', async (req, reply) => {
 });
 
 // Replicator (Relay) Logic
-const relayClients = new Map()
+const relayClients = new Map() // clientId -> ws
+const relayRooms = new Map() // clientId -> roomId
+const roomPeers = new Map() // roomId -> Set<clientId>
 
 app.ready(() => {
-    const wss = new WebSocketServer({ server: app.server, path: '/relay' });
+    const wss = new WebSocketServer({
+        server: app.server,
+        path: '/relay',
+        maxPayload: 52428800 // 50MB
+    });
 
     wss.on('connection', (ws, req) => {
         let clientId = null;
+        let roomId = null;
 
         ws.on('message', (data) => {
             try {
@@ -78,21 +86,62 @@ app.ready(() => {
                 // Register client
                 if (msg.type === 'register') {
                     clientId = msg.id;
+                    roomId = msg.roomId || null;
                     relayClients.set(clientId, ws);
-                    console.log(`[RELAY] Registered: ${clientId}`);
+
+                    if (roomId) {
+                        relayRooms.set(clientId, roomId);
+                        if (!roomPeers.has(roomId)) roomPeers.set(roomId, new Set());
+                        roomPeers.get(roomId).add(clientId);
+                    }
+
+                    console.log(`[RELAY] Registered: ${clientId}${roomId ? ` (Room: ${roomId})` : ''}`);
                     return;
                 }
 
                 // Tunnel message to target
                 if (msg.type === 'tunnel' && msg.to && msg.payload) {
-                    // Security: Ensure sender is who they say they are if clientId is set
-                    const target = relayClients.get(msg.to);
-                    if (target && target.readyState === 1) {
-                        target.send(JSON.stringify({
-                            type: 'tunneled',
-                            from: clientId || 'anonymous',
-                            payload: msg.payload
-                        }));
+                    if (msg.to === 'room' && roomId) {
+                        const peers = roomPeers.get(roomId);
+                        if (peers) {
+                            const tunneled = JSON.stringify({
+                                type: 'tunneled',
+                                from: clientId || 'anonymous',
+                                payload: msg.payload
+                            });
+                            for (const peerId of peers) {
+                                if (peerId !== clientId) {
+                                    const peerWs = relayClients.get(peerId);
+                                    if (peerWs?.readyState === 1) peerWs.send(tunneled);
+                                }
+                            }
+                        }
+                    } else {
+                        const target = relayClients.get(msg.to);
+                        if (target && target.readyState === 1) {
+                            target.send(JSON.stringify({
+                                type: 'tunneled',
+                                from: clientId || 'anonymous',
+                                payload: msg.payload
+                            }));
+                        }
+                    }
+                }
+
+                // Specific Migration Signal
+                if (msg.type === 'host_migration' && roomId) {
+                    const signal = JSON.stringify({
+                        type: 'host_migration',
+                        payload: msg.payload
+                    });
+                    const peers = roomPeers.get(roomId);
+                    if (peers) {
+                        for (const peerId of peers) {
+                            if (peerId !== clientId) {
+                                const peerWs = relayClients.get(peerId);
+                                if (peerWs?.readyState === 1) peerWs.send(signal);
+                            }
+                        }
                     }
                 }
             } catch (e) {
@@ -103,6 +152,11 @@ app.ready(() => {
         ws.on('close', () => {
             if (clientId) {
                 relayClients.delete(clientId);
+                if (roomId && roomPeers.has(roomId)) {
+                    roomPeers.get(roomId).delete(clientId);
+                    if (roomPeers.get(roomId).size === 0) roomPeers.delete(roomId);
+                }
+                relayRooms.delete(clientId);
                 console.log(`[RELAY] Unregistered: ${clientId}`);
             }
         });
