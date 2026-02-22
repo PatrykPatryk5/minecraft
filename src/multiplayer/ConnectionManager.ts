@@ -260,34 +260,7 @@ export class ConnectionManager {
             const connectionTimeout = setTimeout(() => {
                 if (this.status === 'connecting') {
                     console.warn('[MP] P2P connection timed out (5s), switching to Replicator Relay fallback.');
-                    this.isUsingRelay = true;
-                    this.status = 'connected';
-                    this.currentLobbyId = hostId;
-                    (window as any).isMPClient = true;
-
-                    // Clear any pending PeerJS attempts
-                    if (this.hostConn) {
-                        this.hostConn.close();
-                        this.hostConn = null;
-                    }
-
-                    // Send join packet via Relay
-                    this.sendViaRelay(hostId, {
-                        type: 'join',
-                        payload: {
-                            name: playerName,
-                            password,
-                            version: PROTOCOL_VERSION,
-                            token: this.authSession?.token || 'offline',
-                            uuid: this.authSession?.uuid || `off-${Math.random().toString(36).substring(2, 6)}`
-                        }
-                    });
-
-                    if (this.joinResolve) {
-                        this.joinResolve();
-                        this.joinResolve = null;
-                        this.joinReject = null;
-                    }
+                    this.switchToRelay(hostId, playerName, password);
                 }
             }, 5000);
 
@@ -316,8 +289,22 @@ export class ConnectionManager {
                     this.status = 'connected';
                     this.currentLobbyId = hostId;
                     this.isUsingRelay = false;
-                    console.log('[MP] P2P channel open, waiting for welcome...');
-                    // resolve/multiplayer state moved to welcome handler
+                    console.log('[MP] P2P channel open, sending join packet...');
+
+                    conn.send(encodePacket({
+                        type: 'join',
+                        payload: {
+                            name: playerName,
+                            password,
+                            version: PROTOCOL_VERSION,
+                            token: this.authSession?.token || 'offline',
+                            uuid: this.authSession?.uuid || `off-${Math.random().toString(36).substring(2, 6)}`,
+                            dimension: useGameStore.getState().dimension,
+                            pos: useGameStore.getState().playerPos,
+                            rot: useGameStore.getState().playerRot,
+                            isUnderwater: useGameStore.getState().isUnderwater
+                        }
+                    } as any));
                 });
 
                 conn.on('data', (data: any) => {
@@ -326,22 +313,36 @@ export class ConnectionManager {
                 });
 
                 conn.on('close', () => {
+                    const wasConnecting = (this.status === 'connecting');
                     this.status = 'disconnected';
                     console.log('[MP] Disconnected from Host');
-                    this.handleHostDisconnect();
+                    if (wasConnecting) {
+                        this.switchToRelay(hostId, playerName, password);
+                    } else {
+                        this.handleHostDisconnect();
+                    }
                 });
 
                 conn.on('error', (err) => {
                     console.error('[MP] Connection to host error:', err);
-                    this.status = 'error';
-                    reject(err);
+                    if (this.status === 'connecting') {
+                        this.switchToRelay(hostId, playerName, password);
+                    } else {
+                        this.status = 'error';
+                        reject(err);
+                    }
                 });
             });
 
-            this.peer.on('error', (err) => {
-                this.status = 'error';
-                console.error('[MP] Client Peer error:', err);
-                reject(err);
+            this.peer.on('error', (err: any) => {
+                if (this.status === 'connecting') {
+                    console.warn('[MP] Peer error during join, failing back to Relay:', err.type);
+                    this.switchToRelay(hostId, playerName, password);
+                } else {
+                    this.status = 'error';
+                    console.error('[MP] Client Peer error:', err);
+                    reject(err);
+                }
             });
         });
     }
@@ -1123,6 +1124,37 @@ export class ConnectionManager {
 
 
     // ── Lobby Registration (Host → index.js) ───────────────
+
+    private switchToRelay(hostId: string, playerName: string, password: string): void {
+        if (this.isUsingRelay) return;
+
+        console.warn('[MP] Switching to Replicator Relay fallback...');
+        this.isUsingRelay = true;
+        this.status = 'connecting'; // Stay in connecting until welcome packet arrives
+        this.currentLobbyId = hostId;
+        (window as any).isMPClient = true;
+
+        if (this.hostConn) {
+            this.hostConn.close();
+            this.hostConn = null;
+        }
+
+        const state = useGameStore.getState();
+        this.sendViaRelay(hostId, {
+            type: 'join',
+            payload: {
+                name: playerName,
+                password,
+                version: PROTOCOL_VERSION,
+                token: this.authSession?.token || 'offline',
+                uuid: this.authSession?.uuid || `off-${Math.random().toString(36).substring(2, 6)}`,
+                dimension: state.dimension,
+                pos: state.playerPos,
+                rot: state.playerRot,
+                isUnderwater: state.isUnderwater
+            }
+        });
+    }
 
     private async connectToRelay(myId: string): Promise<void> {
         return new Promise((resolve) => {
