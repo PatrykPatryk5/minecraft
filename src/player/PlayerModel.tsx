@@ -22,7 +22,7 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
     const walkTime = useRef(0);
     const lastUpdate = useRef(0);
     const posBuffer = useRef<{ pos: [number, number, number], rot: [number, number], ts: number }[]>([]);
-    const BUFFER_TIME = 100; // 100ms interpolation buffer
+    const BUFFER_TIME = 60; // Reduced from 100ms for lower perceived latency
 
     // Initial positioning
     useFrame((_, delta) => {
@@ -30,7 +30,8 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
         const playerState = state.connectedPlayers[id];
 
         // Hide if they are not in the same dimension
-        if (!playerState || playerState.dimension !== state.dimension) {
+        const isMatch = !playerState.dimension || playerState.dimension === state.dimension;
+        if (!playerState || !isMatch) {
             if (group.current) group.current.visible = false;
             return;
         } else if (group.current) {

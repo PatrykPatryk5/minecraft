@@ -445,6 +445,24 @@ export class ConnectionManager {
         }
     }
 
+    private sendToPlayer(playerId: string, packet: ServerPacket): void {
+        packet.seq = this.outSeq++;
+        packet.ts = Date.now();
+        const encoded = encodePacket(packet as any);
+
+        // Try direct peer connection
+        const conn = this.connections.get(playerId);
+        if (conn && conn.open) {
+            conn.send(encoded);
+            return;
+        }
+
+        // Try dedicated websocket (not applicable for sending TO a client, but keeping for symmetry if needed)
+
+        // Fallback to relay
+        this.sendViaRelay(playerId, packet);
+    }
+
     private broadcast(packet: ServerPacket, excludePeer?: string): void {
         packet.seq = this.outSeq++;
         packet.ts = Date.now();
@@ -486,7 +504,7 @@ export class ConnectionManager {
                 case 'move':
                     this.broadcast({
                         type: 'player_move',
-                        payload: { id: 'host', pos: packet.payload.pos, rot: packet.payload.rot, dimension: packet.payload.dimension, isUnderwater: packet.payload.isUnderwater }
+                        payload: { id: 'host', nid: 0, pos: packet.payload.pos, rot: packet.payload.rot, dimension: packet.payload.dimension, isUnderwater: packet.payload.isUnderwater }
                     });
                     break;
                 case 'block_place':
@@ -521,26 +539,6 @@ export class ConnectionManager {
     }
 
     sendBlockUpdate(x: number, y: number, z: number, blockType: number): void {
-        // Rate Limiting: Max 15 actions per second
-        const now = Date.now();
-        if (now - this.lastActionReset > 1000) {
-            this.actionCounter = 0;
-            this.lastActionReset = now;
-        }
-        if (this.actionCounter > 15) {
-            console.warn('[MP] Action rate limit reached!');
-            return;
-        }
-        this.actionCounter++;
-
-        // Distance Validation: Max 8 blocks reach
-        const playerPos = useGameStore.getState().playerPos;
-        const distSq = Math.pow(playerPos[0] - x, 2) + Math.pow(playerPos[1] - y, 2) + Math.pow(playerPos[2] - z, 2);
-        if (distSq > 64) { // 8^2
-            console.warn('[MP] Block update out of reach!');
-            return;
-        }
-
         const type = blockType === 0 ? 'block_break' : 'block_place';
         this.sendToHost({
             type: type as any,
@@ -632,7 +630,7 @@ export class ConnectionManager {
                         this.nidToUuid.set(nid, senderId);
                     }
 
-                    this.sendViaRelay(senderId, {
+                    const welcomePacket = {
                         type: 'welcome',
                         payload: {
                             playerId: senderId,
@@ -642,7 +640,9 @@ export class ConnectionManager {
                             time: store.dayTime,
                             weather: store.weather
                         }
-                    } as any);
+                    } as any;
+
+                    this.sendToPlayer(senderId, welcomePacket);
 
                     this.broadcast({
                         type: 'player_join',
@@ -754,9 +754,11 @@ export class ConnectionManager {
             case 'player_move': {
                 const { id, nid, pos, rot, dimension, isUnderwater, latency, ts, health } = packet.payload;
                 const resolvedId = id || (nid !== undefined ? this.nidToUuid.get(nid) : null);
-                if (resolvedId && store.connectedPlayers[resolvedId]) {
-                    const prev = store.connectedPlayers[resolvedId];
-                    store.addConnectedPlayer(resolvedId, prev.name, pos, rot || prev.rot, (dimension as Dimension) || prev.dimension, isUnderwater, health, latency, ts);
+
+                if (resolvedId) {
+                    const prev = store.connectedPlayers[resolvedId] || { name: 'Player', pos: [0, 64, 0], rot: [0, 0], dimension: 'overworld' };
+                    store.addConnectedPlayer(resolvedId, prev.name, pos, rot || prev.rot, (dimension as Dimension) || prev.dimension, isUnderwater, health, latency, ts, nid);
+                    if (nid !== undefined) this.nidToUuid.set(nid, resolvedId);
                 }
                 break;
             }

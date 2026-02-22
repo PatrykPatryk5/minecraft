@@ -7,7 +7,7 @@
 
 // ─── Constants ───────────────────────────────────────────
 
-export const PROTOCOL_VERSION = 10; // Standard 1.0
+export const PROTOCOL_VERSION = 11; // Standard 1.1 - Added dimension/underwater flags to binary
 export const TICK_RATE = 20;
 export const POSITION_SYNC_INTERVAL = 50;
 export const MAX_CHAT_LENGTH = 256;
@@ -116,8 +116,8 @@ export interface PlayerInfo {
 // [1-4] TS (4)
 // [5-22] PAYLOAD
 
-export function encodeMoveBinary(pos: [number, number, number], rot: [number, number], health: number): ArrayBuffer {
-    const buffer = new ArrayBuffer(20);
+export function encodeMoveBinary(pos: [number, number, number], rot: [number, number], health: number, dimension: string = 'overworld', isUnderwater: boolean = false): ArrayBuffer {
+    const buffer = new ArrayBuffer(21);
     const view = new DataView(buffer);
     view.setUint8(0, 0x01); // Client -> Host: Move
     view.setUint32(1, Date.now() % 0xFFFFFFFF);
@@ -127,11 +127,18 @@ export function encodeMoveBinary(pos: [number, number, number], rot: [number, nu
     view.setInt8(17, Math.round(rot[0] * 127 / Math.PI));
     view.setInt8(18, Math.round(rot[1] * 127 / Math.PI));
     view.setUint8(19, health || 20);
+
+    // Flags: bit 0 = underwater, bits 1-2 = dimension
+    let dimIdx = 0;
+    if (dimension === 'nether') dimIdx = 1;
+    if (dimension === 'end') dimIdx = 2;
+    const flags = (isUnderwater ? 1 : 0) | (dimIdx << 1);
+    view.setUint8(20, flags);
     return buffer;
 }
 
-export function encodePlayerMoveBinary(nid: number, pos: [number, number, number], rot: [number, number], health: number, latency?: number): ArrayBuffer {
-    const buffer = new ArrayBuffer(23);
+export function encodePlayerMoveBinary(nid: number, pos: [number, number, number], rot: [number, number], health: number, latency?: number, dimension: string = 'overworld', isUnderwater: boolean = false): ArrayBuffer {
+    const buffer = new ArrayBuffer(24);
     const view = new DataView(buffer);
     view.setUint8(0, 0x02); // Host -> Client: PlayerMove
     view.setUint32(1, Date.now() % 0xFFFFFFFF);
@@ -143,6 +150,12 @@ export function encodePlayerMoveBinary(nid: number, pos: [number, number, number
     view.setInt8(20, Math.round((rot ? rot[1] : 0) * 127 / Math.PI));
     view.setUint8(21, health || 20);
     view.setUint8(22, Math.min(255, latency || 0));
+
+    let dimIdx = 0;
+    if (dimension === 'nether') dimIdx = 1;
+    if (dimension === 'end') dimIdx = 2;
+    const flags = (isUnderwater ? 1 : 0) | (dimIdx << 1);
+    view.setUint8(23, flags);
     return buffer;
 }
 
@@ -175,19 +188,27 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer): T | 
         }
 
         if (type === 0x01) { // Client -> Host: Move
+            const flags = view.getUint8(20);
+            const dimIdx = (flags >> 1) & 0x03;
+            const dimension = dimIdx === 1 ? 'nether' : (dimIdx === 2 ? 'end' : 'overworld');
             return {
                 type: 'move',
                 ts: view.getUint32(1),
                 payload: {
                     pos: [view.getFloat32(5), view.getFloat32(9), view.getFloat32(13)],
                     rot: [view.getInt8(17) * Math.PI / 127, view.getInt8(18) * Math.PI / 127],
-                    health: view.getUint8(19)
+                    health: view.getUint8(19),
+                    dimension,
+                    isUnderwater: (flags & 1) === 1
                 }
             } as any;
         }
 
         if (type === 0x02) { // Host -> Client: PlayerMove
             const nid = view.getUint16(5);
+            const flags = view.getUint8(23);
+            const dimIdx = (flags >> 1) & 0x03;
+            const dimension = dimIdx === 1 ? 'nether' : (dimIdx === 2 ? 'end' : 'overworld');
             return {
                 type: 'player_move',
                 ts: view.getUint32(1),
@@ -196,7 +217,9 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer): T | 
                     pos: [view.getFloat32(7), view.getFloat32(11), view.getFloat32(15)],
                     rot: [view.getInt8(19) * Math.PI / 127, view.getInt8(20) * Math.PI / 127],
                     health: view.getUint8(21),
-                    latency: view.getUint8(22)
+                    latency: view.getUint8(22),
+                    dimension,
+                    isUnderwater: (flags & 1) === 1
                 }
             } as any;
         }
@@ -206,12 +229,12 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer): T | 
 
 export function encodePacket(packet: ClientPacket | ServerPacket): string | ArrayBuffer {
     if (packet.type === 'move') {
-        const { pos, rot, health } = packet.payload;
-        return encodeMoveBinary(pos, rot || [0, 0], health || 20);
+        const { pos, rot, health, dimension, isUnderwater } = packet.payload;
+        return encodeMoveBinary(pos, rot || [0, 0], health || 20, dimension, isUnderwater);
     }
     if (packet.type === 'player_move' && packet.payload.nid !== undefined) {
-        const { nid, pos, rot, health, latency } = packet.payload;
-        return encodePlayerMoveBinary(nid, pos, rot || [0, 0], health || 20, latency);
+        const { nid, pos, rot, health, latency, dimension, isUnderwater } = packet.payload;
+        return encodePlayerMoveBinary(nid, pos, rot || [0, 0], health || 20, latency, dimension, isUnderwater);
     }
 
     // Wrapped JSON
