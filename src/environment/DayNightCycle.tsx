@@ -23,7 +23,8 @@ const DayNightCycle: React.FC = () => {
     const graphics = useGameStore((s) => s.settings.graphics);
     const renderDist = useGameStore((s) => s.settings.renderDistance);
     const brightness = useGameStore((s) => s.settings.brightness || 0.5);
-    const brightnessMultiplier = 0.7 + brightness * 1.5;
+    const currentDim = useGameStore((s) => s.dimension);
+    const brightnessMultiplier = 0.95 + brightness * 1.6;
     const useShadows = graphics !== 'fast';
     const shadowMapSize = graphics === 'fabulous' ? 4096 : 2048;
 
@@ -70,6 +71,8 @@ const DayNightCycle: React.FC = () => {
         const sunY = Math.sin(angle) * 150;
         const sunZ = Math.sin(angle + Math.PI * 0.5) * 150;
 
+        const isOverworld = currentDim === 'overworld';
+
         const sunHeight = Math.sin(angle);
         const daylight = smoothstep(-0.1, 0.12, sunHeight);
         const isNight = daylight < 0.08;
@@ -91,7 +94,8 @@ const DayNightCycle: React.FC = () => {
             dirLightRef.current.position.set(snappedX, Math.max(py + 12, py + sunY), snappedZ);
             dirLightRef.current.target.position.set(px, py - 10, pz);
             dirLightRef.current.target.updateMatrixWorld();
-            dirLightRef.current.castShadow = useShadows && daylight > 0.08;
+            dirLightRef.current.castShadow = useShadows && daylight > 0.08 && isOverworld;
+            dirLightRef.current.visible = isOverworld;
 
             if (useShadows) {
                 const shadow = dirLightRef.current.shadow;
@@ -122,8 +126,16 @@ const DayNightCycle: React.FC = () => {
         }
 
         if (ambLightRef.current) {
-            ambLightRef.current.intensity = lerp(0.08, 0.3, daylight) * brightnessMultiplier;
-            ambLightRef.current.color.copy(lerpColor(skyColors.night, skyColors.day, daylight));
+            if (currentDim === 'nether') {
+                ambLightRef.current.intensity = 0.4 * brightnessMultiplier;
+                ambLightRef.current.color.set('#411');
+            } else if (currentDim === 'end') {
+                ambLightRef.current.intensity = 0.3 * brightnessMultiplier;
+                ambLightRef.current.color.set('#212');
+            } else {
+                ambLightRef.current.intensity = lerp(0.08, 0.3, daylight) * brightnessMultiplier;
+                ambLightRef.current.color.copy(lerpColor(skyColors.night, skyColors.day, daylight));
+            }
         }
 
         if (hemiRef.current) {
@@ -169,14 +181,16 @@ const DayNightCycle: React.FC = () => {
 
     return (
         <>
-            <Sky
-                sunPosition={[sunX, sunY, sunZ]}
-                turbidity={isNightUi ? 0 : 3}
-                rayleigh={isNightUi ? 0 : 0.3}
-                mieCoefficient={0.005}
-                mieDirectionalG={0.8}
-            />
-            {isNightUi && <Stars radius={300} depth={50} count={7000} factor={4} saturation={0} fade speed={1} />}
+            {currentDim === 'overworld' && (
+                <Sky
+                    sunPosition={[sunX, sunY, sunZ]}
+                    turbidity={isNightUi ? 0 : 3}
+                    rayleigh={isNightUi ? 0 : 0.3}
+                    mieCoefficient={0.005}
+                    mieDirectionalG={0.8}
+                />
+            )}
+            {isNightUi && currentDim === 'overworld' && <Stars radius={300} depth={50} count={7000} factor={4} saturation={0} fade speed={1} />}
             <ambientLight ref={ambLightRef} intensity={0.5} />
             <directionalLight
                 ref={dirLightRef}

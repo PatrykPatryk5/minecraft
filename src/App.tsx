@@ -38,20 +38,6 @@ import FallingBlocksManager from './entities/FallingBlocks';
 import ArrowsManager from './entities/Arrows';
 import TNTManager from './entities/TNTPrimed';
 
-const LoadingScreen: React.FC<{ caps: RendererCapabilities | null; progress: string }> = ({ caps, progress }) => (
-    <div className="loading-screen">
-        <div className="loading-icon">⛏</div>
-        <div className="loading-text">{progress}</div>
-        <div className="loading-bar"><div className="loading-fill" /></div>
-        {caps && <div className="loading-gpu">{caps.label} | {caps.gpuName}</div>}
-        <div className="loading-credits">
-            <div>MADE BY: MUZYKANT TEAM</div>
-            <div>MAIN DEVELOPER: Patryk_Patryk_5</div>
-            <a href="https://muzykant.xyz" target="_blank" rel="noreferrer">https://muzykant.xyz</a>
-            <div>ALL RIGHTS RESERVED!</div>
-        </div>
-    </div>
-);
 
 const UnderwaterOverlay = () => {
     const isUnderwater = useGameStore((s) => s.isUnderwater);
@@ -68,7 +54,6 @@ const SceneContent: React.FC = () => {
 
     return (
         <>
-            <fog attach="fog" args={['#7cb1e8', renderDist * 16 * 0.6, renderDist * 16]} />
             <DayNightCycle />
             <Physics>
                 <World />
@@ -114,34 +99,72 @@ const App: React.FC = () => {
             setCaps(detected);
             console.log(`[MC R3F] Renderer: ${detected.label} | GPU: ${detected.gpuName}`);
             preloadAllTextures();
-            setTimeout(() => setReady(true), 500);
+            setTimeout(() => {
+                setReady(true);
+                // Smoothly hide HTML loading screen after React is mounted
+                requestAnimationFrame(() => {
+                    const overlay = document.getElementById('loading-overlay');
+                    if (overlay) {
+                        overlay.style.pointerEvents = 'none'; // Disable interactions immediately
+                        overlay.classList.add('fade-out');
+                        setTimeout(() => overlay.remove(), 1000);
+                    }
+                });
+            }, 500);
         };
         init();
     }, []);
 
-    // Auto-fullscreen when starting game
-    useEffect(() => {
-        if (screen === 'playing' && prevScreenRef.current !== 'playing') {
-            if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen?.().catch(() => { });
-            }
-        }
-        prevScreenRef.current = screen;
-    }, [screen]);
-
-    // F1 to toggle HUD
+    // ─── 100% Game Focus & Shortcut Blocking ────────────────
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
+            // Block critical browser shortcuts
+            const blockedKeys = ['F1', 'F3', 'F5', 'F6', 'F11', 'F12'];
+            const isCtrl = e.ctrlKey || e.metaKey;
+            const isAlt = e.altKey;
+
+            if (blockedKeys.includes(e.code) || (isCtrl && (e.code === 'KeyR' || e.code === 'KeyS' || e.code === 'KeyP' || e.code === 'KeyF'))) {
+                if (screen === 'playing') {
+                    e.preventDefault();
+                    console.log(`[MC] Blocked shortcut: ${e.code}`);
+                }
+            }
+
             if (e.code === 'F1') {
-                e.preventDefault();
                 useGameStore.getState().toggleHUD();
             }
         };
-        window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
-    }, []);
 
-    if (!ready) return <LoadingScreen caps={caps} progress="Ładowanie zasobów..." />;
+        const onFocus = () => {
+            console.log('[MC] Window focused');
+            // Resume sound or logic if needed
+        };
+
+        const onBlur = () => {
+            console.log('[MC] Window blurred - Pausing');
+            if (screen === 'playing' && !useGameStore.getState().isPaused) {
+                useGameStore.getState().setPaused(true);
+            }
+        };
+
+        const onClick = () => {
+            // Interaction logic handled by PointerLockControls via Canvas
+        };
+
+        window.addEventListener('keydown', onKey);
+        window.addEventListener('click', onClick);
+        window.addEventListener('focus', onFocus);
+        window.addEventListener('blur', onBlur);
+
+        return () => {
+            window.removeEventListener('keydown', onKey);
+            window.removeEventListener('click', onClick);
+            window.removeEventListener('focus', onFocus);
+            window.removeEventListener('blur', onBlur);
+        };
+    }, [screen, activeOverlay]);
+
+    if (!ready) return null; // Keep HTML overlay visible
 
     const isPlaying = screen === 'playing';
 

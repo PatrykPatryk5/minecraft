@@ -499,8 +499,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    pointer-events: auto;
+    pointer-events: none;
     z-index: 200;
+}
+
+.click-to-play .start-box {
+    pointer-events: auto;
+    /* Box remains interactable if needed, but clicks on overlay pass through */
 }
 
 .start-box {

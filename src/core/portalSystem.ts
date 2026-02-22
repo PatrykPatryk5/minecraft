@@ -59,32 +59,64 @@ export function attemptNetherPortalIgnite(x: number, y: number, z: number): bool
     return false;
 }
 
+export function getSafeHeight(x: number, z: number, searchRange: [number, number] = [32, 110]): number {
+    const s = useGameStore.getState();
+    const bx = Math.floor(x);
+    const bz = Math.floor(z);
+
+    // Scan for solid ground (top down or bottom up depending on range)
+    for (let y = searchRange[1]; y >= searchRange[0]; y--) {
+        const type = s.getBlock(bx, y, bz);
+        if (type !== BlockType.AIR && type !== BlockType.LAVA && type !== BlockType.WATER) {
+            return y;
+        }
+    }
+    return searchRange[0]; // Fallback
+}
+
 export function buildNetherPortalSafe(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
     const dx = 1;
     const dz = 0;
 
-    // Clear area & build frame
-    for (let offsetX = -1; offsetX <= 2; offsetX++) {
-        for (let dy = -1; dy <= 4; dy++) {
-            for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
-                s.addBlock(x + offsetX, y + dy, z + offsetZ, BlockType.AIR);
+    const bx = Math.floor(x);
+    const by = Math.floor(y);
+    const bz = Math.floor(z);
+
+    // 1. Build a 4x4 platform under the portal for safety
+    for (let ox = -1; ox <= 2; ox++) {
+        for (let oz = -1; oz <= 1; oz++) {
+            const current = s.getBlock(bx + ox, by - 1, bz + oz);
+            if (current === BlockType.AIR || current === BlockType.LAVA || current === BlockType.WATER) {
+                s.addBlock(bx + ox, by - 1, bz + oz, BlockType.OBSIDIAN);
             }
         }
     }
 
-    // Bottom and top
-    s.addBlock(x, y - 1, z, BlockType.OBSIDIAN);
-    s.addBlock(x + 1, y - 1, z, BlockType.OBSIDIAN);
-    s.addBlock(x, y + 3, z, BlockType.OBSIDIAN);
-    s.addBlock(x + 1, y + 3, z, BlockType.OBSIDIAN);
+    // 2. Clear interior (4x5 area)
+    for (let ox = -1; ox <= 2; ox++) {
+        for (let dy = 0; dy <= 4; dy++) {
+            for (let oz = -1; oz <= 1; oz++) {
+                s.addBlock(bx + ox, by + dy, bz + oz, BlockType.AIR);
+            }
+        }
+    }
 
-    // Sides
-    for (let h = 0; h <= 2; h++) {
-        s.addBlock(x - 1, y + h, z, BlockType.OBSIDIAN);
-        s.addBlock(x + 2, y + h, z, BlockType.OBSIDIAN);
-        // Interior
-        s.addBlock(x, y + h, z, BlockType.NETHER_PORTAL_BLOCK);
-        s.addBlock(x + 1, y + h, z, BlockType.NETHER_PORTAL_BLOCK);
+    // 3. Build typical 4x5 Frame
+    // Bottom
+    s.addBlock(bx, by, bz, BlockType.OBSIDIAN);
+    s.addBlock(bx + 1, by, bz, BlockType.OBSIDIAN);
+    // Top
+    s.addBlock(bx, by + 4, bz, BlockType.OBSIDIAN);
+    s.addBlock(bx + 1, by + 4, bz, BlockType.OBSIDIAN);
+    // Left pillar
+    for (let h = 0; h <= 4; h++) s.addBlock(bx - 1, by + h, bz, BlockType.OBSIDIAN);
+    // Right pillar
+    for (let h = 0; h <= 4; h++) s.addBlock(bx + 2, by + h, bz, BlockType.OBSIDIAN);
+
+    // 4. Fill with portal blocks
+    for (let h = 1; h <= 3; h++) {
+        s.addBlock(bx, by + h, bz, BlockType.NETHER_PORTAL_BLOCK);
+        s.addBlock(bx + 1, by + h, bz, BlockType.NETHER_PORTAL_BLOCK);
     }
 }

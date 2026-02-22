@@ -14,6 +14,7 @@ import useGameStore from '../store/gameStore';
 import { BlockType } from '../core/blockTypes';
 import { playSound } from '../audio/sounds';
 import { getNextStep, isSolid } from './pathfinding';
+import { MAX_HEIGHT } from '../core/terrainGen';
 
 // ─── Types ──────────────────────────────────────────────
 export type MobType = 'zombie' | 'skeleton' | 'creeper' | 'pig' | 'cow' | 'sheep'
@@ -63,7 +64,7 @@ const GRAVITY = -28;
 
 let nextMobId = 1;
 let lastSpawnCheck = 0;
-const SPAWN_INTERVAL = 5000; // Check every 5s
+const SPAWN_INTERVAL = 1000; // Check every 1s (Minecraft is 400ms but 1s is safer for perf)
 
 // ─── Core Functions ─────────────────────────────────────
 
@@ -98,10 +99,17 @@ export function updateMobs(delta: number): void {
     // Spawn check
     if (now - lastSpawnCheck > SPAWN_INTERVAL && mobs.length < MAX_MOBS) {
         lastSpawnCheck = now;
-        const newMob = trySpawnMob(playerPos, s.dayTime);
-        if (newMob) {
-            mobs.push(newMob);
-            changed = true;
+
+        // Pack spawning: try to spawn 1-4 mobs in a flock
+        const packSize = 1 + Math.floor(Math.random() * 4);
+        for (let p = 0; p < packSize; p++) {
+            if (mobs.length >= MAX_MOBS) break;
+            const newMob = trySpawnMob(playerPos, s.dayTime);
+            if (newMob) {
+                mobs.push(newMob);
+                changed = true;
+                // Offset subsequent pack members slightly
+            }
         }
     }
 
@@ -386,6 +394,8 @@ function trySpawnMob(playerPos: [number, number, number], dayTime: number): Mob 
     const y = getGroundLevel(x, z, s);
     if (y < 1) return null;
 
+    const groundBlock = s.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
+
     // Choose mob type based on time/luck
     let type: MobType;
 
@@ -398,17 +408,21 @@ function trySpawnMob(playerPos: [number, number, number], dayTime: number): Mob 
         if (r < 0.3) type = 'zombie';
         else if (r < 0.5) type = 'skeleton';
         else if (r < 0.65) type = 'creeper';
-        else if (r < 0.8) type = 'spider'; // Added spider
-        else if (r < 0.9) type = 'wolf';   // Added wolf (can spawn at night too)
-        else type = 'enderman'; // Rare
+        else if (r < 0.8) type = 'spider';
+        else if (r < 0.9) type = 'wolf';
+        else type = 'enderman';
     } else {
+        // Day spawning - ANIMALS ONLY
+        // Requirement: Must spawn on Grass
+        if (groundBlock !== BlockType.GRASS) return null;
+
         const r = Math.random();
         if (r < 0.25) type = 'pig';
         else if (r < 0.50) type = 'cow';
         else if (r < 0.70) type = 'sheep';
-        else if (r < 0.85) type = 'chicken'; // Added chicken
-        else if (r < 0.95) type = 'wolf';    // Added wolf
-        else type = 'zombie'; // Very rare day zombie
+        else if (r < 0.85) type = 'chicken';
+        else if (r < 0.95) type = 'wolf';
+        else return null; // No day monsters
     }
 
     return spawnMob(type, x, y + 1, z);
@@ -441,7 +455,7 @@ function getGroundLevel(x: number, z: number, s: ReturnType<typeof useGameStore.
     }
 
     let foundY = 64;
-    for (let y = 120; y > 0; y--) {
+    for (let y = MAX_HEIGHT - 1; y > 0; y--) {
         const block = s.getBlock(bx, y, bz);
         if (block && block !== BlockType.AIR && block !== BlockType.WATER &&
             block !== BlockType.TALL_GRASS && block !== BlockType.FLOWER_RED &&

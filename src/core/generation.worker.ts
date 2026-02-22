@@ -139,9 +139,13 @@ export class TerrainWorker {
                             target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
                             target.uvs.push(atlasUV.u + face.uv[i][0] * atlasUV.su, atlasUV.v + face.uv[i][1] * atlasUV.sv);
                             let br = 1.0;
+                            const isLightSource = BLOCK_DATA[bt]?.light && BLOCK_DATA[bt]?.light! > 0;
+
                             if (lod === 0 && !isWater) {
-                                // Keep grass fully bright to eliminate black corner artifacts.
-                                if (bt === BlockType.GRASS) {
+                                // Keep light sources and grass (partially) bright to eliminate black corner artifacts or show emission.
+                                if (isLightSource) {
+                                    br = 1.0;
+                                } else if (bt === BlockType.GRASS) {
                                     br = face.name === 'top' ? 1.0 : 0.9;
                                 } else {
                                     br = Math.max(1.0 - cornerAO[i] * 0.2, 0.42);

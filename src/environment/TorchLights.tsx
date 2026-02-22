@@ -53,8 +53,14 @@ const TorchLights: React.FC = () => {
 
                 if (!chunk) continue;
 
-                // Extremely fast native C++ array cull before doing 16000 element JS loop
-                if (!chunk.includes(BlockType.TORCH) && !chunk.includes(BlockType.REDSTONE_TORCH)) continue;
+                // Extremely fast native C++ array cull
+                const lightSourceIds = [
+                    BlockType.TORCH, BlockType.REDSTONE_TORCH, BlockType.GLOWSTONE,
+                    BlockType.LANTERN, BlockType.SOUL_LANTERN, BlockType.SOUL_TORCH,
+                    BlockType.SEA_LANTERN, BlockType.OCHRE_FROGLIGHT, BlockType.VERDANT_FROGLIGHT,
+                    BlockType.PEARLESCENT_FROGLIGHT, BlockType.BEACON, BlockType.REDSTONE_LAMP
+                ];
+                if (!lightSourceIds.some(id => chunk.includes(id))) continue;
 
                 // Restrict Y range to save scanning time: scan around player's Y ± 32
                 const minY = Math.max(0, py - 32);
@@ -66,17 +72,20 @@ const TorchLights: React.FC = () => {
                             const idx = lx + y * 16 + lz * 256; // Fast blockIndex
                             const block = chunk[idx];
 
-                            if (block === BlockType.TORCH || block === BlockType.REDSTONE_TORCH) {
+                            if (lightSourceIds.includes(block)) {
                                 const wx = cx * 16 + lx;
                                 const wz = cz * 16 + lz;
                                 const distSq = (wx - px) ** 2 + (y - py) ** 2 + (wz - pz) ** 2;
+
+                                const isRedstone = block === BlockType.REDSTONE_TORCH || block === BlockType.REDSTONE_LAMP;
+                                const isSoul = block === BlockType.SOUL_TORCH || block === BlockType.SOUL_LANTERN;
 
                                 foundLights.push({
                                     x: wx + 0.5,
                                     y: y + 0.5,
                                     z: wz + 0.5,
-                                    color: block === BlockType.TORCH ? '#ffdd88' : '#ff3300',
-                                    intensity: block === BlockType.TORCH ? 1.5 : 0.8,
+                                    color: isRedstone ? '#ff3300' : isSoul ? '#00ccff' : '#ffdd88',
+                                    intensity: (block === BlockType.TORCH || block === BlockType.LANTERN || block === BlockType.GLOWSTONE) ? 1.5 : 1.0,
                                     distSq
                                 });
                             }

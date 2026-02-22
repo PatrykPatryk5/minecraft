@@ -33,7 +33,7 @@ import { spreadLava, tickLava, checkLavaFill } from '../core/lavaSystem';
 import { processGravity, checkGravityBlock } from '../core/gravityBlocks';
 import { placePiston } from '../core/pistonSystem';
 import { tillBlock, plantSeed, applyBoneMeal } from '../core/farmingSystem';
-import { buildNetherPortalSafe } from '../core/portalSystem';
+import { buildNetherPortalSafe, getSafeHeight } from '../core/portalSystem';
 
 // ─── Constants ───────────────────────────────────────────
 const GRAVITY = -28;
@@ -109,6 +109,8 @@ const Player: React.FC = () => {
     const leftMouseHeld = useRef(false);
     const rightMouseHeld = useRef(false);
     const rightRepeatTimer = useRef(0);
+
+    const setLocked = useGameStore((s) => s.setLocked);
 
     const storeRef = useRef(useGameStore.getState());
     useEffect(() => {
@@ -1133,19 +1135,23 @@ const Player: React.FC = () => {
                     s.setDimension('nether');
                     const nx = Math.floor(p.x / 8);
                     const nz = Math.floor(p.z / 8);
-                    p.set(nx + 1, 50, nz + 1);
+                    // Search for a safe height in Nether (typical interior is 32-110)
+                    const ny = getSafeHeight(nx, nz, [32, 110]);
+
+                    p.set(nx + 0.5, ny + 1.5, nz + 0.5);
                     vel.set(0, 0, 0);
-                    buildNetherPortalSafe(nx, 50, nz);
+                    buildNetherPortalSafe(nx, ny, nz);
                     playSound('portal');
                 } else if (s.dimension === 'nether') {
                     s.setDimension('overworld');
                     const ox = Math.floor(p.x * 8);
                     const oz = Math.floor(p.z * 8);
-                    const oy = getSpawnHeight(ox, oz);
-                    // y + 2 for safe spawn, and the portal will clear the area above it
-                    p.set(ox + 1, oy + 2, oz + 1);
+                    // Search for ground in Overworld (0-150)
+                    const oy = getSafeHeight(ox, oz, [62, 150]);
+
+                    p.set(ox + 0.5, oy + 1.5, oz + 0.5);
                     vel.set(0, 0, 0);
-                    buildNetherPortalSafe(ox, Math.floor(oy + 2), oz);
+                    buildNetherPortalSafe(ox, oy, oz);
                     playSound('portal');
                 }
             }
@@ -1219,7 +1225,12 @@ const Player: React.FC = () => {
 
     return (
         <>
-            <PointerLockControls ref={controlsRef} />
+            <PointerLockControls
+                ref={controlsRef}
+                onLock={() => setLocked(true)}
+                onUnlock={() => setLocked(false)}
+                pointerSpeed={1.0}
+            />
             <RigidBody ref={rbRef} type="kinematicPosition" colliders="cuboid" args={[PLAYER_WIDTH, PLAYER_COLLIDER_HEIGHT / 2, PLAYER_WIDTH]}>
                 <mesh visible={false}>
                     <boxGeometry args={[PLAYER_WIDTH * 2, PLAYER_COLLIDER_HEIGHT, PLAYER_WIDTH * 2]} />

@@ -412,19 +412,13 @@ const useGameStore = create<GameState>((set, get) => ({
     worldName: 'Nowy Świat',
 
     setChunkData: (cx, cz, dimension, data) => {
-        // If received chunk is for a different dimension than currently active, discard it
         if (dimension !== get().dimension) return;
-
         const key = chunkKey(cx, cz);
-
-        // Save to IndexedDB asynchronously
         saveChunk(`${dimension}:${cx},${cz}`, data);
 
         set((s) => {
-            const newGen = new Set(s.generatedChunks);
-            newGen.add(key);
+            if (s.chunks[key] === data) return {};
 
-            // Bump version for self and neighbors to force re-mesh (fixes culling seams)
             const versions = { ...s.chunkVersions };
             const bump = (k: string) => { versions[k] = (versions[k] ?? 0) + 1; };
 
@@ -434,12 +428,16 @@ const useGameStore = create<GameState>((set, get) => ({
             const nPz = chunkKey(cx, cz + 1);
             const nNz = chunkKey(cx, cz - 1);
 
-            // Avoid updating non-existent neighbors; this keeps meshing churn lower
-            // when many new chunks stream in at once.
             if (s.chunks[nPx]) bump(nPx);
             if (s.chunks[nNx]) bump(nNx);
             if (s.chunks[nPz]) bump(nPz);
             if (s.chunks[nNz]) bump(nNz);
+
+            let newGen = s.generatedChunks;
+            if (!s.generatedChunks.has(key)) {
+                newGen = new Set(s.generatedChunks);
+                newGen.add(key);
+            }
 
             return {
                 chunks: { ...s.chunks, [key]: data },
@@ -491,30 +489,40 @@ const useGameStore = create<GameState>((set, get) => ({
         const lx = ((x % 16) + 16) % 16;
         const lz = ((z % 16) + 16) % 16;
         const state = get();
+
         let chunk = state.chunks[key];
         if (!chunk) {
             chunk = new Uint16Array(CHUNK_VOLUME);
-            set((s) => ({ chunks: { ...s.chunks, [key]: chunk! } }));
         }
 
-        // Preserve power if modifying existing block? 
-        // Generally, replacing a block resets power to 0.
-        chunk[blockIndex(lx, y, lz)] = typeId & 0x0FFF;
+        // Use a new copy to ensure React/Zustand detect change if they compare references
+        const newChunk = new Uint16Array(chunk);
+        newChunk[blockIndex(lx, y, lz)] = typeId & 0x0FFF;
 
-        // Trigger Redstone update
         import('../core/redstoneSystem').then(({ updateRedstone }) => {
             updateRedstone(x, y, z);
         });
 
-        // Bump version for self and neighbors
-        state.bumpVersion(cx, cz);
-        if (lx === 0) state.bumpVersion(cx - 1, cz);
-        if (lx === 15) state.bumpVersion(cx + 1, cz);
-        if (lz === 0) state.bumpVersion(cx, cz - 1);
-        if (lz === 15) state.bumpVersion(cx, cz + 1);
+        set((s) => {
+            const versions = { ...s.chunkVersions };
+            const bump = (ccx: number, ccz: number) => {
+                const k = chunkKey(ccx, ccz);
+                versions[k] = (versions[k] ?? 0) + 1;
+            };
+            bump(cx, cz);
+            if (lx === 0) bump(cx - 1, cz);
+            if (lx === 15) bump(cx + 1, cz);
+            if (lz === 0) bump(cx, cz - 1);
+            if (lz === 15) bump(cx, cz + 1);
+
+            return {
+                chunks: { ...s.chunks, [key]: newChunk },
+                chunkVersions: versions
+            };
+        });
 
         // Save to IndexedDB
-        saveChunk(`${state.dimension}:${cx},${cz}`, chunk);
+        saveChunk(`${state.dimension}:${cx},${cz}`, newChunk);
 
         // Broadcast if local multiplayer
         if (!fromNetwork && state.isMultiplayer) {
@@ -598,19 +606,27 @@ const useGameStore = create<GameState>((set, get) => ({
             updateRedstone(x, y, z);
         });
 
-        // Bump version for self and neighbors
-        const s = get();
-        s.bumpVersion(cx, cz);
-        if (lx === 0) s.bumpVersion(cx - 1, cz);
-        if (lx === 15) s.bumpVersion(cx + 1, cz);
-        if (lz === 0) s.bumpVersion(cx, cz - 1);
-        if (lz === 15) s.bumpVersion(cx, cz + 1);
+        // Bump version for self and neighbors - Batching to avoid React Error #185
+        set((s) => {
+            const versions = { ...s.chunkVersions };
+            const bump = (ccx: number, ccz: number) => {
+                const k = chunkKey(ccx, ccz);
+                versions[k] = (versions[k] ?? 0) + 1;
+            };
+            bump(cx, cz);
+            if (lx === 0) bump(cx - 1, cz);
+            if (lx === 15) bump(cx + 1, cz);
+            if (lz === 0) bump(cx, cz - 1);
+            if (lz === 15) bump(cx, cz + 1);
+            return { chunkVersions: versions };
+        });
 
+        const state = get();
         // Save to IndexedDB
-        saveChunk(`${s.dimension}:${cx},${cz}`, chunk);
+        saveChunk(`${state.dimension}:${cx},${cz}`, chunk);
 
         // Broadcast if local multiplayer
-        if (!fromNetwork && s.isMultiplayer) {
+        if (!fromNetwork && state.isMultiplayer) {
             import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
                 getConnection().sendBlockBreak(x, y, z);
             });

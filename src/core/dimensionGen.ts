@@ -10,9 +10,9 @@ import { createNoise2D, createNoise3D } from 'simplex-noise';
 import { BlockType } from './blockTypes';
 import { CHUNK_SIZE, MAX_HEIGHT } from './terrainGen';
 
-// Inline blockIndex for performance
-function blockIndex(x: number, y: number, z: number): number {
-    return (x * MAX_HEIGHT * CHUNK_SIZE) + (y * CHUNK_SIZE) + z;
+// Fast block index: y * 256 + lz * 16 + lx
+function blockIndex(lx: number, y: number, lz: number): number {
+    return (y << 8) | (lz << 4) | lx;
 }
 
 // Seeded random for deterministic generation
@@ -56,6 +56,10 @@ export function generateNetherChunk(cx: number, cz: number): Uint16Array {
                 if (y === 0 || y >= CEILING) {
                     data[blockIndex(lx, y, lz)] = BlockType.BEDROCK;
                     continue;
+                }
+
+                if (y >= CEILING - 3 && seededRandom(wx * 7, wz * 7 + y) > 0.95) {
+                    data[blockIndex(lx, y, lz)] = BlockType.BEDROCK; // Solid ceiling
                 }
 
                 // 3D cave noise
@@ -116,52 +120,50 @@ export function generateEndChunk(cx: number, cz: number): Uint16Array {
         for (let lz = 0; lz < CHUNK_SIZE; lz++) {
             const wx = cx * CHUNK_SIZE + lx;
             const wz = cz * CHUNK_SIZE + lz;
-
             const distFromCenter = Math.sqrt(wx * wx + wz * wz);
 
             // Main island (radius ~80)
             if (distFromCenter < 80) {
                 const edgeFalloff = Math.max(0, 1 - distFromCenter / 80);
                 const heightVar = noise2d(wx * 0.03, wz * 0.03) * 6;
-                const islandTopY = END_Y + Math.floor(edgeFalloff * 12 + heightVar);
-                const islandBotY = END_Y - Math.floor(edgeFalloff * 8);
+                const islandTopY = END_Y + Math.floor(edgeFalloff * 15 + heightVar);
+                const islandBotY = END_Y - Math.floor(edgeFalloff * 10);
 
-                for (let y = Math.max(0, islandBotY); y <= Math.min(islandTopY, MAX_HEIGHT - 1); y++) {
+                for (let y = Math.max(1, islandBotY); y <= Math.min(islandTopY, MAX_HEIGHT - 1); y++) {
                     data[blockIndex(lx, y, lz)] = BlockType.END_STONE;
                 }
-            }
-            // Outer floating islands
-            else if (distFromCenter > 200 && distFromCenter < 500) {
-                const islandNoise = noise2d(wx * 0.008, wz * 0.008);
-                if (islandNoise > 0.5) {
-                    const strength = Math.floor((islandNoise - 0.5) * 20);
-                    const baseY = END_Y + Math.floor(noise2d(wx * 0.02 + 50, wz * 0.02 + 50) * 20);
-                    for (let y = baseY; y < baseY + strength && y < MAX_HEIGHT; y++) {
-                        if (y >= 0) {
-                            data[blockIndex(lx, y, lz)] = BlockType.END_STONE;
-                        }
-                    }
-                }
-            }
 
-            // Obsidian pillars on main island (very rare per-block)
-            if (distFromCenter < 40) {
-                const pillarChance = seededRandom(Math.floor(wx / 3) * 7, Math.floor(wz / 3) * 7);
-                if (pillarChance > 0.998) {
-                    const pillarHeight = 30 + Math.floor(seededRandom(wx, wz * 2) * 50);
-                    for (let y = END_Y; y < Math.min(END_Y + pillarHeight, MAX_HEIGHT); y++) {
-                        for (let dx = -1; dx <= 1; dx++) {
-                            for (let dz = -1; dz <= 1; dz++) {
-                                const px = lx + dx;
-                                const pz = lz + dz;
-                                if (px >= 0 && px < CHUNK_SIZE && pz >= 0 && pz < CHUNK_SIZE) {
-                                    data[blockIndex(px, y, pz)] = BlockType.OBSIDIAN;
-                                }
+                // Obsidian pillars on main island
+                if (distFromCenter < 60 && distFromCenter > 10) {
+                    const pillarId = Math.floor(wx / 20) * 1000 + Math.floor(wz / 20);
+                    const pillarRand = seededRandom(pillarId % 1000, Math.floor(pillarId / 1000));
+                    if (pillarRand > 0.95) {
+                        const px = Math.floor(wx / 20) * 20 + 10;
+                        const pz = Math.floor(wz / 20) * 20 + 10;
+                        const dx = wx - px, dz = wz - pz;
+                        if (dx * dx + dz * dz < 9) { // 3x3 pillar
+                            const pHeight = 20 + Math.floor(pillarRand * 40);
+                            for (let y = END_Y; y < END_Y + pHeight && y < MAX_HEIGHT; y++) {
+                                data[blockIndex(lx, y, lz)] = BlockType.OBSIDIAN;
                             }
                         }
                     }
                 }
             }
+            // Small floating islands
+            else {
+                const islandNoise = noise2d(wx * 0.05, wz * 0.05);
+                if (islandNoise > 0.7) {
+                    const radius = Math.floor((islandNoise - 0.7) * 40);
+                    const baseY = END_Y + Math.floor(noise2d(wx * 0.1, wz * 0.1) * 10);
+                    if (Math.abs(64 - baseY) < radius / 4) {
+                        data[blockIndex(lx, baseY, lz)] = BlockType.END_STONE;
+                    }
+                }
+            }
+
+            // Bedrock floor for safety
+            data[blockIndex(lx, 0, lz)] = BlockType.BEDROCK;
         }
     }
 

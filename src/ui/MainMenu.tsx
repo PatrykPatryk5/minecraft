@@ -75,12 +75,12 @@ const MenuHome: React.FC = () => {
 
             <div className="menu-buttons">
                 {hasSave ? (
-                    <button className="mc-btn primary" onClick={handleContinue}>
+                    <button className="mc-btn primary" onClick={(e) => { e.stopPropagation(); handleContinue(); }}>
                         🟢 Kontynuuj Grę
                     </button>
                 ) : null}
 
-                <button className={hasSave ? "mc-btn" : "mc-btn primary"} onClick={() => setScreen('worldCreate')}>
+                <button className={hasSave ? "mc-btn" : "mc-btn primary"} onClick={(e) => { e.stopPropagation(); setScreen('worldCreate'); }}>
                     🌍 Nowy Świat
                 </button>
                 <div className="menu-row">
@@ -100,7 +100,7 @@ const MenuHome: React.FC = () => {
                     />
                 </div>
                 <div className="menu-row">
-                    <button className="mc-btn half" onClick={() => setScreen('settings')}>⚙ Opcje</button>
+                    <button className="mc-btn half" onClick={(e) => { e.stopPropagation(); setScreen('settings'); }}>⚙ Opcje</button>
                     <button className="mc-btn half" disabled>🗣 Języki</button>
                 </div>
             </div>
@@ -221,8 +221,8 @@ const WorldCreate: React.FC = () => {
             </div>
 
             <div className="menu-buttons" style={{ marginTop: 20 }}>
-                <button className="mc-btn primary" onClick={startGame}>🚀 Utwórz Świat</button>
-                <button className="mc-btn" onClick={() => setScreen('mainMenu')}>← Wstecz</button>
+                <button className="mc-btn primary" onClick={(e) => { e.stopPropagation(); startGame(); }}>🚀 Utwórz Świat</button>
+                <button className="mc-btn" onClick={(e) => { e.stopPropagation(); setScreen('mainMenu'); }}>← Wstecz</button>
             </div>
         </div>
     );
@@ -260,7 +260,7 @@ const SettingsScreen: React.FC = () => {
                 </div>
                 <div className="setting-item">
                     <label>Jasność: <strong>{(settings.brightness * 100).toFixed(0)}%</strong></label>
-                    <input type="range" min={1} max={100} value={settings.brightness * 100} onChange={(e) => updateSettings({ brightness: +e.target.value / 100 })} className="mc-slider" />
+                    <input type="range" min={1} max={200} value={settings.brightness * 100} onChange={(e) => updateSettings({ brightness: +e.target.value / 100 })} className="mc-slider" />
                 </div>
                 <div className="setting-item">
                     <label>Grafika: <strong>{settings.graphics}</strong></label>

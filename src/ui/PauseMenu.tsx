@@ -151,7 +151,7 @@ const PauseMenu: React.FC = () => {
                     </div>
                     <div className="setting-row">
                         <span>Jasność: <strong>{(settings.brightness * 100).toFixed(0)}%</strong></span>
-                        <input type="range" min={1} max={100} value={settings.brightness * 100}
+                        <input type="range" min={1} max={200} value={settings.brightness * 100}
                             onChange={(e) => updateSettings({ brightness: +e.target.value / 100 })} className="mc-slider" />
                     </div>
                     <div className="setting-row">
