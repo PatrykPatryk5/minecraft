@@ -395,6 +395,7 @@ export class ConnectionManager {
     }
 
     disconnect(): void {
+        const state = useGameStore.getState();
         if (this.ws) {
             this.ws.close();
             this.ws = null;
@@ -402,6 +403,7 @@ export class ConnectionManager {
         this.stopPositionSync();
         this.stopWorldSync();
         this.stopLobbyHeartbeat();
+        this.stopPingHeartbeat();
         if (this.hostConn) {
             this.hostConn.close();
             this.hostConn = null;
@@ -418,10 +420,16 @@ export class ConnectionManager {
             fetch(`/api/multiplayer/host/${this.currentLobbyId}`, { method: 'DELETE' }).catch(() => { });
             this.currentLobbyId = null;
         }
+        if (this.status !== 'disconnected') {
+            state.setServerWarning({
+                message: 'Połączenie z serwerem zostało przerwane!',
+                severity: 'critical'
+            });
+        }
+
         this.status = 'disconnected';
         this.role = 'none';
 
-        const state = useGameStore.getState();
         state.setIsMultiplayer(false);
         state.clearConnectedPlayers();
     }
@@ -606,6 +614,7 @@ export class ConnectionManager {
                 store.setIsMultiplayer(true);
                 (window as any).isMPClient = true;
                 this.startPositionSync();
+                this.startPingHeartbeat();
 
                 if (this.joinResolve) {
                     this.joinResolve();
@@ -701,8 +710,13 @@ export class ConnectionManager {
             }
 
             case 'pong': {
-                if (senderId) {
-                    const rtt = Date.now() - packet.payload.ts;
+                const rtt = Date.now() - packet.payload.ts;
+                if (!senderId) {
+                    // This is our main ping to host/dedicated server
+                    this.ping = rtt;
+                    store.setPing(rtt);
+                } else {
+                    // This is a ping from a client if we are host
                     this.lastLatency.set(senderId, rtt);
                     const existing = store.connectedPlayers[senderId];
                     if (existing) {
@@ -996,6 +1010,20 @@ export class ConnectionManager {
             const packet = decodePacket<ClientPacket>(data);
             if (packet) this.handlePacket(packet, id);
         });
+    }
+
+    private startPingHeartbeat(): void {
+        if (this.pingInterval) return;
+        this.pingInterval = setInterval(() => {
+            this.sendPing();
+        }, 2000);
+    }
+
+    private stopPingHeartbeat(): void {
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+        }
     }
 }
 
