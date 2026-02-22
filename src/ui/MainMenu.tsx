@@ -115,6 +115,11 @@ const MenuHome: React.FC = () => {
                 <a href="https://muzykant.xyz" target="_blank" rel="noreferrer">https://muzykant.xyz</a>
                 <div>ALL RIGHTS RESERVED!</div>
             </div>
+
+            <div className="menu-disclaimer">
+                NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT. <br />
+                NIE JEST TO OFICJALNY PRODUKT MINECRAFT. NIE ZATWIERDZONE PRZEZ MOJANG LUB MICROSOFT ANI Z NIMI NIEPOWIĄZANE.
+            </div>
         </div>
     );
 };

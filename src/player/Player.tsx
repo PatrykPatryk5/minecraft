@@ -293,6 +293,18 @@ const Player: React.FC = () => {
                 }
             } else if (e.button === 2) {
                 // ── Right Click: Interact or Place Block ──
+                if (selected && BLOCK_DATA[selected]?.foodRestore) {
+                    // Eat if: purely food item (isItem) OR if hungry
+                    // This allows placing Cake (solid block) but eating it if hungry if we were to implement block-eating
+                    // For now, most food are isItem: true.
+                    if (s.hunger < s.maxHunger || BLOCK_DATA[selected].isItem) {
+                        s.eatFood();
+                        // If it's a placeable block (like Cake), we still return if we ate? 
+                        // In MC, you place Cake. So let's only return if it's isItem (non-placeable).
+                        if (BLOCK_DATA[selected].isItem) return;
+                    }
+                }
+
                 if (!hit) {
                     if (selected === BlockType.BOW && s.gameMode !== 'spectator') {
                         isChargingBow.current = true;
@@ -337,12 +349,6 @@ const Player: React.FC = () => {
 
                 // (Already defined above: const selected = s.getSelectedBlock();)
                 if (!selected) return;
-
-                // If holding food, try eating instead of placing
-                if (BLOCK_DATA[selected]?.foodRestore && BLOCK_DATA[selected]?.isItem) {
-                    s.eatFood();
-                    return;
-                }
 
                 // Farming/tool interactions should happen before generic item early-return.
                 if ([105, 115, 125, 135, 145].includes(selected)) {

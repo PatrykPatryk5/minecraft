@@ -307,6 +307,18 @@
     text-decoration: underline;
 }
 
+.menu-disclaimer {
+    position: absolute;
+    bottom: 4px;
+    font-size: 6px;
+    color: #444;
+    text-align: center;
+    width: 100%;
+    pointer-events: none;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
 /* ─── Screen Title ────────────────────────────────── */
 .screen-title {
     font-size: 16px;
