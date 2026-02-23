@@ -1705,3 +1705,132 @@
 .armor-placeholder.boots {
     background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M12 2L4 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm1 16h-2v-2h2v2zm0-4h-2V7h2v7z"/></svg>');
 }
+
+/* ================================================================
+   MOBILE CONTROLS (BETA)
+   ================================================================ */
+.mobile-controls-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.mobile-controls-overlay * {
+    pointer-events: auto;
+}
+
+/* Joystick */
+.mobile-joystick-base {
+    position: absolute;
+    bottom: 40px;
+    left: 40px;
+    width: 140px;
+    height: 140px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(8px);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: none;
+}
+
+.mobile-joystick-knob {
+    width: 60px;
+    height: 60px;
+    background: rgba(255, 255, 255, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 50%;
+    transition: transform 0.05s linear;
+}
+
+/* Buttons */
+.mobile-actions-right {
+    position: absolute;
+    bottom: 40px;
+    right: 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    align-items: flex-end;
+}
+
+.mobile-btn {
+    width: 70px;
+    height: 70px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(8px);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-family: var(--font);
+    font-size: 8px;
+    text-transform: uppercase;
+    touch-action: none;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+.mobile-btn:active {
+    background: rgba(255, 255, 255, 0.3);
+    transform: scale(0.9);
+}
+
+.jump-btn {
+    width: 90px;
+    height: 90px;
+    background: rgba(226, 183, 20, 0.2);
+    border-color: var(--mc-accent);
+}
+
+.mobile-actions-secondary {
+    display: flex;
+    gap: 12px;
+}
+
+.mobile-interaction-btns {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 20px;
+}
+
+.break-btn {
+    background: rgba(255, 100, 100, 0.2);
+    border-color: #ff6464;
+}
+
+.place-btn {
+    background: rgba(100, 255, 100, 0.2);
+    border-color: #64ff64;
+}
+
+.mobile-hotbar-nav {
+    position: absolute;
+    bottom: 110px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 150px;
+}
+
+.mobile-hotbar-nav button {
+    background: var(--mc-slot-bg);
+    border: 2px solid var(--mc-slot-border);
+    color: #fff;
+    font-family: var(--font);
+    padding: 8px 12px;
+    border-radius: 4px;
+}
+
+@media (min-width: 1024px) {
+    .mobile-controls-overlay {
+        display: none;
+    }
+}

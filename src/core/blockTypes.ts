@@ -95,6 +95,7 @@ export enum BlockType {
     SOUL_SAND = 73,
     CRYING_OBSIDIAN = 74,
     END_PORTAL_FRAME = 75,
+    END_PORTAL_FRAME_EYE = 80,
     DRAGON_EGG = 76,
     NETHER_PORTAL_BLOCK = 77,
     END_PORTAL_BLOCK = 78,
@@ -120,6 +121,7 @@ export enum BlockType {
     WHEAT_5 = 166,
     WHEAT_6 = 167,
     WHEAT_7 = 168,
+    FIRE = 169,
     SEEDS = 250,
     // ─── Tool Items ─────────────────────────────────────
     STICK = 100,
@@ -546,6 +548,7 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.MUSHROOM_STEW]: { name: 'Zupa Grzybowa', color: '#bb6644', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, foodRestore: 6 },
     // ─── Farming ────────────────────────────────────────
     [BlockType.FARMLAND]: { name: 'Ziemia Uprawna', color: '#6b4226', top: '#4b3216', transparent: false, solid: true, breakTime: 0.6, tool: 'shovel' },
+    [BlockType.FIRE]: { name: 'Ogień', color: '#ffcc00', transparent: true, solid: false, breakTime: 0.1, light: 15, emissive: true },
     [BlockType.SEEDS]: { name: 'Nasiona', color: '#88cc44', transparent: false, solid: false, breakTime: 0, isItem: true },
 
     [BlockType.WHEAT_0]: { name: 'Pszenica (etap 0)', color: '#00cc00', transparent: true, solid: false, breakTime: 0 },
@@ -598,6 +601,7 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.SOUL_SAND]: { name: 'Piasek Dusz', color: '#5b4538', transparent: false, solid: true, breakTime: 0.5, tool: 'shovel' },
     [BlockType.CRYING_OBSIDIAN]: { name: 'Płaczący Obsydian', color: '#32006b', transparent: false, solid: true, breakTime: 50, tool: 'pickaxe', emissive: true },
     [BlockType.END_PORTAL_FRAME]: { name: 'Rama Portalu Endu', color: '#3b6b4b', top: '#1a4a4a', transparent: false, solid: true, breakTime: 999 },
+    [BlockType.END_PORTAL_FRAME_EYE]: { name: 'Rama Portalu Endu (Oko)', color: '#3b6b4b', top: '#00ff88', transparent: false, solid: true, breakTime: 999, emissive: true },
     [BlockType.DRAGON_EGG]: { name: 'Smocze Jajo', color: '#0d0016', transparent: true, solid: true, breakTime: 3.0 },
     [BlockType.NETHER_PORTAL_BLOCK]: { name: 'Portal Netheru', color: '#7b0099', transparent: true, solid: false, breakTime: 999, emissive: true },
     [BlockType.END_PORTAL_BLOCK]: { name: 'Portal Endu', color: '#001122', transparent: true, solid: false, breakTime: 999, emissive: true },

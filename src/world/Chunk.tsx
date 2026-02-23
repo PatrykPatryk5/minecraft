@@ -55,7 +55,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
     const v_nPz = useGameStore((s) => s.chunkVersions[cx + ',' + (cz + 1)] ?? -1);
     const v_nNz = useGameStore((s) => s.chunkVersions[cx + ',' + (cz - 1)] ?? -1);
 
-    const useShadows = useGameStore((s) => s.settings.graphics !== 'fast');
+    const useShadows = useGameStore((s) => s.settings.graphics !== 'fast' && s.settings.graphics !== 'potato');
     const [meshData, setMeshData] = React.useState<{ solidGeo: THREE.BufferGeometry | null, waterGeo: THREE.BufferGeometry | null, atlas: THREE.Texture } | null>(null);
 
     useEffect(() => {

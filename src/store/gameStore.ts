@@ -12,6 +12,7 @@
  */
 
 import { create } from 'zustand';
+import { subscribeWithSelector } from 'zustand/middleware';
 import { BlockType, DEFAULT_HOTBAR, EMPTY_HOTBAR, BLOCK_DATA } from '../core/blockTypes';
 import { saveChunk, savePlayerState, loadPlayerState, clearAllChunks, clearPlayerState, PlayerSaveState } from '../core/storage';
 import { blockIndex, CHUNK_VOLUME } from '../core/terrainGen';
@@ -59,7 +60,7 @@ export interface GameSettings {
     sensitivity: number;
     soundVolume: number;
     musicVolume: number;
-    graphics: 'fast' | 'fancy' | 'fabulous';
+    graphics: 'potato' | 'fast' | 'fancy' | 'fabulous';
     showFps: boolean;
     viewBobbing: boolean;
     difficulty: Difficulty;
@@ -107,6 +108,19 @@ export interface TNTPrimedEntity {
     id: string;
     pos: [number, number, number];
     fuse: number; // in ticks (default 80 = 4s)
+}
+
+export interface EyeOfEnderEntity {
+    id: string;
+    pos: [number, number, number];
+    target: [number, number];
+    life: number;
+}
+
+export interface PearlEntity {
+    id: string;
+    pos: [number, number, number];
+    velocity: [number, number, number];
 }
 
 export interface FurnaceState {
@@ -157,6 +171,14 @@ export interface GameState {
     spawnTNT: (pos: [number, number, number], fuse?: number, fromNetwork?: boolean) => void;
     removeTNT: (id: string, fromNetwork?: boolean) => void;
     updateTNT: (id: string, fuse: number) => void;
+
+    eyesOfEnder: Record<string, EyeOfEnderEntity>;
+    addEyeOfEnder: (pos: [number, number, number], target: [number, number]) => void;
+    removeEyeOfEnder: (id: string) => void;
+
+    pearls: Record<string, PearlEntity>;
+    addPearl: (pos: [number, number, number], velocity: [number, number, number]) => void;
+    removePearl: (id: string) => void;
 
     setChunkData: (cx: number, cz: number, dimension: string, data: Uint16Array) => void;
     getBlock: (x: number, y: number, z: number) => number;
@@ -222,6 +244,7 @@ export interface GameState {
     addItem: (id: number, count?: number, initialDurability?: number) => boolean;
     consumeHotbarItem: (slot: number) => void;
     damageTool: (slotIndex: number) => void;
+    updateHotbarItem: (slotIndex: number, item: Partial<InventorySlot>) => void;
     getSelectedBlock: () => number;
 
     // ── Global Cursor ─────────────────────────────────────
@@ -269,6 +292,12 @@ export interface GameState {
     toggleHUD: () => void;
     isChatOpen: boolean;
     setChatOpen: (v: boolean) => void;
+
+    isMobile: boolean;
+    setIsMobile: (v: boolean) => void;
+
+    virtualKeys: Record<string, boolean>;
+    setVirtualKey: (key: string, pressed: boolean) => void;
 
     // ── Settings ──────────────────────────────────────────
     settings: GameSettings;
@@ -403,7 +432,7 @@ const makeSlots = (n: number): InventorySlot[] => Array.from({ length: n }, empt
 const hotbarFromIds = (ids: number[]): InventorySlot[] =>
     ids.map(id => id ? { id, count: 64, durability: BLOCK_DATA[id]?.maxDurability } : emptySlot());
 
-const useGameStore = create<GameState>((set, get) => ({
+const useGameStore = create<GameState>()(subscribeWithSelector((set, get) => ({
     // ── Screen ────────────────────────────────────────────
     screen: 'mainMenu' as GameScreen,
     setScreen: (s) => set({ screen: s }),
@@ -619,6 +648,32 @@ const useGameStore = create<GameState>((set, get) => ({
             });
         }
     },
+
+    eyesOfEnder: {},
+    addEyeOfEnder: (pos, target) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        set((s) => ({
+            eyesOfEnder: { ...s.eyesOfEnder, [id]: { id, pos, target, life: 100 } }
+        }));
+    },
+    removeEyeOfEnder: (id) => set((s) => {
+        const next = { ...s.eyesOfEnder };
+        delete next[id];
+        return { eyesOfEnder: next };
+    }),
+
+    pearls: {},
+    addPearl: (pos, velocity) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        set((s) => ({
+            pearls: { ...s.pearls, [id]: { id, pos, velocity } }
+        }));
+    },
+    removePearl: (id) => set((s) => {
+        const next = { ...s.pearls };
+        delete next[id];
+        return { pearls: next };
+    }),
 
     setBlockPower: (x, y, z, power) => {
         if (y < 0 || y > 255) return;
@@ -1000,6 +1055,11 @@ const useGameStore = create<GameState>((set, get) => ({
             set({ hotbar: newHotbar });
         }
     },
+    updateHotbarItem: (slotIndex, item) => set((s) => {
+        const newHotbar = [...s.hotbar];
+        newHotbar[slotIndex] = { ...newHotbar[slotIndex], ...item };
+        return { hotbar: newHotbar };
+    }),
     getSelectedBlock: () => {
         const s = get();
         return s.hotbar[s.hotbarSlot]?.id ?? 0;
@@ -1147,6 +1207,14 @@ const useGameStore = create<GameState>((set, get) => ({
     toggleHUD: () => set((s) => ({ showHUD: !s.showHUD })),
     isChatOpen: false,
     setChatOpen: (v) => set({ isChatOpen: v }),
+
+    isMobile: false,
+    setIsMobile: (v) => set({ isMobile: v }),
+
+    virtualKeys: {},
+    setVirtualKey: (key, pressed) => set((s) => ({
+        virtualKeys: { ...s.virtualKeys, [key]: pressed }
+    })),
 
     // ── Settings ──────────────────────────────────────────
     settings: { ...defaultSettings },
@@ -1395,6 +1463,6 @@ const useGameStore = create<GameState>((set, get) => ({
         get().resetWorld();
         window.location.reload(); // Hard reset
     }
-}));
+})));
 
 export default useGameStore;

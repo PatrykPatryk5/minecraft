@@ -133,7 +133,7 @@ export type SoundType =
     | 'open' | 'close' | 'levelup'
     | 'explode' | 'bow' | 'pop' | 'fuse'
     | 'anvil' | 'xp' | 'fireball' | 'portal'
-    | 'piston_out' | 'piston_in' | 'gravel' | 'roar'
+    | 'piston_out' | 'piston_in' | 'gravel' | 'roar' | 'fire'
     | 'grass_step' | 'stone_step' | 'wood_step' | 'sand_step';
 
 // ─── 3D Audio Listener ───────────────────────────────────
@@ -603,6 +603,21 @@ export function playSound(type: SoundType, pos?: [number, number, number]): void
                 env.gain.linearRampToValueAtTime(0, now + 4.0);
                 noise.connect(filter).connect(env).connect(output);
                 noise.start(now); noise.stop(now + 4.0);
+                break;
+            }
+            case 'fire': {
+                // Hissing fire sound
+                for (let i = 0; i < 3; i++) {
+                    const noise = createNoise(ctx, 0.15);
+                    const filter = ctx.createBiquadFilter();
+                    filter.type = 'highpass'; filter.frequency.value = 1000 + Math.random() * 500;
+                    const env = ctx.createGain();
+                    const t = now + i * 0.05;
+                    env.gain.setValueAtTime(0.15, t);
+                    env.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+                    noise.connect(filter).connect(env).connect(output);
+                    noise.start(t); noise.stop(t + 0.15);
+                }
                 break;
             }
         }
