@@ -1,21 +1,28 @@
-MIT License
+# ⚖️ Custom Source-Available License
 
-Copyright (c) 2026 PatrykPatryk5
+Copyright (c) 2026 MUZYKANT TEAM & PatrykPatryk5.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+## 1. Permission and Usage
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to use the Software for **Private and Educational Purposes** only.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+### 🏠 Private Use: ALLOWED
+You are free to:
+- Clone the repository for personal study.
+- Run the game locally for testing and enjoyment.
+- Modify the source code for personal, non-distributed projects.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+### 💼 Commercial & Public Use: PROHIBITED
+You are **NOT** allowed to:
+- Use the Software or any of its components for commercial purposes.
+- Host a public version of this game or a derivative work without explicit, written consent from the **MUZYKANT TEAM**.
+- Sell, lease, or monetize access to any part of this project.
+
+## 2. Redistribution
+Redistribution of the source code or compiled binaries, with or without modifications, is prohibited unless authorized by the authors.
+
+## 3. Disclaimers
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+📧 For licensing inquiries or commercial partnership requests, please contact: **[r3f@muzykant.xyz](mailto:r3f@muzykant.xyz)**
