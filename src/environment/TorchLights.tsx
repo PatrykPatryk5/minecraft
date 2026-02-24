@@ -43,56 +43,44 @@ const TorchLights: React.FC = () => {
 
         const foundLights: LightSource[] = [];
 
-        // Scan nearby chunks
+        // Use the store's tracked light sources for extreme efficiency
         for (let dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
             for (let dz = -SCAN_RADIUS; dz <= SCAN_RADIUS; dz++) {
                 const cx = pcx + dx;
                 const cz = pcz + dz;
                 const key = chunkKey(cx, cz);
                 const chunk = store.chunks[key];
+                const lightIndices = store.lightSources[key];
 
-                if (!chunk) continue;
+                if (!chunk || !lightIndices || lightIndices.length === 0) continue;
 
-                // Extremely fast native C++ array cull
-                const lightSourceIds = [
-                    BlockType.TORCH, BlockType.REDSTONE_TORCH, BlockType.GLOWSTONE,
-                    BlockType.LANTERN, BlockType.SOUL_LANTERN, BlockType.SOUL_TORCH,
-                    BlockType.SEA_LANTERN, BlockType.OCHRE_FROGLIGHT, BlockType.VERDANT_FROGLIGHT,
-                    BlockType.PEARLESCENT_FROGLIGHT, BlockType.BEACON, BlockType.REDSTONE_LAMP,
-                    BlockType.LAVA
-                ];
-                if (!lightSourceIds.some(id => chunk.includes(id))) continue;
+                for (const idx of lightIndices) {
+                    const block = chunk[idx];
 
-                // Restrict Y range to save scanning time: scan around player's Y ± 32
-                const minY = Math.max(0, py - 32);
-                const maxY = Math.min(255, py + 32);
+                    // Recover coordinates from index
+                    const y = idx >> 8;
+                    const lz = (idx >> 4) & 0x0F;
+                    const lx = idx & 0x0F;
 
-                for (let y = minY; y <= maxY; y++) {
-                    for (let lx = 0; lx < 16; lx++) {
-                        for (let lz = 0; lz < 16; lz++) {
-                            const idx = (y << 8) | (lz << 4) | lx; // Synchronized with terrainGen.ts blockIndex
-                            const block = chunk[idx];
+                    const wx = cx * 16 + lx;
+                    const wz = cz * 16 + lz;
+                    const distSq = (wx - px) ** 2 + (y - py) ** 2 + (wz - pz) ** 2;
 
-                            if (lightSourceIds.includes(block)) {
-                                const wx = cx * 16 + lx;
-                                const wz = cz * 16 + lz;
-                                const distSq = (wx - px) ** 2 + (y - py) ** 2 + (wz - pz) ** 2;
+                    // Skip lights that are too far
+                    if (distSq > (SCAN_RADIUS * 16) ** 2) continue;
 
-                                const isRedstone = block === BlockType.REDSTONE_TORCH || block === BlockType.REDSTONE_LAMP;
-                                const isSoul = block === BlockType.SOUL_TORCH || block === BlockType.SOUL_LANTERN;
-                                const isLava = block === BlockType.LAVA;
+                    const isRedstone = block === BlockType.REDSTONE_TORCH || block === BlockType.REDSTONE_LAMP;
+                    const isSoul = block === BlockType.SOUL_TORCH || block === BlockType.SOUL_LANTERN;
+                    const isLava = block === BlockType.LAVA;
 
-                                foundLights.push({
-                                    x: wx + 0.5,
-                                    y: y + 0.5,
-                                    z: wz + 0.5,
-                                    color: isRedstone ? '#ff3300' : isSoul ? '#00ccff' : isLava ? '#ff6600' : '#ffdd88',
-                                    intensity: (block === BlockType.TORCH || block === BlockType.LANTERN || block === BlockType.GLOWSTONE || isLava) ? 1.5 : 1.0,
-                                    distSq
-                                });
-                            }
-                        }
-                    }
+                    foundLights.push({
+                        x: wx + 0.5,
+                        y: y + 0.5,
+                        z: wz + 0.5,
+                        color: isRedstone ? '#ff3300' : isSoul ? '#11ccff' : isLava ? '#ff6600' : '#ffdd88',
+                        intensity: (block === BlockType.TORCH || block === BlockType.LANTERN || block === BlockType.GLOWSTONE || isLava) ? 1.8 : 1.2,
+                        distSq
+                    });
                 }
             }
         }
@@ -109,7 +97,7 @@ const TorchLights: React.FC = () => {
                     return topLights;
                 }
             }
-            return prev; // Same lights
+            return prev;
         });
     };
 

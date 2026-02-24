@@ -603,14 +603,16 @@ function drawWool(ctx: CanvasRenderingContext2D, base: RGB, seed: number) {
 
 function drawGlowstone(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
+    fillNoise(ctx, [235, 215, 100], 15, seed); // Brighter base
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        const v = rng() * 35 - 17;
-        px(ctx, x, y, 220 + v, 200 + v * 0.8, 80 + v * 0.4);
+        const v = rng() * 30 - 10;
+        if (rng() < 0.2) px(ctx, x, y, 255, 240, 180); // Glowing specks
+        else px(ctx, x, y, 220 + v, 190 + v * 0.8, 70 + v * 0.4);
     }
-    // Cracked pattern
-    for (let i = 0; i < 5; i++) {
+    // Cracker pattern with subtle glow
+    for (let i = 0; i < 8; i++) {
         const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0;
-        px(ctx, sx, sy, 180, 155, 50);
+        px(ctx, sx, sy, 255, 230, 120);
     }
 }
 
@@ -698,16 +700,21 @@ function drawCactus(ctx: CanvasRenderingContext2D, face: string, seed: number) {
 function drawLava(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        const v = rng() * 40 - 20;
-        const hot = rng() < 0.15;
-        if (hot) px(ctx, x, y, 255, 200 + (rng() * 55 | 0), 50);
-        else px(ctx, x, y, 210 + v, 90 + v * 0.5, 15 + v * 0.2);
+        const v = rng() * 50 - 25;
+        const hot = rng() < 0.25; // More hot pixels
+        if (hot) {
+            px(ctx, x, y, 255, 210 + (rng() * 45 | 0), 60);
+        } else {
+            // Vibrant orange/red base
+            px(ctx, x, y, 230 + v, 100 + v * 0.6, 20);
+        }
     }
-    // Bright lava veins
-    for (let i = 0; i < 3; i++) {
+    // Intense lava veins
+    for (let i = 0; i < 5; i++) {
         let cx = (rng() * 14 + 1) | 0, cy = (rng() * 14 + 1) | 0;
-        for (let j = 0; j < 4; j++) {
-            px(ctx, cx & 15, cy & 15, 255, 220, 80);
+        const len = 3 + (rng() * 4 | 0);
+        for (let j = 0; j < len; j++) {
+            px(ctx, cx & 15, cy & 15, 255, 240, 150); // White-hot vein center
             cx += rng() > 0.5 ? 1 : -1; cy += rng() > 0.5 ? 1 : 0;
         }
     }

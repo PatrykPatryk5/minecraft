@@ -21,6 +21,16 @@ import { SMELTING_RECIPES, FUEL_VALUES } from '../core/crafting';
 export const chunkKey = (cx: number, cz: number): string => `${cx},${cz}`;
 export const blockKey = (lx: number, y: number, lz: number): string => `${lx},${y},${lz}`;
 
+export const LIGHT_SOURCE_IDS = new Set([
+    BlockType.TORCH, BlockType.REDSTONE_TORCH, BlockType.GLOWSTONE,
+    BlockType.LANTERN, BlockType.SOUL_LANTERN, BlockType.SOUL_TORCH,
+    BlockType.SEA_LANTERN, BlockType.OCHRE_FROGLIGHT, BlockType.VERDANT_FROGLIGHT,
+    BlockType.PEARLESCENT_FROGLIGHT, BlockType.BEACON, BlockType.REDSTONE_LAMP,
+    BlockType.LAVA, BlockType.FURNACE_ON, BlockType.CRYING_OBSIDIAN,
+    BlockType.NETHER_PORTAL_BLOCK, BlockType.END_PORTAL_BLOCK,
+    BlockType.SCULK_CATALYST, BlockType.SCULK_SENSOR
+]);
+
 // ─── Types ───────────────────────────────────────────────
 export type GameMode = 'survival' | 'creative' | 'spectator';
 export type GameScreen = 'mainMenu' | 'worldCreate' | 'settings' | 'keybinds' | 'multiplayer' | 'playing' | 'paused' | 'credits';
@@ -155,6 +165,7 @@ export interface GameState {
 
     // ── World ─────────────────────────────────────────────
     chunks: Record<string, Uint16Array>;
+    lightSources: Record<string, number[]>; // indices of light-emitting blocks
     chunkVersions: Record<string, number>;
 
     generatedChunks: Set<string>;
@@ -373,6 +384,7 @@ export interface GameState {
     setDimension: (d: Dimension) => void;
     dimensionChunks: Record<string, {
         chunks: Record<string, Uint16Array>;
+        lightSources: Record<string, number[]>;
         chunkVersions: Record<string, number>;
         generatedChunks: Set<string>;
     }>;
@@ -449,6 +461,7 @@ const useGameStore = create<GameState>((set, get) => ({
 
     // ── World ─────────────────────────────────────────────
     chunks: {},
+    lightSources: {},
     chunkVersions: {},
     generatedChunks: new Set(),
     worldSeed: Math.floor(Math.random() * 999999),
@@ -475,6 +488,13 @@ const useGameStore = create<GameState>((set, get) => ({
             if (existing.every((val, i) => val === finalData[i])) return;
         }
 
+        const lightIndices: number[] = [];
+        for (let i = 0; i < CHUNK_VOLUME; i++) {
+            if (LIGHT_SOURCE_IDS.has(data[i] & 0x0FFF)) {
+                lightIndices.push(i);
+            }
+        }
+
         saveChunk(`${dimension}:${cx},${cz}`, finalData);
 
         set((s) => {
@@ -499,7 +519,8 @@ const useGameStore = create<GameState>((set, get) => ({
             }
 
             return {
-                chunks: { ...s.chunks, [key]: data },
+                chunks: { ...s.chunks, [key]: finalData },
+                lightSources: { ...s.lightSources, [key]: lightIndices },
                 generatedChunks: newGen,
                 chunkVersions: versions,
             };
@@ -547,6 +568,7 @@ const useGameStore = create<GameState>((set, get) => ({
     addBlocks: (blocks, fromNetwork = false) => {
         const s = get();
         const affectedChunks = new Map<string, Uint16Array>();
+        const newLightSources = { ...s.lightSources };
         const versions = { ...s.chunkVersions };
 
         for (const b of blocks) {
@@ -563,15 +585,35 @@ const useGameStore = create<GameState>((set, get) => ({
             }
 
             const idx = blockIndex(lx, b.y, lz);
-            if (chunk[idx] === (b.typeId & 0x0FFF)) continue; // OPTIMIZATION: skip if same type
+            const oldType = chunk[idx] & 0x0FFF;
+            const newType = b.typeId & 0x0FFF;
+            if (oldType === newType) continue; // OPTIMIZATION: skip if same type
 
             // If it's the original from state, copy it
             if (chunk === s.chunks[key]) {
                 chunk = new Uint16Array(chunk);
             }
 
-            chunk[idx] = b.typeId & 0x0FFF;
+            chunk[idx] = newType;
             affectedChunks.set(key, chunk);
+
+            // Update light sources
+            let chunkLights = newLightSources[key] || s.lightSources[key] || [];
+            let lightChanged = false;
+
+            if (LIGHT_SOURCE_IDS.has(oldType)) {
+                chunkLights = chunkLights.filter(i => i !== idx);
+                lightChanged = true;
+            }
+            if (LIGHT_SOURCE_IDS.has(newType)) {
+                if (!chunkLights.includes(idx)) {
+                    chunkLights = [...chunkLights, idx];
+                    lightChanged = true;
+                }
+            }
+            if (lightChanged) {
+                newLightSources[key] = chunkLights;
+            }
 
             // Bump versions
             const bump = (ccx: number, ccz: number) => {
@@ -606,6 +648,7 @@ const useGameStore = create<GameState>((set, get) => ({
 
         set({
             chunks: newChunks,
+            lightSources: newLightSources,
             chunkVersions: versions,
             generatedChunks: newGen
         });
@@ -688,12 +731,23 @@ const useGameStore = create<GameState>((set, get) => ({
         const idx = blockIndex(lx, y, lz);
         if (chunk[idx] === 0) return; // Already air
 
-        const oldType = chunk[idx];
+        const oldRaw = chunk[idx];
+        const oldType = oldRaw & 0x0FFF;
         chunk[idx] = 0; // Reset ID and power to 0
+
+        // Update light sources
+        if (LIGHT_SOURCE_IDS.has(oldType)) {
+            const s = get();
+            const lights = s.lightSources[key] || [];
+            const newLights = lights.filter(i => i !== idx);
+            set((state) => ({
+                lightSources: { ...state.lightSources, [key]: newLights }
+            }));
+        }
 
         // Trigger Linked breaking & actions
         import('../core/blockActions').then(({ onBlockBroken }) => {
-            onBlockBroken(x, y, z, oldType);
+            onBlockBroken(x, y, z, oldRaw);
         });
 
         // Trigger Redstone update
@@ -733,6 +787,8 @@ const useGameStore = create<GameState>((set, get) => ({
         const affectedChunks = new Set<string>();
         const redstoneTargets: [number, number, number][] = [];
         const bumpCounts = new Map<string, number>();
+        const newLightSources = { ...s.lightSources };
+
         const queueBump = (cx: number, cz: number) => {
             const k = chunkKey(cx, cz);
             bumpCounts.set(k, (bumpCounts.get(k) ?? 0) + 1);
@@ -750,8 +806,15 @@ const useGameStore = create<GameState>((set, get) => ({
             const idx = blockIndex(lx, y, lz);
             if (chunk[idx] === 0) continue;
 
+            const oldType = chunk[idx] & 0x0FFF;
             chunk[idx] = 0;
             affectedChunks.add(key);
+
+            if (LIGHT_SOURCE_IDS.has(oldType)) {
+                let lights = newLightSources[key] || s.lightSources[key] || [];
+                newLightSources[key] = lights.filter(i => i !== idx);
+            }
+
             if (redstoneTargets.length < 256) redstoneTargets.push([x, y, z]);
         }
 
@@ -768,13 +831,16 @@ const useGameStore = create<GameState>((set, get) => ({
             queueBump(cx, cz - 1);
         }
 
-        if (bumpCounts.size > 0) {
+        if (bumpCounts.size > 0 || Object.keys(newLightSources).length !== Object.keys(s.lightSources).length) {
             set((state) => {
                 const chunkVersions = { ...state.chunkVersions };
                 for (const [key, delta] of bumpCounts) {
                     chunkVersions[key] = (chunkVersions[key] ?? 0) + delta;
                 }
-                return { chunkVersions };
+                return {
+                    chunkVersions,
+                    lightSources: newLightSources
+                };
             });
         }
 
@@ -1396,14 +1462,16 @@ const useGameStore = create<GameState>((set, get) => ({
         const oldDim = s.dimension;
         // Save current state
         const savedChunks = { ...s.chunks };
+        const savedLights = { ...s.lightSources };
         const savedVersions = { ...s.chunkVersions };
         const savedGenerated = new Set(s.generatedChunks);
 
-        const newDimStore = s.dimensionChunks[d] || { chunks: {}, chunkVersions: {}, generatedChunks: new Set() };
+        const newDimStore = s.dimensionChunks[d] || { chunks: {}, lightSources: {}, chunkVersions: {}, generatedChunks: new Set() };
 
         return {
             dimension: d,
             chunks: newDimStore.chunks || {},
+            lightSources: newDimStore.lightSources || {},
             chunkVersions: newDimStore.chunkVersions || {},
             generatedChunks: newDimStore.generatedChunks || new Set(),
             // Save old to storage
@@ -1411,6 +1479,7 @@ const useGameStore = create<GameState>((set, get) => ({
                 ...s.dimensionChunks,
                 [oldDim]: {
                     chunks: savedChunks,
+                    lightSources: savedLights,
                     chunkVersions: savedVersions,
                     generatedChunks: savedGenerated
                 }
@@ -1418,9 +1487,9 @@ const useGameStore = create<GameState>((set, get) => ({
         };
     }),
     dimensionChunks: {
-        overworld: { chunks: {}, chunkVersions: {}, generatedChunks: new Set() },
-        nether: { chunks: {}, chunkVersions: {}, generatedChunks: new Set() },
-        end: { chunks: {}, chunkVersions: {}, generatedChunks: new Set() }
+        overworld: { chunks: {}, lightSources: {}, chunkVersions: {}, generatedChunks: new Set() },
+        nether: { chunks: {}, lightSources: {}, chunkVersions: {}, generatedChunks: new Set() },
+        end: { chunks: {}, lightSources: {}, chunkVersions: {}, generatedChunks: new Set() }
     },
     dragonDefeated: false,
     setDragonDefeated: (v) => set({ dragonDefeated: v }),
