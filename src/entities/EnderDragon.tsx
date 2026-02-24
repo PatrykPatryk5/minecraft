@@ -10,8 +10,8 @@ import { EndCrystal } from './EndCrystal';
 import { BlockType } from '../core/blockTypes';
 
 const CRYSTAL_POSITIONS: [number, number, number][] = [
-    [35, 71, 0], [-35, 71, 0], [0, 71, 35], [0, 71, -35],
-    [25, 56, 25], [-25, 56, 25], [25, 56, -25], [-25, 56, -25]
+    [35, 95, 0], [-35, 95, 0], [0, 95, 35], [0, 95, -35],
+    [25, 80, 25], [-25, 80, 25], [25, 80, -25], [-25, 80, -25]
 ];
 
 export const EnderDragon: React.FC = () => {
@@ -25,7 +25,7 @@ export const EnderDragon: React.FC = () => {
 
     // Simple state machine: Circle -> Swoop -> Perch
     const state = useRef<'circle' | 'swoop'>('circle');
-    const target = useRef(new Vector3(0, 50, 0));
+    const target = useRef(new Vector3(0, 100, 0));
     const angle = useRef(0);
     const healTimer = useRef(0);
 
@@ -45,10 +45,10 @@ export const EnderDragon: React.FC = () => {
         }
 
         if (state.current === 'circle') {
-            // Circle around 0,0 at radius 60, height 50
+            // Circle around 0,0 at radius 60, height 100
             target.current.set(
                 Math.sin(angle.current) * 60,
-                50 + Math.sin(angle.current * 2) * 10,
+                100 + Math.sin(angle.current * 2) * 10,
                 Math.cos(angle.current) * 60
             );
 
@@ -77,24 +77,25 @@ export const EnderDragon: React.FC = () => {
 
     const spawnExitPortal = () => {
         const s = useGameStore.getState();
+        const BASE_Y = 80; // Surface of main island at center
         // 3x3 bedrock ring around 0,0, with exit portal block in the middle
         for (let dx = -2; dx <= 2; dx++) {
             for (let dz = -2; dz <= 2; dz++) {
                 if (Math.abs(dx) == 2 || Math.abs(dz) == 2) {
-                    s.addBlock(dx, 30, dz, BlockType.BEDROCK);
-                    s.addBlock(dx, 31, dz, BlockType.BEDROCK);
+                    s.addBlock(dx, BASE_Y, dz, BlockType.BEDROCK);
+                    s.addBlock(dx, BASE_Y + 1, dz, BlockType.BEDROCK);
                 } else {
-                    s.addBlock(dx, 30, dz, BlockType.BEDROCK);
+                    s.addBlock(dx, BASE_Y, dz, BlockType.BEDROCK);
                 }
             }
         }
         // Set the portal blocks
-        s.addBlock(0, 31, 1, BlockType.END_PORTAL_BLOCK);
-        s.addBlock(0, 31, -1, BlockType.END_PORTAL_BLOCK);
-        s.addBlock(1, 31, 0, BlockType.END_PORTAL_BLOCK);
-        s.addBlock(-1, 31, 0, BlockType.END_PORTAL_BLOCK);
+        s.addBlock(0, BASE_Y + 1, 1, BlockType.END_PORTAL_BLOCK);
+        s.addBlock(0, BASE_Y + 1, -1, BlockType.END_PORTAL_BLOCK);
+        s.addBlock(1, BASE_Y + 1, 0, BlockType.END_PORTAL_BLOCK);
+        s.addBlock(-1, BASE_Y + 1, 0, BlockType.END_PORTAL_BLOCK);
         // And the central fountain
-        s.addBlock(0, 31, 0, BlockType.END_PORTAL_BLOCK);
+        s.addBlock(0, BASE_Y + 1, 0, BlockType.END_PORTAL_BLOCK);
     };
 
     const onClick = () => {

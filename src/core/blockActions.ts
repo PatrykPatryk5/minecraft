@@ -12,6 +12,52 @@ import { playSound } from '../audio/sounds';
 import { emitBlockBreak, emitExplosion } from '../core/particles';
 import { MAX_HEIGHT } from './terrainGen';
 
+/**
+ * End Portal Activation
+ * Checks if a 3x3 ring of frames is present and fills the center with portal blocks.
+ */
+function attemptEndPortalActivation(bx: number, by: number, bz: number): boolean {
+    const s = useGameStore.getState();
+
+    const checkFrame = (ox: number, oz: number) => {
+        // Frame blocks (ring of 12)
+        const frameCoords = [
+            [0, -1], [1, -1], [2, -1], // North
+            [0, 3], [1, 3], [2, 3], // South
+            [-1, 0], [-1, 1], [-1, 2], // West
+            [3, 0], [3, 1], [3, 2]  // East
+        ];
+
+        for (const [dx, dz] of frameCoords) {
+            if (s.getBlock(ox + dx, by, oz + dz) !== BlockType.END_PORTAL_FRAME) return false;
+        }
+
+        // All frames present! Activate.
+        const blocks: { x: number, y: number, z: number, typeId: number }[] = [];
+        for (let dx = 0; dx < 3; dx++) {
+            for (let dz = 0; dz < 3; dz++) {
+                blocks.push({ x: ox + dx, y: by, z: oz + dz, typeId: BlockType.END_PORTAL_BLOCK });
+            }
+        }
+        s.addBlocks(blocks);
+        playSound('portal');
+        return true;
+    };
+
+    // Try all 12 possible origins (top-left of the 3x3 air center) relative to the clicked block
+    const relativeOrigins = [
+        [0, 1], [-1, 1], [-2, 1],     // Clicked North side
+        [0, -3], [-1, -3], [-2, -3],  // Clicked South side
+        [1, 0], [1, -1], [1, -2],     // Clicked West side
+        [-3, 0], [-3, -1], [-3, -2]   // Clicked East side
+    ];
+
+    for (const [dx, dz] of relativeOrigins) {
+        if (checkFrame(bx + dx, bz + dz)) return true;
+    }
+    return false;
+}
+
 // ─── TNT Explosion ──────────────────────────────────────
 const EXPLOSION_RADIUS = 4;
 const EXPLOSION_DAMAGE = 12;
@@ -219,6 +265,11 @@ export function handleBlockAction(
         case BlockType.OBSIDIAN:
             if (heldItem === BlockType.FLINT_AND_STEEL) {
                 return attemptNetherPortalIgnite(blockX, blockY, blockZ);
+            }
+            return false;
+        case BlockType.END_PORTAL_FRAME:
+            if (heldItem === BlockType.EYE_OF_ENDER) {
+                return attemptEndPortalActivation(blockX, blockY, blockZ);
             }
             return false;
         case BlockType.TRAPDOOR:

@@ -14,7 +14,6 @@ export default function useKeyboard(): React.RefObject<KeyMap> {
 
     useEffect(() => {
         const down = (e: KeyboardEvent) => {
-            // Don't track movement keys if chat is open
             if (useGameStore.getState().isChatOpen) return;
             keys.current[e.code] = true;
         };
@@ -22,16 +21,25 @@ export default function useKeyboard(): React.RefObject<KeyMap> {
             keys.current[e.code] = false;
         };
         const blur = () => {
-            // Reset all keys when window loses focus (prevents stuck keys)
             keys.current = {};
         };
         window.addEventListener('keydown', down);
         window.addEventListener('keyup', up);
         window.addEventListener('blur', blur);
+
+        // Sync virtual keys from store every frame (or subscribe)
+        const unsub = useGameStore.subscribe((s) => {
+            const vKeys = s.virtualKeys;
+            for (const k in vKeys) {
+                keys.current[k] = vKeys[k];
+            }
+        });
+
         return () => {
             window.removeEventListener('keydown', down);
             window.removeEventListener('keyup', up);
             window.removeEventListener('blur', blur);
+            unsub();
         };
     }, []);
 

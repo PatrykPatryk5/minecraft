@@ -59,7 +59,7 @@ export interface GameSettings {
     sensitivity: number;
     soundVolume: number;
     musicVolume: number;
-    graphics: 'fast' | 'fancy' | 'fabulous';
+    graphics: 'fast' | 'fancy' | 'fabulous' | 'potato';
     showFps: boolean;
     viewBobbing: boolean;
     difficulty: Difficulty;
@@ -107,6 +107,18 @@ export interface TNTPrimedEntity {
     id: string;
     pos: [number, number, number];
     fuse: number; // in ticks (default 80 = 4s)
+}
+
+export interface EyeOfEnderEntity {
+    id: string;
+    pos: [number, number, number];
+    target: [number, number];
+}
+
+export interface EnderPearlEntity {
+    id: string;
+    pos: [number, number, number];
+    velocity: [number, number, number];
 }
 
 export interface FurnaceState {
@@ -157,6 +169,14 @@ export interface GameState {
     spawnTNT: (pos: [number, number, number], fuse?: number, fromNetwork?: boolean) => void;
     removeTNT: (id: string, fromNetwork?: boolean) => void;
     updateTNT: (id: string, fuse: number) => void;
+
+    eyesOfEnder: Record<string, EyeOfEnderEntity>;
+    addEyeOfEnder: (pos: [number, number, number], target: [number, number]) => void;
+    removeEyeOfEnder: (id: string) => void;
+
+    pearls: Record<string, EnderPearlEntity>;
+    addPearl: (pos: [number, number, number], velocity: [number, number, number]) => void;
+    removePearl: (id: string) => void;
 
     setChunkData: (cx: number, cz: number, dimension: string, data: Uint16Array) => void;
     getBlock: (x: number, y: number, z: number) => number;
@@ -248,6 +268,12 @@ export interface GameState {
     setMiningProgress: (p: number) => void;
     lookingAt: [number, number, number] | null;
     setLookingAt: (pos: [number, number, number] | null) => void;
+
+    // ── Mobile / Virtual Input ────────────────────────────
+    isMobile: boolean;
+    setIsMobile: (v: boolean) => void;
+    virtualKeys: Record<string, boolean>;
+    setVirtualKey: (key: string, pressed: boolean) => void;
 
     // ── Day/Night ─────────────────────────────────────────
     dayTime: number;
@@ -1151,7 +1177,20 @@ const useGameStore = create<GameState>((set, get) => ({
     // ── Settings ──────────────────────────────────────────
     settings: { ...defaultSettings },
     updateSettings: (partial) => set((s) => {
-        const newSettings = { ...s.settings, ...partial };
+        let newSettings = { ...s.settings, ...partial };
+
+        // ZIEMNIAK (Potato) Mode presets
+        if (partial.graphics === 'potato') {
+            newSettings = {
+                ...newSettings,
+                renderDistance: 2,
+                smoothLighting: false,
+                particles: 'minimal',
+                viewBobbing: false,
+                brightness: 1.0, // Brighter because no shadows
+            };
+        }
+
         return { settings: newSettings, renderDistance: newSettings.renderDistance, fov: newSettings.fov };
     }),
     renderDistance: defaultSettings.renderDistance,
@@ -1172,6 +1211,14 @@ const useGameStore = create<GameState>((set, get) => ({
     setMiningProgress: (p: number) => set({ miningProgressValue: p }),
     lookingAt: null,
     setLookingAt: (pos) => set({ lookingAt: pos }),
+
+    // ── Mobile / Virtual Input ────────────────────────────
+    isMobile: /iPhone|iPad|iPod|Android/i.test(typeof navigator !== 'undefined' ? navigator.userAgent : ''),
+    setIsMobile: (v) => set({ isMobile: v }),
+    virtualKeys: {},
+    setVirtualKey: (key, pressed) => set((s) => ({
+        virtualKeys: { ...s.virtualKeys, [key]: pressed }
+    })),
 
     // ── Multiplayer ───────────────────────────────────────
     // Provide a Math.random fallback since crypto.randomUUID() is unavailable on non-HTTPS LAN connections
@@ -1304,6 +1351,31 @@ const useGameStore = create<GameState>((set, get) => ({
     updateTNT: (id, fuse) => set((s) => ({
         primedTNT: s.primedTNT.map(t => t.id === id ? { ...t, fuse } : t)
     })),
+
+    // ── Throwables ────────────────────────────────────────
+    eyesOfEnder: {},
+    addEyeOfEnder: (pos, target) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        set((s) => ({
+            eyesOfEnder: { ...s.eyesOfEnder, [id]: { id, pos, target } }
+        }));
+    },
+    removeEyeOfEnder: (id) => set((s) => {
+        const { [id]: _, ...rest } = s.eyesOfEnder;
+        return { eyesOfEnder: rest };
+    }),
+
+    pearls: {},
+    addPearl: (pos, velocity) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        set((s) => ({
+            pearls: { ...s.pearls, [id]: { id, pos, velocity } }
+        }));
+    },
+    removePearl: (id) => set((s) => {
+        const { [id]: _, ...rest } = s.pearls;
+        return { pearls: rest };
+    }),
 
     // ── Pistons ────────────────────────────────────────────
     pistons: {},

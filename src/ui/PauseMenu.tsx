@@ -167,10 +167,10 @@ const PauseMenu: React.FC = () => {
                     <div className="setting-row">
                         <span>Grafika:</span>
                         <div className="mode-selector compact">
-                            {(['fast', 'fancy', 'fabulous'] as const).map((g) => (
+                            {(['fast', 'fancy', 'fabulous', 'potato'] as const).map((g) => (
                                 <button key={g} className={`mode-btn sm${settings.graphics === g ? ' active' : ''}`}
                                     onClick={() => updateSettings({ graphics: g })}>
-                                    {g === 'fast' ? '⚡' : g === 'fancy' ? '🎨' : '✨'}
+                                    {g === 'fast' ? '⚡' : g === 'fancy' ? '🎨' : g === 'fabulous' ? '✨' : '🥔'}
                                 </button>
                             ))}
                         </div>

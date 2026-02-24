@@ -38,6 +38,8 @@ import DroppedItemsManager from './entities/DroppedItems';
 import FallingBlocksManager from './entities/FallingBlocks';
 import ArrowsManager from './entities/Arrows';
 import TNTManager from './entities/TNTPrimed';
+import { ThrowablesManager } from './entities/Throwables';
+import MobileControls from './ui/MobileControls';
 import PreJoinShield from './ui/PreJoinShield';
 import TabList from './ui/TabList';
 
@@ -67,6 +69,7 @@ const SceneContent: React.FC = () => {
                 <FallingBlocksManager />
                 <ArrowsManager />
                 <TNTManager />
+                <ThrowablesManager />
             </Physics>
             <Clouds />
             <Weather />
@@ -231,6 +234,9 @@ const App: React.FC = () => {
 
             {/* Tab List */}
             {isPlaying && <TabList />}
+
+            {/* Mobile Controls */}
+            {isPlaying && <MobileControls />}
 
             {/* Credits */}
             {screen === 'credits' && <CreditsScreen />}

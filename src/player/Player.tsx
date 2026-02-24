@@ -311,6 +311,19 @@ const Player: React.FC = () => {
                         isChargingBow.current = true;
                         bowCharge.current = 0;
                     }
+                    if (selected === BlockType.EYE_OF_ENDER && s.gameMode !== 'spectator') {
+                        // Throw eye towards 0,0 (simplified stronghold logic)
+                        s.addEyeOfEnder([camera.position.x, camera.position.y, camera.position.z], [0, 0]);
+                        s.consumeHotbarItem(s.hotbarSlot);
+                        playSound('pop');
+                    }
+                    if (selected === BlockType.ENDER_PEARL && s.gameMode !== 'spectator') {
+                        const dir = camera.getWorldDirection(new THREE.Vector3());
+                        const vel: [number, number, number] = [dir.x * 25, dir.y * 25 + 2, dir.z * 25];
+                        s.addPearl([camera.position.x, camera.position.y, camera.position.z], vel);
+                        s.consumeHotbarItem(s.hotbarSlot);
+                        playSound('pop');
+                    }
                     return;
                 }
                 if (s.gameMode === 'spectator') return;

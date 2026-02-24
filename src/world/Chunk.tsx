@@ -55,8 +55,12 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
     const v_nPz = useGameStore((s) => s.chunkVersions[cx + ',' + (cz + 1)] ?? -1);
     const v_nNz = useGameStore((s) => s.chunkVersions[cx + ',' + (cz - 1)] ?? -1);
 
-    const useShadows = useGameStore((s) => s.settings.graphics !== 'fast');
+    const smoothLighting = useGameStore((s) => s.settings.smoothLighting);
+    const useShadows = useGameStore((s) => s.settings.graphics !== 'fast' && s.settings.graphics !== 'potato');
     const [meshData, setMeshData] = React.useState<{ solidGeo: THREE.BufferGeometry | null, waterGeo: THREE.BufferGeometry | null, atlas: THREE.Texture } | null>(null);
+
+    // If smooth lighting is OFF, forced LOD to at least 1 (no AO)
+    const activeLod = !smoothLighting ? Math.max(1, lod) as 0 | 1 | 2 : lod;
 
     useEffect(() => {
         return () => {
@@ -100,7 +104,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                 const atlas = getAtlasTexture();
 
                 // Request meshing from worker
-                const result = await pool.submitMesh(cx, cz, chunkData, [nPx, nNx, nPz, nNz], lod);
+                const result = await pool.submitMesh(cx, cz, chunkData, [nPx, nNx, nPz, nNz], activeLod);
                 if (!active || !result) return;
 
                 const createGeo = (data: any) => {
