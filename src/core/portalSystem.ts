@@ -59,54 +59,6 @@ export function attemptNetherPortalIgnite(x: number, y: number, z: number): bool
     return false;
 }
 
-export function attemptEndPortalIgnite(x: number, y: number, z: number): boolean {
-    const s = useGameStore.getState();
-    // A frame block is at distance 2 from the center in one axis and 0 or 1 in the other.
-    // We check potential centers at dx=2/0 and dz=0/2.
-    const potentialCenters = [
-        [x + 2, z], [x - 2, z], [x, z + 2], [x, z - 2],
-        [x + 2, z + 1], [x + 2, z - 1], [x - 2, z + 1], [x - 2, z - 1],
-        [x + 1, z + 2], [x - 1, z + 2], [x + 1, z - 2], [x - 1, z - 2]
-    ];
-
-    for (const [cx, cz] of potentialCenters) {
-        let allFramesFilled = true;
-        // The 12 frame positions for a 3x3 portal interior (5x5 ring minus corners)
-        const frames = [
-            [cx - 2, cz - 1], [cx - 2, cz], [cx - 2, cz + 1],
-            [cx + 2, cz - 1], [cx + 2, cz], [cx + 2, cz + 1],
-            [cx - 1, cz - 2], [cx, cz - 2], [cx + 1, cz - 2],
-            [cx - 1, cz + 2], [cx, cz + 2], [cx + 1, cz + 2]
-        ];
-
-        for (const [fx, fz] of frames) {
-            if (s.getBlock(fx, y, fz) !== BlockType.END_PORTAL_FRAME_EYE) {
-                allFramesFilled = false;
-                break;
-            }
-        }
-
-        if (allFramesFilled) {
-            const portalBlocks: { x: number, y: number, z: number, typeId: number }[] = [];
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dz = -1; dz <= 1; dz++) {
-                    // Only fill if it's currently air (or frame if we messed up, but usually air)
-                    const current = s.getBlock(cx + dx, y, cz + dz);
-                    if (!current || current === BlockType.AIR) {
-                        portalBlocks.push({ x: cx + dx, y: y, z: cz + dz, typeId: BlockType.END_PORTAL_BLOCK });
-                    }
-                }
-            }
-            if (portalBlocks.length > 0) {
-                s.addBlocks(portalBlocks);
-                playSound('fuse');
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 export function getSafeHeight(x: number, z: number, searchRange: [number, number] = [32, 110]): number {
     const s = useGameStore.getState();
     const bx = Math.floor(x);

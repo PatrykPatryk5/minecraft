@@ -24,7 +24,7 @@ import useKeyboard from './useKeyboard';
 import useGameStore from '../store/gameStore';
 import { BLOCK_DATA, BlockType, getBlockDrop } from '../core/blockTypes';
 import { getConnection } from '../multiplayer/ConnectionManager';
-import { getSpawnHeight, MAX_HEIGHT, getNearestStronghold } from '../core/terrainGen';
+import { getSpawnHeight, MAX_HEIGHT } from '../core/terrainGen';
 import { emitBlockBreak } from '../core/particles';
 import { playSound, startAmbience, updateListener, updateEnvironment } from '../audio/sounds';
 import { checkWaterFill, spreadWater } from '../core/waterSystem';
@@ -34,7 +34,7 @@ import { spreadLava, tickLava, checkLavaFill } from '../core/lavaSystem';
 import { processGravity, checkGravityBlock } from '../core/gravityBlocks';
 import { placePiston } from '../core/pistonSystem';
 import { tillBlock, plantSeed, applyBoneMeal } from '../core/farmingSystem';
-import { buildNetherPortalSafe, getSafeHeight, attemptNetherPortalIgnite } from '../core/portalSystem';
+import { buildNetherPortalSafe, getSafeHeight } from '../core/portalSystem';
 
 // ─── Constants ───────────────────────────────────────────
 const GRAVITY = -28;
@@ -110,8 +110,6 @@ const Player: React.FC = () => {
     const leftMouseHeld = useRef(false);
     const rightMouseHeld = useRef(false);
     const rightRepeatTimer = useRef(0);
-    const prevVirtualKeys = useRef<Record<string, boolean>>({});
-    const touchLook = useRef({ active: false, lastX: 0, lastY: 0 });
 
     const setLocked = useGameStore((s) => s.setLocked);
 
@@ -207,55 +205,82 @@ const Player: React.FC = () => {
         if (lz === 15) s.bumpVersion(cx, cz + 1);
     }, []);
 
-    const onMouseDownInternal = useCallback((button: number) => {
-        const s = storeRef.current;
-        if (!s.isLocked || s.activeOverlay !== 'none' || s.screen !== 'playing') return;
+    // ─── Mouse Events ─────────────────────────────────────
+    useEffect(() => {
+        const onMouseDown = (e: MouseEvent) => {
+            const s = storeRef.current;
+            if (!s.isLocked || s.activeOverlay !== 'none' || s.screen !== 'playing') return;
 
-        const selected = s.getSelectedBlock();
-        const hit = raycastBlock();
-        if (button === 0) leftMouseHeld.current = true;
-        if (button === 2) rightMouseHeld.current = true;
+            const selected = s.getSelectedBlock();
+            const hit = raycastBlock();
+            if (e.button === 0) leftMouseHeld.current = true;
+            if (e.button === 2) rightMouseHeld.current = true;
 
-        if (button === 0) {
-            miningHeld.current = true;
-            // ── Break Block or Attack Mob ──
-            const dir = camera.getWorldDirection(new THREE.Vector3());
-            let damage = 2; // Base fist damage
-            if (selected) {
-                const toolName = BLOCK_DATA[selected]?.name?.toLowerCase() || '';
-                if (toolName.includes('miecz')) {
-                    if (toolName.includes('diament')) damage = 7;
-                    else if (toolName.includes('żelaz')) damage = 6;
-                    else if (toolName.includes('kamien')) damage = 5;
-                    else damage = 4;
-                } else if (toolName.includes('siekier')) {
-                    if (toolName.includes('diament')) damage = 6;
-                    else if (toolName.includes('żelaz')) damage = 5;
-                    else damage = 3;
+            if (e.button === 0) {
+                miningHeld.current = true;
+                // ── Break Block or Attack Mob ──
+                const dir = camera.getWorldDirection(new THREE.Vector3());
+                let damage = 2; // Base fist damage
+                if (selected) {
+                    const toolName = BLOCK_DATA[selected]?.name?.toLowerCase() || '';
+                    if (toolName.includes('miecz')) {
+                        if (toolName.includes('diament')) damage = 7;
+                        else if (toolName.includes('żelaz')) damage = 6;
+                        else if (toolName.includes('kamien')) damage = 5;
+                        else damage = 4;
+                    } else if (toolName.includes('siekier')) {
+                        if (toolName.includes('diament')) damage = 6;
+                        else if (toolName.includes('żelaz')) damage = 5;
+                        else damage = 3;
+                    }
                 }
-            }
 
-            const hitMob = attackMob(
-                pos.current.x, pos.current.y, pos.current.z,
-                [dir.x, dir.y, dir.z], damage
-            );
+                const hitMob = attackMob(
+                    pos.current.x, pos.current.y, pos.current.z,
+                    [dir.x, dir.y, dir.z], damage
+                );
 
-            if (hitMob) {
-                if (selected && BLOCK_DATA[selected]?.isItem && BLOCK_DATA[selected]?.maxDurability) {
-                    s.damageTool(s.hotbarSlot);
+                if (hitMob) {
+                    // Apply tool durability damage
+                    if (selected && BLOCK_DATA[selected]?.isItem && BLOCK_DATA[selected]?.maxDurability) {
+                        s.damageTool(s.hotbarSlot);
+                    }
+                    getConnection().sendAction('swing');
+                    return;
                 }
+
                 getConnection().sendAction('swing');
-                return;
-            }
 
-            getConnection().sendAction('swing');
+                if (!hit) {
+                    return;
+                }
+                const [bx, by, bz] = hit.block;
+                const type = s.getBlock(bx, by, bz);
+                if (type && type !== BlockType.BEDROCK) {
+                    if (s.gameMode === 'spectator') return;
 
-            if (!hit) return;
-            const [bx, by, bz] = hit.block;
-            const type = s.getBlock(bx, by, bz);
-            if (type && type !== BlockType.BEDROCK) {
-                if (s.gameMode === 'spectator') return;
-                if (s.gameMode === 'creative') {
+                    // Creative = instant break
+                    if (s.gameMode === 'creative') {
+                        emitBlockBreak(bx, by, bz, type);
+                        playSound('break', [bx, by, bz]);
+                        s.removeBlock(bx, by, bz);
+                        bumpAround(bx, bz);
+                        checkWaterFill(bx, by, bz);
+                        checkLavaFill(bx, by, bz);
+                        processGravity(bx, by, bz);
+                        return;
+                    }
+
+                    // Survival = hold-to-mine (start)
+                    const blockData = BLOCK_DATA[type];
+                    if (blockData && blockData.breakTime > 0) {
+                        miningTarget.current = `${bx},${by},${bz}`;
+                        miningProgress.current = 0;
+                        miningHeld.current = true;
+                        return;
+                    }
+
+                    // Instant break blocks (breakTime = 0)
                     emitBlockBreak(bx, by, bz, type);
                     playSound('break', [bx, by, bz]);
                     s.removeBlock(bx, by, bz);
@@ -263,175 +288,174 @@ const Player: React.FC = () => {
                     checkWaterFill(bx, by, bz);
                     checkLavaFill(bx, by, bz);
                     processGravity(bx, by, bz);
-                    return;
-                }
-                const blockData = BLOCK_DATA[type];
-                if (blockData && blockData.breakTime > 0) {
-                    miningTarget.current = `${bx},${by},${bz}`;
-                    miningProgress.current = 0;
-                    miningHeld.current = true;
-                    return;
-                }
-                emitBlockBreak(bx, by, bz, type);
-                playSound('break', [bx, by, bz]);
-                s.removeBlock(bx, by, bz);
-                bumpAround(bx, bz);
-                checkWaterFill(bx, by, bz);
-                checkLavaFill(bx, by, bz);
-                processGravity(bx, by, bz);
-                const drop = getBlockDrop(type);
-                if (drop && drop !== BlockType.AIR) {
-                    s.addDroppedItem(drop, [bx + 0.5, by + 0.5, bz + 0.5]);
-                    playSound('pop');
-                }
-            }
-        } else if (button === 2) {
-            // ── Right Click: Interact or Place Block ──
-            if (selected && BLOCK_DATA[selected]?.foodRestore) {
-                if (s.hunger < s.maxHunger || BLOCK_DATA[selected].isItem) {
-                    s.eatFood();
-                    getConnection().sendAction('eat');
-                    if (BLOCK_DATA[selected].isItem) return;
-                }
-            }
-            if (!hit) {
-                if (selected === BlockType.BOW && s.gameMode !== 'spectator') {
-                    isChargingBow.current = true;
-                    bowCharge.current = 0;
-                }
-                if (selected === BlockType.ENDER_PEARL || selected === BlockType.EYE_OF_ENDER) {
-                    // Logic from before
-                    if (selected === BlockType.ENDER_PEARL) {
-                        const dir = camera.getWorldDirection(new THREE.Vector3());
-                        s.addPearl([camera.position.x, camera.position.y, camera.position.z], [dir.x * 25, dir.y * 25, dir.z * 25]);
-                        s.consumeHotbarItem(s.hotbarSlot);
-                        playSound('bow');
-                    } else {
-                        const nearest = getNearestStronghold(pos.current.x, pos.current.z);
-                        s.addEyeOfEnder([camera.position.x, camera.position.y, camera.position.z], nearest);
-                        s.consumeHotbarItem(s.hotbarSlot);
-                        playSound('bow');
+
+                    const drop = getBlockDrop(type);
+                    if (drop && drop !== BlockType.AIR) {
+                        s.addDroppedItem(drop, [bx + 0.5, by + 0.5, bz + 0.5]);
+                        playSound('pop');
                     }
                 }
-                return;
-            }
-            if (s.gameMode === 'spectator') return;
-            if (selected === BlockType.BOW) {
-                isChargingBow.current = true;
-                bowCharge.current = 0;
-                return;
-            }
-            const [bx2, by2, bz2] = hit.block;
-            const clickedType = s.getBlock(bx2, by2, bz2);
-            if (clickedType === BlockType.CRAFTING) { s.setOverlay('crafting'); playSound('open'); if (!s.isMobile) document.exitPointerLock(); return; }
-            if (clickedType === BlockType.FURNACE || clickedType === BlockType.FURNACE_ON) { s.setOverlay('furnace'); playSound('open'); if (!s.isMobile) document.exitPointerLock(); return; }
-            if (handleBlockAction(bx2, by2, bz2, clickedType, selected)) { bumpAround(bx2, bz2); return; }
-            if (!selected || selected === BlockType.AIR) return;
-            const [px, py, pz] = hit.place;
-            if (selected === BlockType.FLINT_AND_STEEL) {
-                if (clickedType === BlockType.OBSIDIAN) {
-                    if (attemptNetherPortalIgnite(bx2, by2, bz2)) { s.damageTool(s.hotbarSlot); playSound('fire'); bumpAround(bx2, bz2); return; }
+            } else if (e.button === 2) {
+                // ── Right Click: Interact or Place Block ──
+                if (selected && BLOCK_DATA[selected]?.foodRestore) {
+                    // Eat if: purely food item (isItem) OR if hungry
+                    if (s.hunger < s.maxHunger || BLOCK_DATA[selected].isItem) {
+                        s.eatFood();
+                        getConnection().sendAction('eat');
+                        if (BLOCK_DATA[selected].isItem) return;
+                    }
                 }
-                if (s.getBlock(px, py, pz) === BlockType.AIR) {
-                    s.addBlock(px, py, pz, BlockType.FIRE);
-                    s.damageTool(s.hotbarSlot);
-                    playSound('fire');
+
+                if (!hit) {
+                    if (selected === BlockType.BOW && s.gameMode !== 'spectator') {
+                        isChargingBow.current = true;
+                        bowCharge.current = 0;
+                    }
+                    return;
+                }
+                if (s.gameMode === 'spectator') return;
+
+                if (selected === BlockType.BOW) {
+                    isChargingBow.current = true;
+                    bowCharge.current = 0;
+                    return;
+                }
+
+                // Check if we right-clicked a functional block
+                const [bx2, by2, bz2] = hit.block;
+                const clickedType = s.getBlock(bx2, by2, bz2);
+
+                if (clickedType === BlockType.CRAFTING) {
+                    s.setOverlay('crafting');
+                    playSound('open');
+                    document.exitPointerLock();
+                    return;
+                }
+                if (clickedType === BlockType.FURNACE || clickedType === BlockType.FURNACE_ON) {
+                    s.setOverlay('furnace');
+                    playSound('open');
+                    document.exitPointerLock();
+                    return;
+                }
+
+                // Check block actions (TNT, trapdoor, chest, etc.)
+                if (handleBlockAction(bx2, by2, bz2, clickedType, selected)) {
+                    return;
+                }
+
+                const [px, py, pz] = hit.place;
+                if (py < 0 || py > MAX_HEIGHT - 1) return;
+                if (!selected) return;
+
+                if ([105, 115, 125, 135, 145].includes(selected)) {
+                    if (tillBlock(bx2, by2, bz2)) {
+                        s.damageTool(s.hotbarSlot);
+                        playSound('gravel');
+                        bumpAround(bx2, bz2);
+                        return;
+                    }
+                }
+                if (selected === BlockType.SEEDS) {
+                    if (plantSeed(px, py, pz)) {
+                        s.consumeHotbarItem(s.hotbarSlot);
+                        playSound('place', [px, py, pz]);
+                        bumpAround(px, pz);
+                        return;
+                    }
+                }
+                if (selected === BlockType.BONE_MEAL) {
+                    if (applyBoneMeal(bx2, by2, bz2)) {
+                        s.consumeHotbarItem(s.hotbarSlot);
+                        playSound('pop');
+                        bumpAround(bx2, bz2);
+                        return;
+                    }
+                }
+
+                if (BLOCK_DATA[selected]?.isItem) return;
+
+                const feet = Math.floor(pos.current.y - PLAYER_HEIGHT);
+                const head = Math.floor(pos.current.y);
+                const plX = Math.floor(pos.current.x);
+                const plZ = Math.floor(pos.current.z);
+                if (px === plX && pz === plZ && py >= feet && py <= head) return;
+
+                if (selected === BlockType.BED) {
+                    import('../core/blockActions').then(({ handleBedPlacement }) => {
+                        if (handleBedPlacement(px, py, pz, camera.rotation.y)) {
+                            s.consumeHotbarItem(s.hotbarSlot);
+                            playSound('place', [px, py, pz]);
+                            bumpAround(px, pz);
+                        }
+                    });
+                    return;
+                }
+
+                if (selected === BlockType.PISTON || selected === BlockType.PISTON_STICKY) {
+                    const dir = new THREE.Vector3();
+                    camera.getWorldDirection(dir);
+                    dir.negate();
+                    let pDir = 0;
+                    if (Math.abs(dir.y) > Math.abs(dir.x) && Math.abs(dir.y) > Math.abs(dir.z)) {
+                        pDir = dir.y > 0 ? 1 : 0;
+                    } else if (Math.abs(dir.x) > Math.abs(dir.z)) {
+                        pDir = dir.x > 0 ? 5 : 4;
+                    } else {
+                        pDir = dir.z > 0 ? 3 : 2;
+                    }
+                    placePiston(px, py, pz, pDir, selected === BlockType.PISTON_STICKY);
+                    s.consumeHotbarItem(s.hotbarSlot);
                     bumpAround(px, pz);
                     return;
                 }
-            }
-            if (selected === BlockType.WATER_BUCKET || selected === BlockType.LAVA_BUCKET) {
-                const bt = selected === BlockType.WATER_BUCKET ? BlockType.WATER : BlockType.LAVA;
-                s.addBlock(px, py, pz, bt);
-                s.updateHotbarItem(s.hotbarSlot, { id: BlockType.BUCKET, count: 1 });
+
+                s.addBlock(px, py, pz, selected);
+                s.consumeHotbarItem(s.hotbarSlot);
                 playSound('place', [px, py, pz]);
                 bumpAround(px, pz);
+                if (selected === BlockType.WATER) spreadWater(px, py, pz);
+                if (selected === BlockType.LAVA) spreadLava(px, py, pz);
+                checkGravityBlock(px, py, pz);
                 return;
             }
-            if (selected === BlockType.BONE_MEAL) {
-                if (applyBoneMeal(bx2, by2, bz2)) { s.consumeHotbarItem(s.hotbarSlot); playSound('pop'); bumpAround(bx2, bz2); return; }
-            }
-            if (BLOCK_DATA[selected]?.isItem) return;
-            const feet = Math.floor(pos.current.y - PLAYER_HEIGHT), head = Math.floor(pos.current.y);
-            const plX = Math.floor(pos.current.x), plZ = Math.floor(pos.current.z);
-            if (px === plX && pz === plZ && py >= feet && py <= head) return;
-            s.addBlock(px, py, pz, selected);
-            s.consumeHotbarItem(s.hotbarSlot);
-            playSound('place', [px, py, pz]);
-            bumpAround(px, pz);
-        }
-    }, [camera]);
+        };
 
-    const onMouseUpInternal = useCallback((button: number) => {
-        if (button === 0) {
-            leftMouseHeld.current = false;
-            miningHeld.current = false;
-            miningTarget.current = null;
-            miningProgress.current = 0;
-        } else if (button === 2) {
-            rightMouseHeld.current = false;
-            rightRepeatTimer.current = 0;
-            if (isChargingBow.current) {
-                const s = storeRef.current;
-                const power = Math.min(1.0, bowCharge.current);
-                if (power > 0.1) {
-                    const dir = camera.getWorldDirection(new THREE.Vector3());
-                    s.addArrow([camera.position.x, camera.position.y - 0.2, camera.position.z], [dir.x * 30 * power, dir.y * 30 * power, dir.z * 30 * power]);
-                    playSound('bow');
+        const onMouseUp = (e: MouseEvent) => {
+            if (e.button === 0) {
+                leftMouseHeld.current = false;
+                miningHeld.current = false;
+                miningTarget.current = null;
+                miningProgress.current = 0;
+            } else if (e.button === 2) {
+                rightMouseHeld.current = false;
+                rightRepeatTimer.current = 0;
+                if (isChargingBow.current) {
+                    const s = storeRef.current;
+                    const power = Math.min(1.0, bowCharge.current);
+                    if (power > 0.1) {
+                        const dir = camera.getWorldDirection(new THREE.Vector3());
+                        const velocity: [number, number, number] = [
+                            dir.x * 30 * power,
+                            dir.y * 30 * power,
+                            dir.z * 30 * power
+                        ];
+                        const origin: [number, number, number] = [camera.position.x, camera.position.y - 0.2, camera.position.z];
+                        s.addArrow(origin, velocity);
+                        playSound('bow');
+                    }
+                    isChargingBow.current = false;
+                    bowCharge.current = 0;
                 }
-                isChargingBow.current = false;
-                bowCharge.current = 0;
             }
-        }
-    }, [camera]);
+        };
 
-    // ─── Mouse Events ─────────────────────────────────────
-    useEffect(() => {
-        const onDown = (e: MouseEvent) => onMouseDownInternal(e.button);
-        const onUp = (e: MouseEvent) => onMouseUpInternal(e.button);
-        window.addEventListener('mousedown', onDown);
-        window.addEventListener('mouseup', onUp);
+        window.addEventListener('mousedown', onMouseDown);
+        window.addEventListener('mouseup', onMouseUp);
         return () => {
-            window.removeEventListener('mousedown', onDown);
-            window.removeEventListener('mouseup', onUp);
+            window.removeEventListener('mousedown', onMouseDown);
+            window.removeEventListener('mouseup', onMouseUp);
         };
-    }, [onMouseDownInternal, onMouseUpInternal]);
-
-    // Mobile specific: Touch to look
-    useEffect(() => {
-        const s = storeRef.current;
-        if (!s.isMobile) return;
-
-        const onTouchStart = (e: TouchEvent) => {
-            if (s.activeOverlay !== 'none') return;
-            const t = e.touches[0];
-            // Only look on the right half of the screen
-            if (t.clientX < window.innerWidth / 2) return;
-            touchLook.current = { active: true, lastX: t.clientX, lastY: t.clientY };
-        };
-        const onTouchMove = (e: TouchEvent) => {
-            if (!touchLook.current.active) return;
-            const t = e.touches[0];
-            const dx = (t.clientX - touchLook.current.lastX) * 0.005;
-            const dy = (t.clientY - touchLook.current.lastY) * 0.005;
-
-            camera.rotation.y -= dx;
-            camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x - dy));
-
-            touchLook.current.lastX = t.clientX;
-            touchLook.current.lastY = t.clientY;
-        };
-        const onTouchEnd = () => { touchLook.current.active = false; };
-
-        window.addEventListener('touchstart', onTouchStart);
-        window.addEventListener('touchmove', onTouchMove);
-        window.addEventListener('touchend', onTouchEnd);
-        return () => {
-            window.removeEventListener('touchstart', onTouchStart);
-            window.removeEventListener('touchmove', onTouchMove);
-            window.removeEventListener('touchend', onTouchEnd);
-        };
-    }, [camera]);
+    }, [raycastBlock, bumpAround]);
 
     // ─── Middle Click (pick block) ─────────────────────────
     useEffect(() => {
@@ -451,7 +475,7 @@ const Player: React.FC = () => {
                         }
                     }
                     if (s.gameMode === 'creative') {
-                        const newHotbar = s.hotbar.map((sl: any) => ({ ...sl }));
+                        const newHotbar = s.hotbar.map(sl => ({ ...sl }));
                         newHotbar[s.hotbarSlot] = { id: type, count: 64 };
                         s.setHotbar(newHotbar);
                     }
@@ -489,14 +513,6 @@ const Player: React.FC = () => {
             bowCharge.current += rawDelta;
         }
 
-        // Virtual Key transitions (for mobile mouse buttons)
-        const v = s.virtualKeys;
-        if (v['MouseButton0'] && !prevVirtualKeys.current['MouseButton0']) onMouseDownInternal(0);
-        else if (!v['MouseButton0'] && prevVirtualKeys.current['MouseButton0']) onMouseUpInternal(0);
-        if (v['MouseButton2'] && !prevVirtualKeys.current['MouseButton2']) onMouseDownInternal(2);
-        else if (!v['MouseButton2'] && prevVirtualKeys.current['MouseButton2']) onMouseUpInternal(2);
-        prevVirtualKeys.current = { ...v };
-
         accumulator.current += Math.min(rawDelta, 0.25);
 
         let ticksThisFrame = 0;
@@ -520,7 +536,7 @@ const Player: React.FC = () => {
             right.crossVectors(flatForward, new THREE.Vector3(0, 1, 0)).normalize();
 
             const k = keys.current ?? {};
-            const jumpHeld = !!k.Space || !!v.Space;
+            const jumpHeld = !!k.Space;
             const jumpPressed = jumpHeld && !jumpHeldLast.current;
             const jumpReleased = !jumpHeld && jumpHeldLast.current;
             jumpHeldLast.current = jumpHeld;
@@ -534,8 +550,8 @@ const Player: React.FC = () => {
             const bodyInWater = isInWater(p.x, p.y - 0.5, p.z);
             const headInWater = isInWater(p.x, p.y + 0.1, p.z);
             const inWater = feetInWater || bodyInWater;
-            const isSneaking = (k.ControlLeft || v.ControlLeft) && !inWater && !isFlying.current;
-            const isSprinting = (k.ShiftLeft || v.ShiftLeft) && !(k.ControlLeft || v.ControlLeft) && !inWater && !isFlying.current;
+            const isSneaking = k.ControlLeft && !inWater && !isFlying.current;
+            const isSprinting = k.ShiftLeft && !k.ControlLeft && !inWater && !isFlying.current;
 
             if (rightMouseHeld.current && !isChargingBow.current && mode !== 'spectator') {
                 rightRepeatTimer.current += dt;
@@ -614,7 +630,7 @@ const Player: React.FC = () => {
             }
 
             // ─── Creative Fly Toggle ─────────────────────────
-            if (mode === 'creative' && (k.Space || v.Space)) {
+            if (mode === 'creative' && k.Space) {
                 const now = performance.now();
                 if (now - lastJumpTime.current < 300 && !onGround.current) {
                     isFlying.current = !isFlying.current;
@@ -629,10 +645,10 @@ const Player: React.FC = () => {
             const baseSpeed = flying ? FLY_SPEED : (isSprinting ? SPRINT_SPEED : WALK_SPEED);
             const speed = inWater ? SWIM_SPEED : (isSneaking && !flying ? WALK_SPEED * CROUCH_SPEED_MULT : baseSpeed);
             const move = new THREE.Vector3();
-            if (k.KeyW || v.KeyW) move.add(flatForward);
-            if (k.KeyS || v.KeyS) move.sub(flatForward);
-            if (k.KeyA || v.KeyA) move.sub(right);
-            if (k.KeyD || v.KeyD) move.add(right);
+            if (k.KeyW) move.add(flatForward);
+            if (k.KeyS) move.sub(flatForward);
+            if (k.KeyA) move.sub(right);
+            if (k.KeyD) move.add(right);
             const hasMoveInput = move.lengthSq() > 0;
             if (hasMoveInput) move.normalize().multiplyScalar(speed);
 
@@ -653,8 +669,8 @@ const Player: React.FC = () => {
 
             if (flying) {
                 vel.y = 0;
-                if (k.Space || v.Space) vel.y = FLY_SPEED;
-                if (k.ShiftLeft || v.ShiftLeft) vel.y = -FLY_SPEED;
+                if (k.Space) vel.y = FLY_SPEED;
+                if (k.ShiftLeft) vel.y = -FLY_SPEED;
             } else if (inWater) {
                 // ─── Improved Swimming Physics ──────────────
                 // Depth-proportional water resistance
@@ -1199,10 +1215,12 @@ const Player: React.FC = () => {
 
     return (
         <>
-            {/* PointerLock is only for Desktop */}
-            {!useGameStore.getState().isMobile && (
-                <PointerLockControls ref={controlsRef} selector=".hud" />
-            )}
+            <PointerLockControls
+                ref={controlsRef}
+                onLock={() => setLocked(true)}
+                onUnlock={() => setLocked(false)}
+                pointerSpeed={1.0}
+            />
             <RigidBody ref={rbRef} type="kinematicPosition" colliders="cuboid" args={[PLAYER_WIDTH, PLAYER_COLLIDER_HEIGHT / 2, PLAYER_WIDTH]}>
                 <mesh visible={false}>
                     <boxGeometry args={[PLAYER_WIDTH * 2, PLAYER_COLLIDER_HEIGHT, PLAYER_WIDTH * 2]} />

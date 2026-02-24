@@ -13,15 +13,6 @@ export default function useKeyboard(): React.RefObject<KeyMap> {
     const keys = useRef<KeyMap>({});
 
     useEffect(() => {
-        // Sync with virtual keys from store (for mobile support)
-        const unsub = useGameStore.subscribe(
-            (s) => s.virtualKeys,
-            (virtual: Record<string, boolean>) => {
-                // Merge virtual keys into the main ref
-                Object.assign(keys.current, virtual);
-            }
-        );
-
         const down = (e: KeyboardEvent) => {
             // Don't track movement keys if chat is open
             if (useGameStore.getState().isChatOpen) return;
@@ -32,14 +23,12 @@ export default function useKeyboard(): React.RefObject<KeyMap> {
         };
         const blur = () => {
             // Reset all keys when window loses focus (prevents stuck keys)
-            // But KEEP virtual keys if we are on mobile? Actually, just reset all.
             keys.current = {};
         };
         window.addEventListener('keydown', down);
         window.addEventListener('keyup', up);
         window.addEventListener('blur', blur);
         return () => {
-            unsub();
             window.removeEventListener('keydown', down);
             window.removeEventListener('keyup', up);
             window.removeEventListener('blur', blur);

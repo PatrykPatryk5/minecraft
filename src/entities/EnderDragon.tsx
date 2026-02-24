@@ -45,10 +45,10 @@ export const EnderDragon: React.FC = () => {
         }
 
         if (state.current === 'circle') {
-            // Circle around 0,0 at radius 60, height 95
+            // Circle around 0,0 at radius 60, height 50
             target.current.set(
                 Math.sin(angle.current) * 60,
-                95 + Math.sin(angle.current * 2) * 10,
+                50 + Math.sin(angle.current * 2) * 10,
                 Math.cos(angle.current) * 60
             );
 
@@ -58,7 +58,7 @@ export const EnderDragon: React.FC = () => {
             }
         } else if (state.current === 'swoop') {
             // Swoop at player
-            target.current.set(playerPos[0], Math.max(85, playerPos[1] + 5), playerPos[2]);
+            target.current.set(playerPos[0], playerPos[1] + 5, playerPos[2]);
             if (dragonPos.distanceTo(target.current) < 10) {
                 state.current = 'circle';
             }
@@ -77,26 +77,24 @@ export const EnderDragon: React.FC = () => {
 
     const spawnExitPortal = () => {
         const s = useGameStore.getState();
-        const baseH = 80;
         // 3x3 bedrock ring around 0,0, with exit portal block in the middle
         for (let dx = -2; dx <= 2; dx++) {
             for (let dz = -2; dz <= 2; dz++) {
-                if (Math.abs(dx) === 2 || Math.abs(dz) === 2) {
-                    s.addBlock(dx, baseH, dz, BlockType.BEDROCK);
-                    s.addBlock(dx, baseH + 1, dz, BlockType.BEDROCK);
+                if (Math.abs(dx) == 2 || Math.abs(dz) == 2) {
+                    s.addBlock(dx, 30, dz, BlockType.BEDROCK);
+                    s.addBlock(dx, 31, dz, BlockType.BEDROCK);
                 } else {
-                    s.addBlock(dx, baseH, dz, BlockType.BEDROCK);
+                    s.addBlock(dx, 30, dz, BlockType.BEDROCK);
                 }
             }
         }
         // Set the portal blocks
-        s.addBlock(0, baseH + 1, 1, BlockType.END_PORTAL_BLOCK);
-        s.addBlock(0, baseH + 1, -1, BlockType.END_PORTAL_BLOCK);
-        s.addBlock(1, baseH + 1, 0, BlockType.END_PORTAL_BLOCK);
-        s.addBlock(-1, baseH + 1, 0, BlockType.END_PORTAL_BLOCK);
+        s.addBlock(0, 31, 1, BlockType.END_PORTAL_BLOCK);
+        s.addBlock(0, 31, -1, BlockType.END_PORTAL_BLOCK);
+        s.addBlock(1, 31, 0, BlockType.END_PORTAL_BLOCK);
+        s.addBlock(-1, 31, 0, BlockType.END_PORTAL_BLOCK);
         // And the central fountain
-        s.addBlock(0, baseH + 1, 0, BlockType.END_PORTAL_BLOCK);
-        s.addBlock(0, baseH + 2, 0, BlockType.BEDROCK); // Some decoration
+        s.addBlock(0, 31, 0, BlockType.END_PORTAL_BLOCK);
     };
 
     const onClick = () => {
@@ -129,7 +127,7 @@ export const EnderDragon: React.FC = () => {
                 />
             ))}
 
-            <group ref={ref} position={[0, 100, 0]} onClick={onClick}>
+            <group ref={ref} position={[0, 60, 0]} onClick={onClick}>
                 {/* Dragon Body */}
                 <mesh position={[0, 0, 0]}>
                     <boxGeometry args={[4, 4, 12]} />

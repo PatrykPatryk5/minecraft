@@ -269,65 +269,7 @@ export function generateChunk(cx: number, cz: number): ChunkData {
         blocks[blockIndex(px, py + 1, pz)] = BlockType.CHEST;
     }
 
-    // ─── Stronghold (Portal Room) ──────────────────────────
-    // Strongholds spawn in a ring at radius ~1200
-    const ringRadius = 1200 / 16;
-    const angles = [0, 120, 240];
-    for (const angle of angles) {
-        const scx = Math.round(Math.cos(angle * Math.PI / 180) * ringRadius);
-        const scz = Math.round(Math.sin(angle * Math.PI / 180) * ringRadius);
-
-        if (cx === scx && cz === scz) {
-            const px = 8, pz = 8, py = 25; // Center of chunk for simplicity
-            // 7x7x5 room
-            for (let dy = 0; dy < 5; dy++) {
-                for (let dx = -3; dx <= 3; dx++) {
-                    for (let dz = -3; dz <= 3; dz++) {
-                        const nx = px + dx;
-                        const nz = pz + dz;
-                        const ny = py + dy;
-                        const idx = blockIndex(nx, ny, nz);
-
-                        if (dy === 0 || dy === 4 || dx === -3 || dx === 3 || dz === -3 || dz === 3) {
-                            // Walls/Floor/Ceiling
-                            const isMossy = n3(cx * 10 + nx, ny, cz * 10 + nz) > 0.4;
-                            blocks[idx] = isMossy ? BlockType.MOSSY_STONE_BRICKS : BlockType.STONE_BRICKS;
-                        } else {
-                            // Interior
-                            blocks[idx] = BlockType.AIR;
-
-                            // Portal frame logic (3x3 ring at dy=1)
-                            if (dy === 1) {
-                                const adx = Math.abs(dx), adz = Math.abs(dz);
-                                if (adx === 2 && adz <= 1) blocks[idx] = BlockType.END_PORTAL_FRAME;
-                                if (adz === 2 && adx <= 1) blocks[idx] = BlockType.END_PORTAL_FRAME;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     return blocks;
-}
-
-/** Finds the nearest stronghold coordinates (center of chunk) */
-export function getNearestStronghold(px: number, pz: number): [number, number] {
-    const ringRadius = 1200;
-    const angles = [0, 120, 240];
-    let minSourceDistSq = Infinity;
-    let nearest: [number, number] = [800, 800]; // Fallback
-    for (const angle of angles) {
-        const sx = Math.round(Math.cos(angle * Math.PI / 180) * ringRadius);
-        const sz = Math.round(Math.sin(angle * Math.PI / 180) * ringRadius);
-        const distSq = (sx - px) ** 2 + (sz - pz) ** 2;
-        if (distSq < minSourceDistSq) {
-            minSourceDistSq = distSq;
-            nearest = [sx, sz];
-        }
-    }
-    return nearest;
 }
 
 /**

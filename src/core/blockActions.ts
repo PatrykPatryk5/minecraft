@@ -6,7 +6,7 @@
  */
 
 import useGameStore from '../store/gameStore';
-import { attemptNetherPortalIgnite, attemptEndPortalIgnite } from './portalSystem';
+import { attemptNetherPortalIgnite } from './portalSystem';
 import { BlockType, BLOCK_DATA } from './blockTypes';
 import { playSound } from '../audio/sounds';
 import { emitBlockBreak, emitExplosion } from '../core/particles';
@@ -219,16 +219,6 @@ export function handleBlockAction(
         case BlockType.OBSIDIAN:
             if (heldItem === BlockType.FLINT_AND_STEEL) {
                 return attemptNetherPortalIgnite(blockX, blockY, blockZ);
-            }
-            return false;
-        case BlockType.END_PORTAL_FRAME:
-            if (heldItem === BlockType.EYE_OF_ENDER) {
-                const s = useGameStore.getState();
-                s.addBlock(blockX, blockY, blockZ, BlockType.END_PORTAL_FRAME_EYE);
-                s.consumeHotbarItem(s.hotbarSlot);
-                playSound('pop');
-                attemptEndPortalIgnite(blockX, blockY, blockZ);
-                return true;
             }
             return false;
         case BlockType.TRAPDOOR:

@@ -4,6 +4,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import fastifyStatic from '@fastify/static'
 import fastifyCompress from '@fastify/compress'
+import fs from 'fs' // Dodane do weryfikacji folderu
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -16,7 +17,7 @@ const app = Fastify({
 const PORT = process.env.PORT || 3046
 const HOST = '0.0.0.0'
 
-// Auth System & Rate Limiting
+// --- Auth System & Rate Limiting ---
 const sessions = new Map(); // Session Token -> { uuid, name, expire }
 const authRateLimit = new Map(); // IP -> { count, reset }
 
@@ -46,8 +47,8 @@ app.post('/api/auth/claim', async (req, reply) => {
     limit.count++;
     authRateLimit.set(ip, limit);
 
-    const uuid = `uuid-${Math.random().toString(36).substr(2, 9)}`;
-    const token = `token-${Math.random().toString(36).substr(2, 16)}`;
+    const uuid = `uuid-${Math.random().toString(36).substring(2, 11)}`;
+    const token = `token-${Math.random().toString(36).substring(2, 18)}`;
 
     sessions.set(token, { uuid, name, expire: now + 86400000 }); // Valid for 24h
     return { token, uuid };
@@ -63,116 +64,10 @@ app.post('/api/auth/verify', async (req, reply) => {
     return { success: false };
 });
 
-// Replicator (Relay) Logic
+// --- Replicator (Relay) Logic ---
 const relayClients = new Map() // clientId -> ws
 const relayRooms = new Map() // clientId -> roomId
 const roomPeers = new Map() // roomId -> Set<clientId>
-
-app.ready(() => {
-    const wss = new WebSocketServer({
-        server: app.server,
-        path: '/relay',
-        maxPayload: 52428800 // 50MB
-    });
-
-    wss.on('connection', (ws, req) => {
-        let clientId = null;
-        let roomId = null;
-
-        ws.on('message', (data) => {
-            try {
-                const msg = JSON.parse(data);
-
-                // Register client
-                if (msg.type === 'register') {
-                    clientId = msg.id;
-                    roomId = msg.roomId || null;
-                    relayClients.set(clientId, ws);
-
-                    if (roomId) {
-                        relayRooms.set(clientId, roomId);
-                        if (!roomPeers.has(roomId)) roomPeers.set(roomId, new Set());
-                        roomPeers.get(roomId).add(clientId);
-                    }
-
-                    console.log(`[RELAY] Registered: ${clientId}${roomId ? ` (Room: ${roomId})` : ''}`);
-                    return;
-                }
-
-                // Tunnel message to target
-                if (msg.type === 'tunnel' && msg.to && msg.payload) {
-                    if (msg.to === 'room' && roomId) {
-                        const peers = roomPeers.get(roomId);
-                        if (peers) {
-                            const tunneled = JSON.stringify({
-                                type: 'tunneled',
-                                from: clientId || 'anonymous',
-                                payload: msg.payload
-                            });
-                            for (const peerId of peers) {
-                                if (peerId !== clientId) {
-                                    const peerWs = relayClients.get(peerId);
-                                    if (peerWs?.readyState === 1) peerWs.send(tunneled);
-                                }
-                            }
-                        }
-                    } else {
-                        const target = relayClients.get(msg.to);
-                        if (target && target.readyState === 1) {
-                            target.send(JSON.stringify({
-                                type: 'tunneled',
-                                from: clientId || 'anonymous',
-                                payload: msg.payload
-                            }));
-                        }
-                    }
-                }
-
-                // Specific Migration Signal
-                if (msg.type === 'host_migration' && roomId) {
-                    const signal = JSON.stringify({
-                        type: 'host_migration',
-                        payload: msg.payload
-                    });
-                    const peers = roomPeers.get(roomId);
-                    if (peers) {
-                        for (const peerId of peers) {
-                            if (peerId !== clientId) {
-                                const peerWs = relayClients.get(peerId);
-                                if (peerWs?.readyState === 1) peerWs.send(signal);
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error('[RELAY] Error:', e);
-            }
-        });
-
-        ws.on('close', () => {
-            if (clientId) {
-                relayClients.delete(clientId);
-                if (roomId && roomPeers.has(roomId)) {
-                    roomPeers.get(roomId).delete(clientId);
-                    if (roomPeers.get(roomId).size === 0) roomPeers.delete(roomId);
-                }
-                relayRooms.delete(clientId);
-                console.log(`[RELAY] Unregistered: ${clientId}`);
-            }
-        });
-    });
-
-    console.log('📡 Replicator Relay active on /relay');
-});
-
-// kompresja gzip/brotli
-await app.register(fastifyCompress)
-
-// serwowanie plików z dist
-await app.register(fastifyStatic, {
-    root: path.join(__dirname, 'dist'),
-    prefix: '/'
-})
 
 // Konfiguracja STUN/TURN dla PeerJS
 const PEER_CONFIG = {
@@ -195,7 +90,7 @@ app.get('/api/config', async (request, reply) => {
     }
 })
 
-// Prosty system lobby w pamięci
+// --- System Lobby ---
 const lobbies = new Map()
 
 // Cleanup starych lobby (starsze niż 60s)
@@ -214,7 +109,7 @@ app.post('/api/multiplayer/host', async (request, reply) => {
         return reply.code(400).send({ error: 'Missing id or name' })
     }
 
-    const safeName = (name || 'Unknown').replace(/[^\w\s-]/gi, '').substr(0, 32);
+    const safeName = (name || 'Unknown').replace(/[^\w\s-]/gi, '').substring(0, 32);
 
     lobbies.set(id, {
         id,
@@ -223,7 +118,7 @@ app.post('/api/multiplayer/host', async (request, reply) => {
         hasPassword: !!hasPassword,
         isPermanent: !!isPermanent,
         version: version || 'unknown',
-        region: (region || 'Global').substr(0, 16),
+        region: (region || 'Global').substring(0, 16),
         isOnlineMode: !!isOnlineMode,
         isLegacy: !!isLegacy,
         lastSeen: Date.now()
@@ -268,20 +163,128 @@ app.delete('/api/multiplayer/host/:id', async (request, reply) => {
     return reply.code(404).send({ error: 'Lobby not found' })
 })
 
-app.setNotFoundHandler((req, reply) => {
-    // jeśli to plik statyczny → 404
-    if (req.raw.url.includes('.')) {
-        return reply.code(404).send('Not found')
-    }
-
-    // tylko dla SPA routes bez rozszerzenia
-    reply.type('text/html').sendFile('index.html')
-})
-
+// --- Inicjalizacja Aplikacji ---
 const start = async () => {
     try {
+        // 1. Kompresja
+        await app.register(fastifyCompress)
+
+        // 2. Obsługa plików statycznych (Zabezpieczenie przed błędem braku folderu!)
+        const distPath = path.join(__dirname, 'dist');
+        if (!fs.existsSync(distPath)) {
+            console.warn(`[UWAGA] Folder ${distPath} nie istnieje! Tworzę pusty folder, aby serwer mógł wystartować.`);
+            fs.mkdirSync(distPath, { recursive: true });
+        }
+
+        await app.register(fastifyStatic, {
+            root: distPath,
+            prefix: '/'
+        })
+
+        // SPA Fallback (musi być podpięte po załadowaniu fastifyStatic)
+        app.setNotFoundHandler((req, reply) => {
+            if (req.raw.url.includes('.')) {
+                return reply.code(404).send('Not found')
+            }
+            reply.type('text/html').sendFile('index.html')
+        })
+
+        // 3. Start serwera HTTP
         await app.listen({ port: PORT, host: HOST })
-        console.log(`🚀 Server running on http://localhost:${PORT}`)
+        console.log(`🚀 Serwer HTTP działa na http://localhost:${PORT}`)
+
+        // 4. Start WebSockets (po uruchomieniu serwera HTTP)
+        const wss = new WebSocketServer({
+            server: app.server,
+            path: '/relay',
+            maxPayload: 52428800 // 50MB
+        });
+
+        wss.on('connection', (ws, req) => {
+            let clientId = null;
+            let roomId = null;
+
+            ws.on('message', (data) => {
+                try {
+                    const msg = JSON.parse(data);
+
+                    if (msg.type === 'register') {
+                        clientId = msg.id;
+                        roomId = msg.roomId || null;
+                        relayClients.set(clientId, ws);
+
+                        if (roomId) {
+                            relayRooms.set(clientId, roomId);
+                            if (!roomPeers.has(roomId)) roomPeers.set(roomId, new Set());
+                            roomPeers.get(roomId).add(clientId);
+                        }
+                        console.log(`[RELAY] Zarejestrowano: ${clientId}${roomId ? ` (Pokój: ${roomId})` : ''}`);
+                        return;
+                    }
+
+                    if (msg.type === 'tunnel' && msg.to && msg.payload) {
+                        if (msg.to === 'room' && roomId) {
+                            const peers = roomPeers.get(roomId);
+                            if (peers) {
+                                const tunneled = JSON.stringify({
+                                    type: 'tunneled',
+                                    from: clientId || 'anonymous',
+                                    payload: msg.payload
+                                });
+                                for (const peerId of peers) {
+                                    if (peerId !== clientId) {
+                                        const peerWs = relayClients.get(peerId);
+                                        if (peerWs?.readyState === 1) peerWs.send(tunneled);
+                                    }
+                                }
+                            }
+                        } else {
+                            const target = relayClients.get(msg.to);
+                            if (target && target.readyState === 1) {
+                                target.send(JSON.stringify({
+                                    type: 'tunneled',
+                                    from: clientId || 'anonymous',
+                                    payload: msg.payload
+                                }));
+                            }
+                        }
+                    }
+
+                    if (msg.type === 'host_migration' && roomId) {
+                        const signal = JSON.stringify({
+                            type: 'host_migration',
+                            payload: msg.payload
+                        });
+                        const peers = roomPeers.get(roomId);
+                        if (peers) {
+                            for (const peerId of peers) {
+                                if (peerId !== clientId) {
+                                    const peerWs = relayClients.get(peerId);
+                                    if (peerWs?.readyState === 1) peerWs.send(signal);
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('[RELAY] Błąd wiadomości:', e);
+                }
+            });
+
+            ws.on('close', () => {
+                if (clientId) {
+                    relayClients.delete(clientId);
+                    if (roomId && roomPeers.has(roomId)) {
+                        roomPeers.get(roomId).delete(clientId);
+                        if (roomPeers.get(roomId).size === 0) roomPeers.delete(roomId);
+                    }
+                    relayRooms.delete(clientId);
+                    console.log(`[RELAY] Wyrejestrowano: ${clientId}`);
+                }
+            });
+        });
+
+        console.log('📡 Replicator Relay aktywny na /relay');
+
     } catch (err) {
         app.log.error(err)
         process.exit(1)

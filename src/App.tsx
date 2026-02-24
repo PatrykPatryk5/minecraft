@@ -27,7 +27,6 @@ import MainMenu from './ui/MainMenu';
 import CreditsScreen from './ui/CreditsScreen';
 import KeybindScreen from './ui/KeybindScreen';
 import MultiplayerScreen from './ui/MultiplayerScreen';
-import MobileControls from './ui/MobileControls';
 import MobRenderer from './mobs/MobRenderer';
 import { MultiplayerRenderer } from './multiplayer/MultiplayerRenderer';
 import Weather from './environment/Weather';
@@ -38,7 +37,6 @@ import { preloadAllTextures } from './core/textures';
 import DroppedItemsManager from './entities/DroppedItems';
 import FallingBlocksManager from './entities/FallingBlocks';
 import ArrowsManager from './entities/Arrows';
-import { ThrowablesManager } from './entities/Throwables';
 import TNTManager from './entities/TNTPrimed';
 import PreJoinShield from './ui/PreJoinShield';
 import TabList from './ui/TabList';
@@ -52,7 +50,7 @@ const UnderwaterOverlay = () => {
 
 const SceneContent: React.FC = () => {
     const graphics = useGameStore((s) => s.settings.graphics);
-    const usePostProcessing = graphics !== 'fast' && graphics !== 'potato';
+    const usePostProcessing = graphics !== 'fast';
     const isFabulous = graphics === 'fabulous';
 
     const renderDist = useGameStore((s) => s.settings.renderDistance);
@@ -68,7 +66,6 @@ const SceneContent: React.FC = () => {
                 <DroppedItemsManager />
                 <FallingBlocksManager />
                 <ArrowsManager />
-                <ThrowablesManager />
                 <TNTManager />
             </Physics>
             <Clouds />
@@ -94,7 +91,7 @@ const App: React.FC = () => {
     const showHUD = useGameStore((s) => s.showHUD);
     const activeOverlay = useGameStore((s) => s.activeOverlay);
     const graphics = useGameStore((s) => s.settings.graphics);
-    const useShadows = graphics !== 'fast' && graphics !== 'potato';
+    const useShadows = graphics !== 'fast';
     const [caps, setCaps] = useState<RendererCapabilities | null>(null);
     const [ready, setReady] = useState(false);
     const prevScreenRef = useRef(screen);
@@ -104,20 +101,6 @@ const App: React.FC = () => {
             const detected = await getRendererCaps();
             setCaps(detected);
             console.log(`[MC R3F] Renderer: ${detected.label} | GPU: ${detected.gpuName}`);
-
-            // Mobile detection
-            const isTouch = (('ontouchstart' in window) || (navigator.maxTouchPoints > 0));
-            const isMobile = isTouch && window.innerWidth < 1024;
-            useGameStore.getState().setIsMobile(isMobile);
-            if (isMobile) {
-                console.log("[MC] Mobile device detected - enabling touch controls");
-                // Force fast graphics on mobile for better FPS
-                const currentGraphics = useGameStore.getState().settings.graphics;
-                if (currentGraphics === 'fancy' || currentGraphics === 'fabulous') {
-                    useGameStore.getState().updateSettings({ graphics: 'fast' });
-                }
-            }
-
             preloadAllTextures();
             setTimeout(() => {
                 setReady(true);
@@ -199,7 +182,7 @@ const App: React.FC = () => {
                 <Canvas
                     camera={{ fov, near: 0.1, far: 1000, position: [0, 80, 0] }}
                     gl={{
-                        antialias: graphics !== 'fast' && graphics !== 'potato',
+                        antialias: graphics !== 'fast',
                         powerPreference: 'high-performance',
                         stencil: false,
                         depth: true,
@@ -207,7 +190,7 @@ const App: React.FC = () => {
                         failIfMajorPerformanceCaveat: false,
                     }}
                     shadows={useShadows ? { type: graphics === 'fabulous' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap } : false}
-                    dpr={graphics === 'potato' ? [0.6, 0.6] : (graphics === 'fabulous' ? [1, Math.min(window.devicePixelRatio, 2)] : [1, 1])}
+                    dpr={graphics === 'fabulous' ? [1, Math.min(window.devicePixelRatio, 2)] : [1, 1]}
                     style={{ width: '100%', height: '100%' }}
                     onContextMenu={(e) => e.preventDefault()}
                     frameloop="always"
@@ -231,7 +214,6 @@ const App: React.FC = () => {
             {isPlaying && showHUD && (
                 <>
                     <HUD />
-                    <MobileControls />
                     <NetworkHUD />
                     <DebugScreen />
                 </>

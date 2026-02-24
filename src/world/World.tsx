@@ -191,9 +191,7 @@ const World: React.FC = () => {
         const pos = useGameStore.getState().playerPos;
         const pcx = Math.floor(pos[0] / CHUNK_SIZE);
         const pcz = Math.floor(pos[2] / CHUNK_SIZE);
-        const s = useGameStore.getState();
-        const rd = s.renderDistance;
-        const isPotato = s.settings.graphics === 'potato';
+        const rd = useGameStore.getState().renderDistance;
 
         // FOV Prioritization: get camera forward vector
         const cameraDir = new THREE.Vector3();
@@ -221,10 +219,7 @@ const World: React.FC = () => {
                 const cx = pcx + dx;
                 const cz = pcz + dz;
                 const key = chunkKey(cx, cz);
-
-                const fLOD = isPotato ? 2 * 2 : LOD_FULL;
-                const mLOD = isPotato ? 6 * 6 : LOD_MEDIUM;
-                const lod: 0 | 1 | 2 = distSq <= fLOD ? 0 : distSq <= mLOD ? 1 : 2;
+                const lod: 0 | 1 | 2 = distSq <= LOD_FULL ? 0 : distSq <= LOD_MEDIUM ? 1 : 2;
 
                 const entry: ChunkEntry = { cx, cz, key, dist: priorityDist, lod };
                 active.push(entry);
