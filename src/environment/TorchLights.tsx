@@ -58,7 +58,8 @@ const TorchLights: React.FC = () => {
                     BlockType.TORCH, BlockType.REDSTONE_TORCH, BlockType.GLOWSTONE,
                     BlockType.LANTERN, BlockType.SOUL_LANTERN, BlockType.SOUL_TORCH,
                     BlockType.SEA_LANTERN, BlockType.OCHRE_FROGLIGHT, BlockType.VERDANT_FROGLIGHT,
-                    BlockType.PEARLESCENT_FROGLIGHT, BlockType.BEACON, BlockType.REDSTONE_LAMP
+                    BlockType.PEARLESCENT_FROGLIGHT, BlockType.BEACON, BlockType.REDSTONE_LAMP,
+                    BlockType.LAVA
                 ];
                 if (!lightSourceIds.some(id => chunk.includes(id))) continue;
 
@@ -79,13 +80,14 @@ const TorchLights: React.FC = () => {
 
                                 const isRedstone = block === BlockType.REDSTONE_TORCH || block === BlockType.REDSTONE_LAMP;
                                 const isSoul = block === BlockType.SOUL_TORCH || block === BlockType.SOUL_LANTERN;
+                                const isLava = block === BlockType.LAVA;
 
                                 foundLights.push({
                                     x: wx + 0.5,
                                     y: y + 0.5,
                                     z: wz + 0.5,
-                                    color: isRedstone ? '#ff3300' : isSoul ? '#00ccff' : '#ffdd88',
-                                    intensity: (block === BlockType.TORCH || block === BlockType.LANTERN || block === BlockType.GLOWSTONE) ? 1.5 : 1.0,
+                                    color: isRedstone ? '#ff3300' : isSoul ? '#00ccff' : isLava ? '#ff6600' : '#ffdd88',
+                                    intensity: (block === BlockType.TORCH || block === BlockType.LANTERN || block === BlockType.GLOWSTONE || isLava) ? 1.5 : 1.0,
                                     distSq
                                 });
                             }

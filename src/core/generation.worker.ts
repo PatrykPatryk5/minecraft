@@ -30,6 +30,7 @@ export class TerrainWorker {
 
     mesh(cx: number, cz: number, chunkData: Uint16Array, neighbors: (Uint16Array | null)[], lod: number) {
         const [nPx, nNx, nPz, nNz] = neighbors;
+        const step = 1 << lod;
 
         // Padded buffer for AO (18x258x18)
         const PH = MAX_HEIGHT + 2;
@@ -43,9 +44,9 @@ export class TerrainWorker {
                 if (!targetChunk) continue;
                 const nlx = (lx + 16) % 16;
                 const nlz = (lz + 16) % 16;
-                const baseIdx = (lx + 1) * PH * PD + (lz + 1);
                 for (let y = 0; y < MAX_HEIGHT; y++) {
-                    padded[baseIdx + (y + 1) * PD] = targetChunk[blockIndex(nlx, y, nlz)];
+                    const idx = blockIndex(nlx, y, nlz);
+                    padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)] = targetChunk[idx];
                 }
             }
         }
@@ -53,6 +54,26 @@ export class TerrainWorker {
         const isSolidAt = (lx: number, y: number, lz: number): boolean => {
             const id = padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)] & 0x0FFF;
             return id > 0 && (BLOCK_DATA[id]?.solid ?? false);
+        };
+
+        const getBlockAt = (x: number, y: number, z: number): number => {
+            if (y < 0 || y >= MAX_HEIGHT) return 0x7FFF;
+            if (x >= -1 && x <= CHUNK_SIZE && z >= -1 && z <= CHUNK_SIZE) {
+                return padded[(x + 1) * PH * PD + (y + 1) * PD + (z + 1)] & 0x0FFF;
+            }
+            const cx_off = Math.floor(x / CHUNK_SIZE);
+            const cz_off = Math.floor(z / CHUNK_SIZE);
+            let neighbor: Uint16Array | null = null;
+            if (cx_off === 1 && cz_off === 0) neighbor = nPx;
+            else if (cx_off === -1 && cz_off === 0) neighbor = nNx;
+            else if (cx_off === 0 && cz_off === 1) neighbor = nPz;
+            else if (cx_off === 0 && cz_off === -1) neighbor = nNz;
+            if (neighbor) {
+                const nlx = (x % 16 + 16) % 16;
+                const nlz = (z % 16 + 16) % 16;
+                return neighbor[blockIndex(nlx, y, nlz)] & 0x0FFF;
+            }
+            return 0;
         };
 
         const solid = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[], lightEmit: [] as number[] };
@@ -69,49 +90,43 @@ export class TerrainWorker {
         }
         maxChunkHeight = Math.min(MAX_HEIGHT - 1, maxChunkHeight + 1);
 
-        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-            for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-                for (let y = 0; y <= maxChunkHeight; y++) {
+        for (let lx = 0; lx < CHUNK_SIZE; lx += step) {
+            for (let lz = 0; lz < CHUNK_SIZE; lz += step) {
+                for (let y = 0; y <= maxChunkHeight; y += step) {
                     const raw = chunkData[blockIndex(lx, y, lz)];
                     const bt = raw & 0x0FFF;
-                    const power = (raw & 0xF000) >> 12;
                     if (!bt) continue;
 
                     const isLiquidBlock = bt === BlockType.WATER || bt === BlockType.LAVA;
-                    const isWater = bt === BlockType.WATER;
-                    const target = isWater ? water : solid;
+                    const target = isLiquidBlock ? water : solid;
 
                     for (let f = 0; f < FACES.length; f++) {
                         const face = FACES[f];
-                        const nlx = lx + face.dir[0];
-                        const nny = y + face.dir[1];
-                        const nlz = lz + face.dir[2];
-                        const nbt_raw = padded[(nlx + 1) * PH * PD + (nny + 1) * PD + (nlz + 1)];
-                        const nbt = nbt_raw & 0x0FFF;
 
-                        let liquidHeight = 1.0;
-                        let neighborLiquidHeight = 1.0;
-                        if (isLiquidBlock) {
-                            let up_raw = 0;
-                            if (y < MAX_HEIGHT - 1) up_raw = chunkData[blockIndex(lx, y + 1, lz)];
-                            if ((up_raw & 0x0FFF) !== bt) liquidHeight = 0.88;
-                            if (nbt === bt) {
-                                const n_up_raw = padded[(nlx + 1) * PH * PD + (nny + 1 + 1) * PD + (nlz + 1)];
-                                if ((n_up_raw & 0x0FFF) !== nbt) neighborLiquidHeight = 0.88;
+                        // Visibility check accounting for LOD step
+                        const nbt = getBlockAt(lx + face.dir[0] * step, y + face.dir[1] * step, lz + face.dir[2] * step);
+
+                        let visible = false;
+                        if (nbt === 0x7FFF) visible = true;
+                        else if (isTransparent(nbt)) {
+                            // Fix: Hide faces between same liquid types
+                            if (isLiquidBlock && (nbt === BlockType.WATER || nbt === BlockType.LAVA)) {
+                                visible = false;
+                            } else {
+                                visible = true;
                             }
                         }
 
-                        if (!isTransparent(nbt)) continue;
-                        if (lod === 2 && (bt === BlockType.TALL_GRASS || bt === BlockType.FLOWER_RED || bt === BlockType.FLOWER_YELLOW || (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7))) continue;
-                        if (bt === nbt && bt !== BlockType.LEAVES) {
-                            if (isLiquidBlock && liquidHeight > neighborLiquidHeight) { } else continue;
-                        }
+                        if (!visible) continue;
+
+                        // Fast skip for foliage at distance
+                        if (lod === 2 && (bt === BlockType.TALL_GRASS || bt === BlockType.FLOWER_RED || bt === BlockType.FLOWER_YELLOW)) continue;
 
                         const atlasUV = getAtlasUV(bt, face.name);
-                        const baseIdx = isWater ? waterIdx : solidIdx;
+                        const baseIdx = isLiquidBlock ? waterIdx : solidIdx;
                         const cornerAO: number[] = [0, 0, 0, 0];
 
-                        if (lod === 0 && !isWater) {
+                        if (lod === 0 && !isLiquidBlock) {
                             const dx = face.dir[0], dy = face.dir[1], dz = face.dir[2];
                             for (let i = 0; i < 4; i++) {
                                 const corner = face.corners[i];
@@ -131,50 +146,30 @@ export class TerrainWorker {
                             }
                         }
 
+                        const info = BLOCK_DATA[bt];
+                        const isLightSource = (info?.light ?? 0) > 0;
+                        const isFloraBlock = bt === BlockType.LEAVES || bt === BlockType.TALL_GRASS || bt === BlockType.FLOWER_RED || bt === BlockType.FLOWER_YELLOW;
+
                         for (let i = 0; i < 4; i++) {
                             const corner = face.corners[i];
-                            let cy0 = y + corner[1];
-                            if (corner[1] === 1 && liquidHeight < 1.0) cy0 = y + liquidHeight;
-                            target.positions.push(lx + corner[0], cy0, lz + corner[2]);
+                            target.positions.push((lx + corner[0] * step), (y + corner[1] * step), (lz + corner[2] * step));
                             target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
                             target.uvs.push(atlasUV.u + face.uv[i][0] * atlasUV.su, atlasUV.v + face.uv[i][1] * atlasUV.sv);
-                            let br = 1.0;
-                            const isLightSource = (BLOCK_DATA[bt]?.light ?? 0) > 0;
-                            const isNeighborLight = (BLOCK_DATA[nbt]?.light ?? 0) > 0;
 
-                            if (lod === 0 && !isWater) {
-                                // Keep light sources and their immediate neighbors bright
-                                if (isLightSource || isNeighborLight) {
-                                    br = 1.0;
-                                } else if (bt === BlockType.GRASS) {
-                                    br = face.name === 'top' ? 1.0 : 0.9;
-                                } else {
-                                    br = Math.max(1.0 - cornerAO[i] * 0.2, 0.42);
-                                }
-                            }
-                            let r = br, g = br, b = br;
-                            if (bt === BlockType.REDSTONE_WIRE) {
-                                const intensity = 0.3 + (power / 15) * 0.7;
-                                r *= intensity; g *= (intensity * 0.1); b *= (intensity * 0.1);
-                            } else if (bt === BlockType.REDSTONE_LAMP && power > 0) {
-                                r *= 1.4; g *= 1.2; b *= 0.8;
-                            } else if (bt === BlockType.REDSTONE_TORCH && power > 0) {
-                                r *= 1.5; g *= 0.3; b *= 0.3;
-                            }
-                            target.colors.push(r, g, b);
-                            const isFloraBlock = bt === BlockType.LEAVES || bt === BlockType.TALL_GRASS || bt === BlockType.FLOWER_RED || bt === BlockType.FLOWER_YELLOW || (bt >= BlockType.WHEAT_0 && bt <= BlockType.WHEAT_7);
-                            const isTopVert = corner[1] > 0;
-                            target.isFlora.push(isFloraBlock ? (bt === BlockType.LEAVES ? 0.3 : (isTopVert ? 1.0 : 0.0)) : 0);
-                            target.isLiquid.push(isLiquidBlock && isTopVert && liquidHeight < 1.0 ? 1.0 : 0.0);
-                            target.lightEmit.push(isLightSource ? 1.0 : 0.0);
+                            const br = (lod === 0 && !isLiquidBlock) ? (1.0 - cornerAO[i] * 0.2) : 1.0;
+                            target.colors.push(br, br, br);
+                            target.lightEmit.push(isLightSource ? 1 : 0);
+                            target.isFlora.push(isFloraBlock ? 1 : 0);
+                            target.isLiquid.push(isLiquidBlock ? 1 : 0);
                         }
 
-                        if (lod === 0 && !isWater && (cornerAO[0] + cornerAO[2] > cornerAO[1] + cornerAO[3])) {
-                            target.indices.push(baseIdx + 1, baseIdx + 2, baseIdx + 3, baseIdx + 1, baseIdx + 3, baseIdx);
+                        // Fix: Corrected AO flip condition (inverted previously)
+                        if (lod === 0 && !isLiquidBlock && (cornerAO[0] + cornerAO[2] > cornerAO[1] + cornerAO[3])) {
+                            target.indices.push(baseIdx + 1, baseIdx + 2, baseIdx + 3, baseIdx + 1, baseIdx + 3, baseIdx + 0);
                         } else {
-                            target.indices.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
+                            target.indices.push(baseIdx + 0, baseIdx + 1, baseIdx + 2, baseIdx + 0, baseIdx + 2, baseIdx + 3);
                         }
-                        if (isWater) waterIdx += 4; else solidIdx += 4;
+                        if (isLiquidBlock) waterIdx += 4; else solidIdx += 4;
                     }
                 }
             }

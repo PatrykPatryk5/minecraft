@@ -56,11 +56,10 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
     const v_nNz = useGameStore((s) => s.chunkVersions[cx + ',' + (cz - 1)] ?? -1);
 
     const smoothLighting = useGameStore((s) => s.settings.smoothLighting);
-    const useShadows = useGameStore((s) => s.settings.graphics !== 'fast' && s.settings.graphics !== 'potato');
+    const useShadows = useGameStore((s) => s.settings.graphics !== 'fast');
     const [meshData, setMeshData] = React.useState<{ solidGeo: THREE.BufferGeometry | null, waterGeo: THREE.BufferGeometry | null, atlas: THREE.Texture } | null>(null);
 
-    // If smooth lighting is OFF, forced LOD to at least 1 (no AO)
-    const activeLod = !smoothLighting ? Math.max(1, lod) as 0 | 1 | 2 : lod;
+    const activeLod = lod;
 
     useEffect(() => {
         return () => {

@@ -155,10 +155,19 @@ export function generateEndChunk(cx: number, cz: number): Uint16Array {
             else {
                 const islandNoise = noise2d(wx * 0.05, wz * 0.05);
                 if (islandNoise > 0.7) {
-                    const radius = Math.floor((islandNoise - 0.7) * 40);
+                    const thickness = Math.floor((islandNoise - 0.7) * 15);
                     const baseY = END_Y + Math.floor(noise2d(wx * 0.1, wz * 0.1) * 10);
-                    if (Math.abs(64 - baseY) < radius / 4) {
-                        data[blockIndex(lx, baseY, lz)] = BlockType.END_STONE;
+
+                    // Generate a small vertical range for thickness
+                    for (let dy = -thickness; dy <= thickness; dy++) {
+                        const y = baseY + dy;
+                        if (y > 0 && y < MAX_HEIGHT) {
+                            // Taper the island horizontally
+                            const horizontalTaper = 1 - (Math.abs(dy) / (thickness + 1));
+                            if (islandNoise > 0.7 + (1 - horizontalTaper) * 0.1) {
+                                data[blockIndex(lx, y, lz)] = BlockType.END_STONE;
+                            }
+                        }
                     }
                 }
             }

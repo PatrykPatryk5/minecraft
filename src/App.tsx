@@ -51,6 +51,7 @@ const UnderwaterOverlay = () => {
 };
 
 const SceneContent: React.FC = () => {
+    const dimension = useGameStore((s) => s.dimension);
     const graphics = useGameStore((s) => s.settings.graphics);
     const usePostProcessing = graphics !== 'fast';
     const isFabulous = graphics === 'fabulous';
@@ -71,8 +72,8 @@ const SceneContent: React.FC = () => {
                 <TNTManager />
                 <ThrowablesManager />
             </Physics>
-            <Clouds />
-            <Weather />
+            {dimension === 'overworld' && <Clouds />}
+            {dimension === 'overworld' && <Weather />}
             <TorchLights />
             <BlockParticles />
 

@@ -142,11 +142,11 @@ const DayNightCycle: React.FC = () => {
 
         if (ambLightRef.current) {
             if (currentDim === 'nether') {
-                ambLightRef.current.intensity = 0.4 * brightnessMultiplier;
-                ambLightRef.current.color.set('#411');
+                ambLightRef.current.intensity = 0.7 * brightnessMultiplier;
+                ambLightRef.current.color.set('#622');
             } else if (currentDim === 'end') {
-                ambLightRef.current.intensity = 0.3 * brightnessMultiplier;
-                ambLightRef.current.color.set('#212');
+                ambLightRef.current.intensity = 0.5 * brightnessMultiplier;
+                ambLightRef.current.color.set('#2a1a35');
             } else {
                 ambLightRef.current.intensity = lerp(0.08, 0.3, daylight) * brightnessMultiplier;
                 ambLightRef.current.color.copy(lerpColor(skyColors.night, skyColors.day, daylight));
@@ -160,7 +160,7 @@ const DayNightCycle: React.FC = () => {
         }
 
         const isUnderwater = useGameStore.getState().isUnderwater;
-        if (scene.fog && scene.fog instanceof THREE.Fog) {
+        if (scene.fog && scene.fog instanceof THREE.Fog && currentDim === 'overworld') {
             if (isUnderwater) {
                 scene.fog.color.set('#0a2860');
                 scene.fog.near = 1;
@@ -206,6 +206,7 @@ const DayNightCycle: React.FC = () => {
                 />
             )}
             {isNightUi && currentDim === 'overworld' && <Stars radius={300} depth={50} count={7000} factor={4} saturation={0} fade speed={1} />}
+            {currentDim === 'end' && <Stars radius={300} depth={50} count={1000} factor={2} saturation={1} fade speed={0.2} />}
             <ambientLight ref={ambLightRef} intensity={0.5} />
             <directionalLight
                 ref={dirLightRef}

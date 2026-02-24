@@ -378,9 +378,9 @@ const World: React.FC = () => {
             ))}
             {dimension === 'end' && !useGameStore.getState().dragonDefeated && <EnderDragon />}
             <fog attach="fog" args={[
-                dimension === 'nether' ? '#200' : dimension === 'end' ? '#000' : isUnderwater ? '#0a2860' : '#87CEEB',
-                isUnderwater ? 1 : dimension === 'end' ? 30 : dimension === 'nether' ? 5 : Math.max(10, renderDistance * CHUNK_SIZE - 64),
-                isUnderwater ? 25 : dimension === 'end' ? 120 : dimension === 'nether' ? 45 : renderDistance * CHUNK_SIZE - 16
+                dimension === 'nether' ? '#200' : dimension === 'end' ? '#080510' : isUnderwater ? '#0a2860' : '#87CEEB',
+                isUnderwater ? 1 : dimension === 'end' ? 20 : dimension === 'nether' ? 5 : Math.max(10, renderDistance * CHUNK_SIZE - 64),
+                isUnderwater ? 25 : dimension === 'end' ? 140 : dimension === 'nether' ? 45 : renderDistance * CHUNK_SIZE - 16
             ]} />
         </>
     );
