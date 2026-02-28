@@ -697,6 +697,87 @@ function drawCactus(ctx: CanvasRenderingContext2D, face: string, seed: number) {
     }
 }
 
+function drawFire(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    ctx.clearRect(0, 0, 16, 16);
+    // Base flames
+    for (let x = 0; x < 16; x++) {
+        // Fire goes from bottom (15) to top (variable height)
+        const height = 10 + Math.floor(rng() * 6); // 10 to 15 pixels tall
+        for (let y = 15; y >= 16 - height; y--) {
+            // Colors from bottom (dark red) to top (yellow/white)
+            const up = 15 - y;
+            if (up === 0 || rng() < 0.1) px(ctx, x, y, 150, 0, 0); // Dark red base
+            else if (up < 4) px(ctx, x, y, 220, 50, 0); // Red
+            else if (up < 8) px(ctx, x, y, 255, 120, 0); // Orange
+            else if (up < 12) px(ctx, x, y, 255, 200, 0); // Yellow
+            else px(ctx, x, y, 255, 255, 100); // Tip yellow/white
+        }
+    }
+    // Random transparent gaps for motion
+    for (let i = 0; i < 20; i++) {
+        const x = Math.floor(rng() * 16);
+        const y = Math.floor(rng() * 16);
+        ctx.clearRect(x, y, 1 + rng() * 2, 1 + rng() * 2);
+    }
+}
+
+function drawCampfire(ctx: CanvasRenderingContext2D, face: string, seed: number) {
+    const rng = sRng(seed);
+    if (face === 'top') {
+        fillNoise(ctx, [40, 40, 40], 10, seed); // Ash
+        // Embers
+        for (let i = 0; i < 20; i++) {
+            const x = (rng() * 12 + 2) | 0;
+            const y = (rng() * 12 + 2) | 0;
+            if (rng() < 0.5) px(ctx, x, y, 255, 150 + rng() * 50, 0); // Orange/Yellow
+            else px(ctx, x, y, 200, 50, 0); // Red
+        }
+        // Logs
+        ctx.fillStyle = '#4c3311';
+        ctx.fillRect(2, 2, 4, 12);
+        ctx.fillRect(10, 2, 4, 12);
+        ctx.fillStyle = '#6b4c2a';
+        ctx.fillRect(2, 6, 12, 4);
+    } else if (face === 'bottom') {
+        drawLogTop(ctx, [107, 84, 51], [150, 120, 70], seed);
+    } else {
+        // Campfire side
+        fillNoise(ctx, [107, 84, 51], 15, seed); // Wood bark
+        // Add fire highlights
+        for (let x = 4; x < 12; x++) {
+            for (let y = 0; y < 8; y++) {
+                if (rng() < 0.4) px(ctx, x, 15 - y, 255, 180 + rng() * 70, rng() * 50);
+            }
+        }
+    }
+}
+
+function drawIronBars(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    const ironColor: RGB = [160, 160, 160];
+    const darkEdge: RGB = [110, 110, 110];
+
+    // Transparent background
+    ctx.clearRect(0, 0, 16, 16);
+
+    // Vertical bars
+    for (let x = 2; x < 15; x += 4) {
+        for (let y = 0; y < 16; y++) {
+            px(ctx, x, y, ironColor[0], ironColor[1], ironColor[2]);
+            px(ctx, x + 1, y, darkEdge[0], darkEdge[1], darkEdge[2]);
+        }
+    }
+
+    // Horizontal bars
+    for (let y = 4; y < 15; y += 6) {
+        for (let x = 0; x < 16; x++) {
+            px(ctx, x, y, ironColor[0] + 20, ironColor[1] + 20, ironColor[2] + 20);
+            px(ctx, x, y + 1, darkEdge[0], darkEdge[1], darkEdge[2]);
+        }
+    }
+}
+
 function drawLava(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
@@ -1180,6 +1261,83 @@ function drawDragonBreath(ctx: CanvasRenderingContext2D, seed: number) {
     }
 }
 
+function drawBow(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    ctx.clearRect(0, 0, 16, 16);
+    // Draw string
+    ctx.strokeStyle = '#aaaaaa';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(3, 4);
+    ctx.lineTo(8, 8);
+    ctx.lineTo(12, 13);
+    ctx.stroke();
+    // Draw wood bow body
+    ctx.strokeStyle = '#8b5a2b';
+    ctx.beginPath();
+    ctx.moveTo(3, 4);
+    ctx.quadraticCurveTo(2, 14, 12, 13);
+    ctx.stroke();
+    // Grip
+    px(ctx, 4, 10, 80, 50, 20); px(ctx, 5, 11, 80, 50, 20);
+}
+
+function drawArrow(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    ctx.clearRect(0, 0, 16, 16);
+    // Shaft
+    for (let i = 3; i < 13; i++) {
+        px(ctx, i, 15 - i, 160, 120, 80);
+    }
+    // Flint head
+    px(ctx, 13, 2, 80, 80, 80); px(ctx, 14, 1, 100, 100, 100); px(ctx, 13, 1, 80, 80, 80); px(ctx, 14, 2, 80, 80, 80);
+    // Leather/feather fletching
+    px(ctx, 1, 14, 200, 200, 200); px(ctx, 2, 13, 200, 200, 200);
+    px(ctx, 3, 15, 200, 200, 200); px(ctx, 4, 14, 200, 200, 200);
+}
+function drawSponge(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    const base: RGB = [194, 183, 78]; // Mustard yellow base
+    fillNoise(ctx, base, 15, seed);
+
+    // Dark porous holes
+    for (let i = 0; i < 18; i++) {
+        const sx = (rng() * 16) | 0;
+        const sy = (rng() * 16) | 0;
+        px(ctx, sx, sy, 115, 105, 30);
+
+        // Sometimes a hole is 2 pixels
+        if (rng() > 0.5) {
+            px(ctx, (sx + 1) % 16, sy, 115, 105, 30);
+        }
+    }
+}
+
+function drawWetSponge(ctx: CanvasRenderingContext2D, seed: number) {
+    const rng = sRng(seed);
+    const base: RGB = [160, 150, 45]; // Darker, wetter, more saturated yellow/orange base
+    fillNoise(ctx, base, 15, seed);
+
+    // Dark porous holes (darker due to water)
+    for (let i = 0; i < 18; i++) {
+        const sx = (rng() * 16) | 0;
+        const sy = (rng() * 16) | 0;
+        px(ctx, sx, sy, 85, 75, 20);
+
+        // Sometimes a hole is 2 pixels
+        if (rng() > 0.5) {
+            px(ctx, (sx + 1) % 16, sy, 85, 75, 20);
+        }
+    }
+
+    // Tiny water dripping/shimmer details
+    for (let i = 0; i < 8; i++) {
+        const sx = (rng() * 16) | 0;
+        const sy = (rng() * 16) | 0;
+        px(ctx, sx, sy, 120, 180, 200); // blueish wet glint
+    }
+}
+
 // ─── Main Texture Creation (MC-Accurate) ──────────────────
 
 function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right', seed: number): void {
@@ -1231,6 +1389,38 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.MOSSY_COBBLE: drawCobble(ctx, seed); // add moss
             for (let i = 0; i < 18; i++) { const sx = (rng() * 14 + 1) | 0, sy = (rng() * 14 + 1) | 0; px(ctx, sx, sy, 60 + (rng() * 25 | 0), 110 + (rng() * 20 | 0), 40); } return;
         case BlockType.DIRT: drawDirt(ctx, seed); return;
+
+        case BlockType.ICE:
+            ctx.fillStyle = 'rgba(150, 200, 255, 0.6)';
+            ctx.fillRect(0, 0, 16, 16);
+            fillNoise(ctx, [180, 220, 255], 10, seed);
+            drawInnerEdge(ctx, [200, 240, 255]);
+            return;
+        case BlockType.SLIME_BLOCK:
+            ctx.fillStyle = 'rgba(100, 200, 100, 0.7)';
+            ctx.fillRect(0, 0, 16, 16);
+            fillNoise(ctx, [120, 220, 120], 10, seed);
+            ctx.fillStyle = 'rgba(80, 180, 80, 0.9)';
+            ctx.fillRect(4, 4, 8, 8);
+            return;
+        case BlockType.MAGMA_BLOCK:
+            drawNetherrack(ctx, seed);
+            for (let i = 0; i < 20; i++) {
+                const sx = (rng() * 16) | 0, sy = (rng() * 16) | 0;
+                px(ctx, sx, sy, 255, 100 + (rng() * 100 | 0), 0);
+            }
+            return;
+        case BlockType.FIRE:
+            ctx.clearRect(0, 0, 16, 16);
+            for (let i = 0; i < 40; i++) {
+                const x = (rng() * 16) | 0;
+                const h = 4 + (rng() * 10 | 0);
+                for (let y = 0; y < h; y++) {
+                    px(ctx, x, 15 - y, 255, 50 + (rng() * 150 | 0), 0);
+                }
+            }
+            return;
+
         case BlockType.GRASS:
             if (face === 'top') drawGrassTop(ctx, seed);
             else if (face === 'bottom') drawDirt(ctx, seed);
@@ -1258,12 +1448,20 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
                     for (let dx = 0; dx < sw; dx++) px(ctx, (sx + dx) & 15, sy, 50, 45, 40);
                 }
             } return;
+        case BlockType.BOW: drawBow(ctx, seed); return;
+        case BlockType.ARROW: drawArrow(ctx, seed); return;
+        case BlockType.SPONGE: drawSponge(ctx, seed); return;
+        case BlockType.WET_SPONGE: drawWetSponge(ctx, seed); return;
         case BlockType.LEAVES: drawLeaves(ctx, seed); return;
         case BlockType.PLANKS: drawPlanks(ctx, [184, 148, 95], seed); return;
         case BlockType.SPRUCE_PLANKS: drawPlanks(ctx, [107, 66, 38], seed); return;
         case BlockType.BIRCH_PLANKS: drawPlanks(ctx, [212, 200, 160], seed); return;
         case BlockType.BRICK: drawBricks(ctx, seed); return;
         case BlockType.GLASS: drawGlass(ctx, seed); return;
+        case BlockType.GLASS_PANE: drawGlass(ctx, seed); return;
+        case BlockType.FIRE: drawFire(ctx, seed); return;
+        case BlockType.IRON_BARS: drawIronBars(ctx, seed); return;
+        case BlockType.CAMPFIRE: drawCampfire(ctx, face, seed); return;
         case BlockType.SNOW: drawSnow(ctx, seed); return;
         case BlockType.GRAVEL: fillNoise(ctx, [120, 115, 110], 30, seed); return;
         case BlockType.CLAY: fillNoise(ctx, [158, 168, 180], 12, seed); return;
@@ -2000,24 +2198,132 @@ export function getBlockIcon(blockId: number): string {
             ctx.fillRect(size * 0.3, size * 0.3, size * 0.4, size * 0.4);
             drawInnerEdge(ctx, lighten(rgb, 30));
         } else {
-            // Existing Tool rendering shape
+            // Check name to determine shape
+            const name = data.name.toLowerCase();
+            const isPick = name.includes('kilof');
+            const isAxe = name.includes('siekiera');
+            const isShovel = name.includes('łopata');
+            const isHoe = name.includes('motyka');
+            const isSword = name.includes('miecz');
+            const isSaddle = name.includes('siodło');
+            const isFishingRod = name.includes('wędka');
+            const isNameTag = name.includes('znacznik');
+            const isLead = name.includes('smycz');
+            const isHorseArmor = name.includes('zbroja konia');
+            const isFlintAndSteel = blockId === BlockType.FLINT_AND_STEEL;
+
+            // Handle
+            ctx.fillStyle = '#8B6B3E';
+            if (isPick || isAxe || isShovel || isHoe || isSword) {
+                ctx.translate(size * 0.5, size * 0.5);
+                ctx.rotate(Math.PI / 4);
+                ctx.fillRect(-size * 0.06, -size * 0.1, size * 0.12, size * 0.5);
+                ctx.rotate(-Math.PI / 4);
+                ctx.translate(-size * 0.5, -size * 0.5);
+            }
+
             const grd = ctx.createLinearGradient(size * 0.4, 0, size * 0.6, size);
             grd.addColorStop(0, `rgb(${Math.min(255, rgb[0] + 50)},${Math.min(255, rgb[1] + 50)},${Math.min(255, rgb[2] + 50)})`);
             grd.addColorStop(1, `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`);
             ctx.fillStyle = grd;
-            // Blade
-            ctx.beginPath();
-            ctx.moveTo(size * 0.42, size * 0.05);
-            ctx.lineTo(size * 0.58, size * 0.05);
-            ctx.lineTo(size * 0.56, size * 0.5);
-            ctx.lineTo(size * 0.44, size * 0.5);
-            ctx.closePath(); ctx.fill();
-            // Guard
-            ctx.fillStyle = '#888';
-            ctx.fillRect(size * 0.35, size * 0.48, size * 0.3, size * 0.06);
-            // Handle
-            ctx.fillStyle = '#8B6B3E';
-            ctx.fillRect(size * 0.44, size * 0.54, size * 0.12, size * 0.35);
+
+            if (isPick) {
+                ctx.beginPath();
+                ctx.moveTo(size * 0.1, size * 0.3);
+                ctx.quadraticCurveTo(size * 0.5, size * 0.1, size * 0.9, size * 0.3);
+                ctx.lineTo(size * 0.8, size * 0.4);
+                ctx.quadraticCurveTo(size * 0.5, size * 0.25, size * 0.2, size * 0.4);
+                ctx.fill();
+            } else if (isAxe) {
+                ctx.fillRect(size * 0.5, size * 0.1, size * 0.3, size * 0.3);
+            } else if (isShovel) {
+                ctx.beginPath();
+                ctx.arc(size * 0.7, size * 0.3, size * 0.15, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (isHoe) {
+                ctx.fillRect(size * 0.4, size * 0.2, size * 0.3, size * 0.1);
+            } else if (isSword) {
+                // Blade
+                ctx.beginPath();
+                ctx.moveTo(size * 0.75, size * 0.1);
+                ctx.lineTo(size * 0.85, size * 0.2);
+                ctx.lineTo(size * 0.4, size * 0.65);
+                ctx.lineTo(size * 0.3, size * 0.55);
+                ctx.fill();
+                // Guard
+                ctx.fillStyle = '#888';
+                ctx.fillRect(size * 0.3, size * 0.5, size * 0.2, size * 0.1);
+            } else if (isSaddle) {
+                ctx.fillStyle = '#8b5a2b';
+                ctx.beginPath();
+                ctx.arc(size * 0.5, size * 0.4, size * 0.3, Math.PI, 0);
+                ctx.lineTo(size * 0.8, size * 0.7);
+                ctx.lineTo(size * 0.6, size * 0.7);
+                ctx.lineTo(size * 0.5, size * 0.5);
+                ctx.lineTo(size * 0.4, size * 0.7);
+                ctx.lineTo(size * 0.2, size * 0.7);
+                ctx.fill();
+            } else if (isFishingRod) {
+                ctx.strokeStyle = '#eeeeee';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(size * 0.8, size * 0.2);
+                ctx.lineTo(size * 0.8, size * 0.8);
+                ctx.stroke();
+
+                ctx.fillStyle = '#8B6B3E';
+                ctx.translate(size * 0.5, size * 0.5);
+                ctx.rotate(Math.PI / 4);
+                ctx.fillRect(-size * 0.05, -size * 0.4, size * 0.1, size * 0.8);
+                ctx.rotate(-Math.PI / 4);
+                ctx.translate(-size * 0.5, -size * 0.5);
+            } else if (isNameTag) {
+                ctx.fillStyle = '#dddddd';
+                ctx.fillRect(size * 0.3, size * 0.4, size * 0.5, size * 0.3);
+                ctx.fillStyle = '#555555';
+                ctx.beginPath();
+                ctx.arc(size * 0.35, size * 0.55, size * 0.05, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (isLead) {
+                ctx.strokeStyle = '#8b4513';
+                ctx.lineWidth = 6;
+                ctx.beginPath();
+                ctx.arc(size * 0.5, size * 0.3, size * 0.15, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(size * 0.5, size * 0.45);
+                ctx.quadraticCurveTo(size * 0.7, size * 0.6, size * 0.4, size * 0.8);
+                ctx.stroke();
+            } else if (isHorseArmor) {
+                ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+                ctx.fillRect(size * 0.2, size * 0.3, size * 0.6, size * 0.5);
+                ctx.fillStyle = darken(rgb, 0.8)[0] !== 0 ? `rgb(${darken(rgb, 0.8)})` : '#222';
+                ctx.fillRect(size * 0.25, size * 0.6, size * 0.2, size * 0.2);
+                ctx.fillRect(size * 0.55, size * 0.6, size * 0.2, size * 0.2);
+                drawInnerEdge(ctx, lighten(rgb, 30));
+            } else if (isFlintAndSteel) {
+                // Steel C-shape
+                ctx.strokeStyle = '#aaaaaa';
+                ctx.lineWidth = 10;
+                ctx.beginPath();
+                ctx.arc(size * 0.65, size * 0.45, size * 0.25, -Math.PI * 0.3, Math.PI * 1.3);
+                ctx.stroke();
+                // Flint edge
+                ctx.fillStyle = '#333333';
+                ctx.beginPath();
+                ctx.moveTo(size * 0.2, size * 0.6);
+                ctx.lineTo(size * 0.4, size * 0.85);
+                ctx.lineTo(size * 0.5, size * 0.7);
+                ctx.lineTo(size * 0.3, size * 0.5);
+                ctx.fill();
+            } else {
+                // Generic item (circle or chunk)
+                ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+                ctx.beginPath();
+                ctx.arc(size * 0.5, size * 0.5, size * 0.25, 0, Math.PI * 2);
+                ctx.fill();
+                drawInnerEdge(ctx, darken(rgb, 0.8));
+            }
         }
     } else {
         // Create mini 16x16 textures for each face

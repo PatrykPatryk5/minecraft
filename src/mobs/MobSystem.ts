@@ -171,6 +171,36 @@ export function updateMobs(delta: number): void {
             }
         }
 
+        // Environmental Damage (Fire, Lava, Magma, Campfire)
+        const mx = Math.floor(mobCopy.pos[0]);
+        const my = Math.floor(mobCopy.pos[1]);
+        const mz = Math.floor(mobCopy.pos[2]);
+        const curBlock = s.getBlock(mx, Math.floor(mobCopy.pos[1] + 0.1), mz);
+        const legBlock = s.getBlock(mx, my, mz);
+        const blockBelow = s.getBlock(mx, Math.floor(mobCopy.pos[1] - 0.1), mz);
+
+        const inLava = curBlock === BlockType.LAVA || legBlock === BlockType.LAVA;
+        const inFire = curBlock === BlockType.FIRE || legBlock === BlockType.FIRE;
+        const onMagma = blockBelow === BlockType.MAGMA_BLOCK;
+        const onCampfire = blockBelow === BlockType.CAMPFIRE;
+        const onHotBlock = onMagma || onCampfire;
+
+        if (mobCopy.type !== 'blaze') { // Blazes are immune to fire/lava
+            if (inLava || inFire || onHotBlock) {
+                const dmgRate = inLava ? 4 : 2;
+                mobCopy.health -= (delta * updateInterval) * dmgRate;
+                if (mobCopy.hurtTimer <= 0) {
+                    mobCopy.hurtTimer = 500;
+                    playSound('hurt');
+                }
+                // Slow down in lava
+                if (inLava) {
+                    mobCopy.vel[0] *= 0.8;
+                    mobCopy.vel[2] *= 0.8;
+                }
+            }
+        }
+
         // AI State Machine
         if (stats.hostile) {
             // Hostile AI
@@ -181,7 +211,7 @@ export function updateMobs(delta: number): void {
                 // Skeleton ranged behavior
                 if (mobCopy.type === 'skeleton') {
                     if (dist < 12 && dist > 2 && now - mobCopy.lastAttackTime > 2000) {
-                        s.setHealth(s.health - stats.damage);
+                        s.takeDamage(stats.damage, { source: `Zostałeś zastrzelony przez szkieleta!` });
                         mobCopy.lastAttackTime = now;
                         playSound('hurt');
                     }
@@ -211,7 +241,7 @@ export function updateMobs(delta: number): void {
 
             // Blaze special behavior
             if (mobCopy.type === 'blaze' && dist < 15 && now - mobCopy.lastAttackTime > 2000) {
-                s.takeDamage(stats.damage);
+                s.takeDamage(stats.damage, { source: `Spłonąłeś od kuli ognia blaza!` });
                 mobCopy.lastAttackTime = now;
                 playSound('fireball');
             }
@@ -220,7 +250,7 @@ export function updateMobs(delta: number): void {
             if (mobCopy.type !== 'creeper' && mobCopy.type !== 'blaze' && dist < ATTACK_RANGE && now - mobCopy.lastAttackTime > ATTACK_COOLDOWN) {
                 mobCopy.state = 'attack';
                 mobCopy.lastAttackTime = now;
-                s.takeDamage(stats.damage);
+                s.takeDamage(stats.damage, { source: mobCopy.type });
                 playSound('hurt');
             }
         } else {
@@ -229,7 +259,7 @@ export function updateMobs(delta: number): void {
                 mobCopy.target = [...playerPos];
                 mobCopy.state = 'chase';
                 if (dist < ATTACK_RANGE && now - mobCopy.lastAttackTime > ATTACK_COOLDOWN) {
-                    s.takeDamage(stats.damage);
+                    s.takeDamage(stats.damage, { source: mobCopy.type });
                     mobCopy.lastAttackTime = now;
                     playSound('hurt');
                 }
@@ -321,15 +351,65 @@ export function updateMobs(delta: number): void {
         if (mobCopy.health <= 0) {
             mobs.splice(i, 1);
             changed = true;
-            if (mobCopy.type === 'cow') s.addItem(BlockType.BEEF_RAW, 1);
-            if (mobCopy.type === 'pig') s.addItem(BlockType.PORKCHOP_RAW, 1);
-            if (mobCopy.type === 'sheep') s.addItem(BlockType.WOOL_WHITE, 1);
-            if (mobCopy.type === 'chicken') s.addItem(BlockType.CHICKEN_RAW, 1);
-            if (mobCopy.type === 'zombie') s.addItem(BlockType.LEATHER, 1);
-            if (mobCopy.type === 'skeleton') s.addItem(BlockType.BONE, 1);
-            if (mobCopy.type === 'spider') s.addItem(BlockType.STRING, 1);
-            const xp = (mobCopy.type === 'blaze') ? 10 : (stats.hostile) ? 5 : Math.floor(Math.random() * 3) + 1;
-            s.addXp(xp);
+            const [mx, my, mz] = mobCopy.pos;
+
+            // Drop items as world entities with random velocity (like real Minecraft)
+            const dropVel = (): [number, number, number] => [
+                (Math.random() - 0.5) * 0.3,
+                0.3 + Math.random() * 0.2,
+                (Math.random() - 0.5) * 0.3,
+            ];
+
+            if (mobCopy.type === 'cow') {
+                const count = 1 + Math.floor(Math.random() * 3);
+                s.addDroppedItem(BlockType.BEEF_RAW, [mx, my + 0.5, mz], dropVel());
+                s.addDroppedItem(BlockType.LEATHER, [mx, my + 0.5, mz], dropVel());
+                if (count > 1) s.addDroppedItem(BlockType.BEEF_RAW, [mx + 0.2, my + 0.5, mz], dropVel());
+            }
+            if (mobCopy.type === 'pig') {
+                const count = 1 + Math.floor(Math.random() * 3);
+                s.addDroppedItem(BlockType.PORKCHOP_RAW, [mx, my + 0.5, mz], dropVel());
+                if (count > 1) s.addDroppedItem(BlockType.PORKCHOP_RAW, [mx + 0.2, my + 0.5, mz], dropVel());
+            }
+            if (mobCopy.type === 'sheep') {
+                s.addDroppedItem(BlockType.WOOL_WHITE, [mx, my + 0.5, mz], dropVel());
+                if (Math.random() < 0.5) s.addDroppedItem(BlockType.PORKCHOP_RAW, [mx, my + 0.5, mz], dropVel()); // mutton (reuse pork)
+            }
+            if (mobCopy.type === 'chicken') {
+                s.addDroppedItem(BlockType.CHICKEN_RAW, [mx, my + 0.5, mz], dropVel());
+                if (Math.random() < 0.3) s.addDroppedItem(BlockType.FEATHER, [mx, my + 0.5, mz], dropVel());
+            }
+            if (mobCopy.type === 'zombie') {
+                if (Math.random() < 0.25) s.addDroppedItem(BlockType.LEATHER, [mx, my + 0.5, mz], dropVel());
+                if (Math.random() < 0.05) s.addDroppedItem(BlockType.IRON_INGOT, [mx, my + 0.5, mz], dropVel());
+            }
+            if (mobCopy.type === 'skeleton') {
+                const bones = 1 + Math.floor(Math.random() * 2);
+                const arrows = 1 + Math.floor(Math.random() * 3);
+                for (let b = 0; b < bones; b++) s.addDroppedItem(BlockType.BONE, [mx + b * 0.1, my + 0.5, mz], dropVel());
+                for (let a = 0; a < arrows; a++) s.addDroppedItem(BlockType.ARROW, [mx + a * 0.1, my + 0.5, mz], dropVel());
+            }
+            if (mobCopy.type === 'spider') {
+                if (Math.random() < 0.5) s.addDroppedItem(BlockType.STRING, [mx, my + 0.5, mz], dropVel());
+                if (Math.random() < 0.1) s.addDroppedItem(BlockType.STRING, [mx + 0.1, my + 0.5, mz], dropVel()); // spider eye item
+            }
+            if (mobCopy.type === 'enderman') {
+                if (Math.random() < 0.5) s.addDroppedItem(BlockType.ENDER_PEARL, [mx, my + 0.5, mz], dropVel());
+            }
+            if (mobCopy.type === 'blaze') {
+                const count = 1 + Math.floor(Math.random() * 2);
+                for (let b = 0; b < count; b++) s.addDroppedItem(BlockType.BLAZE_ROD, [mx + b * 0.1, my + 0.5, mz], dropVel());
+            }
+
+            // XP drop (Minecraft-accurate ranges)
+            const xpTable: Record<string, [number, number]> = {
+                zombie: [5, 5], skeleton: [5, 5], creeper: [5, 5],
+                spider: [5, 5], enderman: [5, 5], blaze: [10, 10],
+                pig: [1, 3], cow: [1, 3], sheep: [1, 3],
+                chicken: [1, 3], wolf: [1, 3],
+            };
+            const [xpMin, xpMax] = xpTable[mobCopy.type] ?? [1, 3];
+            s.addXp(xpMin + Math.floor(Math.random() * (xpMax - xpMin + 1)));
             playSound('pop');
             continue;
         }
@@ -360,7 +440,8 @@ export function attackMob(px: number, py: number, pz: number, direction: [number
             const dot = dx * direction[0] + dy * direction[1] + dz * direction[2];
             if (dot > 0) {
                 const updated = { ...mob };
-                updated.health -= damage;
+                // Apply damage using a consistent method
+                updated.health -= damage; // Direct health modification as there's no mob.takeDamage
                 updated.hurtTimer = 500;
                 updated.state = 'flee';
                 // Knockback
@@ -500,6 +581,14 @@ function creeperExplode(mob: Mob): void {
                 const type = s.getBlock(bx, by, bz);
                 if (type && type !== BlockType.BEDROCK && type !== BlockType.WATER) {
                     s.removeBlock(bx, by, bz);
+
+                    // Debris Physics: Spawn flying physical blocks (about 30% of broken blocks)
+                    if (Math.random() < 0.3) {
+                        const vx = (bx - x) * 2 + (Math.random() - 0.5) * 4;
+                        const vy = 6 + Math.random() * 5;
+                        const vz = (bz - z) * 2 + (Math.random() - 0.5) * 4;
+                        s.spawnFallingBlock(type, [bx + 0.5, by + 0.5, bz + 0.5], [vx, vy, vz], true);
+                    }
                 }
             }
         }
@@ -523,9 +612,54 @@ function creeperExplode(mob: Mob): void {
     const pDist = Math.sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
     if (pDist < CREEPER_EXPLODE_RADIUS * 2.5) {
         const dmg = Math.round(15 * (1 - pDist / (CREEPER_EXPLODE_RADIUS * 2.5)));
-        s.setHealth(s.health - dmg);
+        s.takeDamage(dmg, { source: `Zostałeś wysadzony przez creepera!` });
         playSound('hurt');
+
+        // Knockback player
+        const force = Math.max(0, 20 * (1 - pDist / (CREEPER_EXPLODE_RADIUS * 2.5)));
+        if (force > 0 && pDist > 0) {
+            window.dispatchEvent(new CustomEvent('player-impulse', {
+                detail: {
+                    x: (pdx / pDist) * force,
+                    y: (pdy / pDist) * force + force * 0.4,
+                    z: (pdz / pDist) * force
+                }
+            }));
+        }
     }
+
+    // Knockback Mobs
+    const currentMobs = s.mobs;
+    let mobsChanged = false;
+    for (const m of currentMobs) {
+        if (m.id === mob.id || (m.health !== undefined && m.health <= 0)) continue;
+        const mdx = m.pos[0] - x;
+        const mdy = m.pos[1] - y;
+        const mdz = m.pos[2] - z;
+        const mDist = Math.sqrt(mdx * mdx + mdy * mdy + mdz * mdz);
+        if (mDist < CREEPER_EXPLODE_RADIUS * 2.5) {
+            const force = Math.max(0, 20 * (1 - mDist / (CREEPER_EXPLODE_RADIUS * 2.5)));
+            if (force > 0 && mDist > 0) {
+                m.vel[0] += (mdx / mDist) * force;
+                m.vel[1] += (mdy / mDist) * force + force * 0.4;
+                m.vel[2] += (mdz / mDist) * force;
+
+                // Also damage the mob
+                const dmg = Math.round(15 * (1 - mDist / (CREEPER_EXPLODE_RADIUS * 2.5)));
+                m.health = (m.health ?? 20) - dmg;
+                m.hurtTime = 10;
+                mobsChanged = true;
+            }
+        }
+    }
+    if (mobsChanged) {
+        s.setMobs([...currentMobs]);
+    }
+
+    // Global event for other physical entities (e.g. dropped items)
+    window.dispatchEvent(new CustomEvent('explosion-knockback', {
+        detail: { x, y, z, radius: CREEPER_EXPLODE_RADIUS * 2.5, maxForce: 25 }
+    }));
 
     playSound('explode');
 }

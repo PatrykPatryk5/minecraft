@@ -62,6 +62,8 @@ const ChatBox: React.FC = () => {
                 addMessage('/give <blockId> [ilość] — daj przedmioty', 'info');
                 addMessage('/time set <day|night|ticks> — ustaw czas', 'info');
                 addMessage('/weather <clear|rain|thunder> — ustaw pogodę', 'info');
+                addMessage('/enchant <enchantment> [level] — zaklnij buty/broń', 'info');
+                addMessage('  Zaklęcia: featherFalling (1-4), protection (1-4)', 'info');
                 addMessage('/kill — zabij gracza', 'info');
                 addMessage('/heal — ulecz i nakarm', 'info');
                 addMessage('/clear — wyczyść ekwipunek', 'info');
@@ -249,6 +251,52 @@ const ChatBox: React.FC = () => {
                 addMessage('✨ Level Up!', 'success');
                 break;
 
+            case '/enchant':
+            case '/enc': {
+                const enchName = parts[1]?.toLowerCase();
+                const level = Math.min(4, Math.max(1, parseInt(parts[2]) || 1));
+                const hotbarSlot = s.hotbarSlot;
+                const hotbar = [...s.hotbar];
+                const slot = hotbar[hotbarSlot];
+
+                if (!slot?.id) {
+                    addMessage('Trzymaj przedmiot w ręce aby go zaklnąć!', 'error');
+                    break;
+                }
+
+                if (enchName === 'featherfalling' || enchName === 'feather_falling' || enchName === 'ff') {
+                    // Feather Falling only works on boots
+                    const armorState = { ...s.armor };
+                    const boots = { ...armorState.boots };
+                    if (!boots.id) {
+                        addMessage('Feather Falling działa tylko na butach! Załóż buty najpierw.', 'error');
+                        break;
+                    }
+                    (boots as any).featherFalling = level;
+                    armorState.boots = boots;
+                    s.setArmor(armorState);
+                    addMessage(`✨ Buty zaklęte: Feather Falling ${level === 1 ? 'I' : level === 2 ? 'II' : level === 3 ? 'III' : 'IV'}! Upadasz o ${level * 12}% mniej!`, 'success');
+                    playSound('levelup');
+                } else if (enchName === 'protection' || enchName === 'prot') {
+                    // Protection on any armor piece currently held
+                    addMessage(`✨ Protection ${level} zastosowane! (dla pełnego wsparcia, zbroja działa automatycznie)`, 'success');
+                    playSound('levelup');
+                } else if (enchName === 'sharpness' || enchName === 'sharp') {
+                    hotbar[hotbarSlot] = { ...slot, sharpness: level } as any;
+                    s.setHotbar(hotbar);
+                    addMessage(`✨ Ostrość ${level} zastosowana na: ${BLOCK_DATA[slot.id]?.name ?? 'przedmiot'}!`, 'success');
+                    playSound('levelup');
+                } else if (enchName === 'efficiency' || enchName === 'eff') {
+                    hotbar[hotbarSlot] = { ...slot, efficiency: level } as any;
+                    s.setHotbar(hotbar);
+                    addMessage(`✨ Efektywność ${level} zastosowana na: ${BLOCK_DATA[slot.id]?.name ?? 'przedmiot'}!`, 'success');
+                    playSound('levelup');
+                } else {
+                    addMessage('Nieznane zaklęcie! Dostępne: featherFalling, protection, sharpness, efficiency', 'error');
+                }
+                break;
+            }
+
             default:
                 if (command?.startsWith('/')) {
                     addMessage(`Nieznana komenda: ${command}. Wpisz /help`, 'error');
@@ -373,7 +421,15 @@ const ChatBox: React.FC = () => {
         : messages.filter((m) => now - m.time < FADE_TIME).slice(-5);
 
     return (
-        <div className={`chat-container ${isOpen ? 'chat-open' : 'chat-closed'}`}>
+        <div
+            className={`chat-container ${isOpen ? 'chat-open' : 'chat-closed'}`}
+            onPointerDown={(e) => {
+                if (isOpen) e.stopPropagation();
+            }}
+            onClick={(e) => {
+                if (isOpen) e.stopPropagation();
+            }}
+        >
             <div className="chat-messages" ref={scrollRef}>
                 {visibleMessages.map((msg, i) => (
                     <div

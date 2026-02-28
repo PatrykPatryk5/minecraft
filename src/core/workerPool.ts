@@ -183,6 +183,29 @@ export class WorkerPool {
         }
     }
 
+    /**
+     * Remove queued generation tasks that are no longer in the active chunk keys.
+     * Prevents worker lock-ups and memory leaks when the player is moving fast.
+     */
+    cancelStale(activeKeys: Set<string>): void {
+        const originalLength = this.taskQueue.length;
+        this.taskQueue = this.taskQueue.filter(task => {
+            if (task.type === 'gen') {
+                // Determine the chunk key from the task's arguments
+                const key = `${task.args[0]},${task.args[1]}`;
+                if (!activeKeys.has(key)) {
+                    // Task is stale, discard
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        // Note: we don't resolve the discarded gen tasks here because the callers
+        // (pool.submit callback) handle nulls implicitly or discard them later.
+        // The primary goal is unblocking the queue from thousands of stale chunks.
+    }
+
     terminate(): void {
         for (const w of this.rawWorkers) w.terminate();
         this.rawWorkers = [];

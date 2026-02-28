@@ -104,12 +104,21 @@ export enum BlockType {
     PISTON_HEAD = 110,
     JUKEBOX = 84,
     SPONGE = 85,
+    WET_SPONGE = 120,
     ENCHANTING_TABLE = 86,
     ENDER_CHEST = 87,
     ANVIL = 88,
     BEACON = 89,
     NOTEBLOCK = 91,
     BUTTON = 92,
+    // ─── Utility Items ──────────────────────────────────
+    ICE = 93,
+    SLIME_BLOCK = 94,
+    MAGMA_BLOCK = 95,
+    FIRE = 96,
+    CAMPFIRE = 97,
+    GLASS_PANE = 98,
+    IRON_BARS = 99,
     // ─── Farming ────────────────────────────────────────
     FARMLAND = 160,
     WHEAT_0 = 161,
@@ -355,6 +364,13 @@ export enum BlockType {
     END_CRYSTAL = 800,
     DRAGON_BREATH = 801,
     TOTEM_OF_UNDYING = 802,
+
+    // ─── Miscellaneous & Rare Items ──────────────────────
+    SADDLE = 810,
+    NAME_TAG = 811,
+    LEAD = 812,
+    FISHING_ROD = 813,
+    DIAMOND_HORSE_ARMOR = 814,
 }
 
 // ─── Block Data Interface ────────────────────────────────
@@ -426,11 +442,19 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.DIAMOND_BLOCK]: { name: 'Blok Diamentu', color: '#44eeee', transparent: false, solid: true, breakTime: 5.0, tool: 'pickaxe' },
     [BlockType.EMERALD_BLOCK]: { name: 'Blok Szmaragdu', color: '#22cc44', transparent: false, solid: true, breakTime: 5.0, tool: 'pickaxe' },
     [BlockType.LAPIS_BLOCK]: { name: 'Blok Lapis', color: '#2244aa', transparent: false, solid: true, breakTime: 5.0, tool: 'pickaxe' },
+    // ─── Physics Blocks ─────────────────────────────────
+    [BlockType.ICE]: { name: 'Lód', color: '#77aaff', transparent: true, solid: true, breakTime: 0.5, tool: 'pickaxe' },
+    [BlockType.SLIME_BLOCK]: { name: 'Blok Szlamu', color: '#55cc55', transparent: true, solid: true, breakTime: 0.1, tool: 'hand' },
+    [BlockType.MAGMA_BLOCK]: { name: 'Blok Magmy', color: '#cc4400', ore: '#ffaa00', transparent: false, solid: true, breakTime: 0.5, tool: 'pickaxe', emissive: true, light: 3 },
+    [BlockType.FIRE]: { name: 'Ogień', color: '#ffaa00', transparent: true, solid: false, breakTime: 0.0, light: 15, emissive: true, isItem: false },
+    [BlockType.CAMPFIRE]: { name: 'Ognisko', color: '#dd8833', transparent: true, solid: true, breakTime: 2.0, tool: 'axe', light: 15, emissive: true },
+    [BlockType.GLASS_PANE]: { name: 'Szyba', color: '#aaddff', transparent: true, solid: true, breakTime: 0.3 },
+    [BlockType.IRON_BARS]: { name: 'Kraty', color: '#bbbbbb', transparent: true, solid: true, tool: 'pickaxe', breakTime: 5.0 },
     // ─── Functional Blocks ──────────────────────────────
     [BlockType.CRAFTING]: { name: 'Stół Rzemieślniczy', color: '#b8945f', top: '#8B6B3E', transparent: false, solid: true, breakTime: 2.5, tool: 'axe' },
     [BlockType.FURNACE]: { name: 'Piec', color: '#777777', transparent: false, solid: true, breakTime: 3.5, tool: 'pickaxe' },
     [BlockType.FURNACE_ON]: { name: 'Piec (aktywny)', color: '#997755', transparent: false, solid: true, breakTime: 3.5, tool: 'pickaxe' },
-    [BlockType.CHEST]: { name: 'Skrzynia', color: '#a08050', top: '#907040', transparent: false, solid: true, breakTime: 2.5, tool: 'axe' },
+    [BlockType.CHEST]: { name: 'Skrzynia', color: '#a08050', top: '#907040', transparent: true, solid: true, breakTime: 2.5, tool: 'axe' },
     [BlockType.TNT]: { name: 'TNT', color: '#cc3333', top: '#ddaa44', transparent: false, solid: true, breakTime: 0.0 },
     [BlockType.BOOKSHELF]: { name: 'Biblioteczka', color: '#b8945f', transparent: false, solid: true, breakTime: 1.5, tool: 'axe' },
     [BlockType.TRAPDOOR]: { name: 'Klapa', color: '#806030', transparent: true, solid: true, breakTime: 3.0, tool: 'axe' },
@@ -498,6 +522,12 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.REDSTONE]: { name: 'Redstone', color: '#cc2222', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.QUARTZ]: { name: 'Kwarc', color: '#f0ece4', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.STRING]: { name: 'Nić', color: '#eeeeee', transparent: false, solid: false, breakTime: 0, isItem: true },
+    // ─── Miscellaneous Items ──────────────────────────────
+    [BlockType.SADDLE]: { name: 'Siodło', color: '#8b5a2b', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
+    [BlockType.NAME_TAG]: { name: 'Znacznik', color: '#dddddd', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.LEAD]: { name: 'Smycz', color: '#8b4513', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.FISHING_ROD]: { name: 'Wędka', color: '#b8945f', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 64 },
+    [BlockType.DIAMOND_HORSE_ARMOR]: { name: 'Diamentowa Zbroja Konia', color: '#44ffee', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
     [BlockType.FEATHER]: { name: 'Pióro', color: '#e8e8e8', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.GUNPOWDER]: { name: 'Proch', color: '#555555', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.WHEAT]: { name: 'Pszenica', color: '#dccfa0', transparent: false, solid: false, breakTime: 0, isItem: true },
@@ -522,10 +552,10 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.BUCKET]: { name: 'Wiadro', color: '#aaaaaa', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 16 },
     [BlockType.WATER_BUCKET]: { name: 'Wiadro Wody', color: '#4488cc', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
     [BlockType.LAVA_BUCKET]: { name: 'Wiadro Lawy', color: '#cc6622', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.FLINT_AND_STEEL]: { name: 'Krzesiwo', color: '#aaaaaa', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
+    [BlockType.FLINT_AND_STEEL]: { name: 'Krzesiwo', color: '#aaaaaa', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1, maxDurability: 64 },
     [BlockType.SHEARS]: { name: 'Nożyce', color: '#aaaaaa', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.BOW]: { name: 'Łuk', color: '#a08050', transparent: false, solid: false, breakTime: 0, isItem: true, stackSize: 1 },
-    [BlockType.ARROW]: { name: 'Strzała', color: '#eeeeee', transparent: false, solid: false, breakTime: 0, isItem: true },
+    [BlockType.BOW]: { name: 'Łuk', color: '#855E42', transparent: true, solid: false, breakTime: 0, isItem: true, maxDurability: 384 },
+    [BlockType.ARROW]: { name: 'Strzała', color: '#E5E4E2', transparent: true, solid: false, breakTime: 0, isItem: true, stackSize: 64 },
     [BlockType.COMPASS]: { name: 'Kompas', color: '#cccccc', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.CLOCK]: { name: 'Zegar', color: '#ffd700', transparent: false, solid: false, breakTime: 0, isItem: true },
     // ─── Food ────────────────────────────────────────────
@@ -573,6 +603,8 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.DIAMOND_CHESTPLATE]: { name: 'Diamentowy Napierśnik', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 8, maxDurability: 528 },
     [BlockType.DIAMOND_LEGGINGS]: { name: 'Diamentowe Spodnie', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 6, maxDurability: 495 },
     [BlockType.DIAMOND_BOOTS]: { name: 'Diamentowe Buty', color: '#55ffff', transparent: false, solid: false, breakTime: 0, isItem: true, armorPoints: 3, maxDurability: 429 },
+    // ─── Special Blocks ──────────────────────────────────
+    [BlockType.WET_SPONGE]: { name: 'Mokra Gąbka', color: '#aaaa11', top: '#bbbb11', transparent: false, solid: true, breakTime: 0.6, tool: 'hoe' },
     // ─── Progression Items ───────────────────────────────
     [BlockType.ENDER_PEARL]: { name: 'Perła Endera', color: '#1a7a5e', transparent: false, solid: false, breakTime: 0, isItem: true },
     [BlockType.BLAZE_ROD]: { name: 'Pręt Blaze', color: '#ffaa00', transparent: false, solid: false, breakTime: 0, isItem: true },
@@ -608,7 +640,7 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.JUKEBOX]: { name: 'Szafa Grająca', color: '#6b4226', top: '#8b6240', transparent: false, solid: true, breakTime: 2.0, tool: 'axe' },
     [BlockType.SPONGE]: { name: 'Gąbka', color: '#c2b74e', transparent: false, solid: true, breakTime: 0.6 },
     [BlockType.ENCHANTING_TABLE]: { name: 'Stół Zaklęć', color: '#2b0000', top: '#cc0000', transparent: true, solid: true, breakTime: 5.0, tool: 'pickaxe' },
-    [BlockType.ENDER_CHEST]: { name: 'Skrzynia Endera', color: '#0d1117', transparent: false, solid: true, breakTime: 22.5, tool: 'pickaxe' },
+    [BlockType.ENDER_CHEST]: { name: 'Skrzynia Endera', color: '#0d1117', transparent: true, solid: true, breakTime: 22.5, tool: 'pickaxe' },
     [BlockType.ANVIL]: { name: 'Kowadło', color: '#444444', top: '#555555', transparent: true, solid: true, breakTime: 5.0, tool: 'pickaxe' },
     [BlockType.BEACON]: { name: 'Latarnia', color: '#7ae9e9', transparent: true, solid: true, breakTime: 3.0, emissive: true, light: 15 },
     [BlockType.NOTEBLOCK]: { name: 'Blok Nutowy', color: '#6b4226', top: '#8b5a2b', transparent: false, solid: true, breakTime: 0.8, tool: 'axe' },

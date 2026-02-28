@@ -25,9 +25,9 @@ import useGameStore from '../store/gameStore';
 import { BLOCK_DATA, BlockType, getBlockDrop } from '../core/blockTypes';
 import { getConnection } from '../multiplayer/ConnectionManager';
 import { getSpawnHeight, MAX_HEIGHT } from '../core/terrainGen';
-import { emitBlockBreak } from '../core/particles';
+import { emitBlockBreak, emitLandingDust, emitWaterSplash } from '../core/particles';
 import { playSound, startAmbience, updateListener, updateEnvironment } from '../audio/sounds';
-import { checkWaterFill, spreadWater } from '../core/waterSystem';
+import { checkWaterFill, spreadWater, placeSponge } from '../core/waterSystem';
 import { handleBlockAction, isOnLadder } from '../core/blockActions';
 import { attackMob } from '../mobs/MobSystem';
 import { spreadLava, tickLava, checkLavaFill } from '../core/lavaSystem';
@@ -63,12 +63,66 @@ const AIR_FRICTION = 1.8;
 const WATER_FRICTION = 4;
 const COYOTE_TIME = 0.12;
 const JUMP_BUFFER_TIME = 0.12;
-const JUMP_RELEASE_MULT = 1.0; // Minecraft has constant jump velocity until gravity takes over
+const JUMP_RELEASE_MULT = 1.0;
 const PLACE_REPEAT_INTERVAL = 0.15;
 const FALL_DAMAGE_THRESHOLD = 3;
-const SPRINT_HUNGER_RATE = 0.15; // hunger/sec while sprinting
-const LAVA_DAMAGE_RATE = 4; // hp/sec in lava
-const LAVA_DAMAGE_INTERVAL = 0.5; // seconds between lava damage ticks
+const SPRINT_HUNGER_RATE = 0.15;
+const LAVA_DAMAGE_RATE = 4;
+const LAVA_DAMAGE_INTERVAL = 0.5;
+
+// ─── Weapon Damage Map (by BlockType ID) ─────────────────
+const WEAPON_DAMAGE: Record<number, number> = {
+    [BlockType.WOODEN_SWORD]: 5,
+    [BlockType.STONE_SWORD]: 6,
+    [BlockType.IRON_SWORD]: 7,
+    [BlockType.GOLD_SWORD]: 5,
+    [BlockType.DIAMOND_SWORD]: 8,
+    [BlockType.NETHERITE_SWORD]: 9,
+    [BlockType.WOODEN_AXE]: 4,
+    [BlockType.STONE_AXE]: 5,
+    [BlockType.IRON_AXE]: 6,
+    [BlockType.GOLD_AXE]: 4,
+    [BlockType.DIAMOND_AXE]: 7,
+    [BlockType.NETHERITE_AXE]: 8,
+};
+
+// ─── Tool Type Checkers (by BlockType ID) ────────────────
+const PICKAXE_IDS = new Set([
+    BlockType.WOODEN_PICKAXE, BlockType.STONE_PICKAXE, BlockType.IRON_PICKAXE,
+    BlockType.GOLD_PICKAXE, BlockType.DIAMOND_PICKAXE, BlockType.NETHERITE_PICKAXE,
+]);
+const AXE_IDS = new Set([
+    BlockType.WOODEN_AXE, BlockType.STONE_AXE, BlockType.IRON_AXE,
+    BlockType.GOLD_AXE, BlockType.DIAMOND_AXE, BlockType.NETHERITE_AXE,
+]);
+const SHOVEL_IDS = new Set([
+    BlockType.WOODEN_SHOVEL, BlockType.STONE_SHOVEL, BlockType.IRON_SHOVEL,
+    BlockType.GOLD_SHOVEL, BlockType.DIAMOND_SHOVEL, BlockType.NETHERITE_SHOVEL,
+]);
+const HOE_IDS = new Set([
+    BlockType.WOODEN_HOE, BlockType.STONE_HOE, BlockType.IRON_HOE,
+    BlockType.GOLD_HOE, BlockType.DIAMOND_HOE, BlockType.NETHERITE_HOE,
+]);
+
+// Mining speed multiplier by tool ID (Minecraft-accurate values)
+const TOOL_SPEED: Record<number, number> = {
+    // Pickaxes
+    [BlockType.WOODEN_PICKAXE]: 2, [BlockType.STONE_PICKAXE]: 4,
+    [BlockType.IRON_PICKAXE]: 6, [BlockType.GOLD_PICKAXE]: 12,
+    [BlockType.DIAMOND_PICKAXE]: 8, [BlockType.NETHERITE_PICKAXE]: 9,
+    // Axes
+    [BlockType.WOODEN_AXE]: 2, [BlockType.STONE_AXE]: 4,
+    [BlockType.IRON_AXE]: 6, [BlockType.GOLD_AXE]: 12,
+    [BlockType.DIAMOND_AXE]: 8, [BlockType.NETHERITE_AXE]: 9,
+    // Shovels
+    [BlockType.WOODEN_SHOVEL]: 2, [BlockType.STONE_SHOVEL]: 4,
+    [BlockType.IRON_SHOVEL]: 6, [BlockType.GOLD_SHOVEL]: 12,
+    [BlockType.DIAMOND_SHOVEL]: 8, [BlockType.NETHERITE_SHOVEL]: 9,
+    // Hoes
+    [BlockType.WOODEN_HOE]: 2, [BlockType.STONE_HOE]: 4,
+    [BlockType.IRON_HOE]: 6, [BlockType.GOLD_HOE]: 12,
+    [BlockType.DIAMOND_HOE]: 8, [BlockType.NETHERITE_HOE]: 9,
+};
 
 const Player: React.FC = () => {
     const { camera } = useThree();
@@ -79,6 +133,7 @@ const Player: React.FC = () => {
     const onGround = useRef(false);
     const pos = useRef(new THREE.Vector3(8, 80, 8));
     const highlightRef = useRef<THREE.Mesh>(null);
+    const miningCrackRef = useRef<THREE.Mesh>(null);
     const isFlying = useRef(false);
     const lastJumpTime = useRef(0);
     const stepTimer = useRef(0);
@@ -97,16 +152,20 @@ const Player: React.FC = () => {
     const oxygenTimer = useRef(0);
     const drowningTimer = useRef(0);
     const portalCooldown = useRef(0);
+    const pendingPortalRef = useRef<{ dim: 'overworld' | 'nether' | 'end'; x: number; z: number } | null>(null);
     const bowCharge = useRef(0);
     const isChargingBow = useRef(false);
     const rayDirRef = useRef(new THREE.Vector3());
     const forwardVec = useRef(new THREE.Vector3());
     const rightVec = useRef(new THREE.Vector3());
     const flatForwardVec = useRef(new THREE.Vector3());
+    const moveVec = useRef(new THREE.Vector3());
+    const UP_VEC = useRef(new THREE.Vector3(0, 1, 0));
     const coyoteTimer = useRef(0);
     const jumpBufferTimer = useRef(0);
     const jumpHeldLast = useRef(false);
     const crouchVisualOffset = useRef(0);
+    const stepVisualOffset = useRef(0);
     const leftMouseHeld = useRef(false);
     const rightMouseHeld = useRef(false);
     const rightRepeatTimer = useRef(0);
@@ -120,26 +179,34 @@ const Player: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        // Safe spawn logic:
-        // 1. Get terrain height at 0,0
-        // 2. Add player height + buffer
-        const spawnX = 0;
-        const spawnZ = 0;
-        let y = getSpawnHeight(spawnX, spawnZ);
+        const defaultPos = storeRef.current.playerPos;
+        const isDefault = defaultPos[0] === 8 && defaultPos[1] === 80 && defaultPos[2] === 8;
 
-        // If y is remarkably low (e.g. 0), it might mean the chunk isn't loaded yet.
-        // In that case, spawn high up (80) to fall safely.
-        if (y <= 5) y = 80;
-        if (y < 65) y = 65; // Minimum height (sea level)
+        if (isDefault || defaultPos[1] < 0) {
+            // Safe spawn logic for new game or fell in void while offline
+            const spawnX = defaultPos[0];
+            const spawnZ = defaultPos[2];
+            let y = getSpawnHeight(spawnX, spawnZ);
 
-        pos.current.set(spawnX, y + 2, spawnZ);
+            if (y <= 5) y = 80;
+            if (y < 65) y = 65; // Minimum height (sea level)
+
+            pos.current.set(spawnX, y + 2, spawnZ);
+            fallStart.current = y + 2;
+        } else {
+            // Respect loaded save state
+            pos.current.set(defaultPos[0], defaultPos[1], defaultPos[2]);
+            fallStart.current = defaultPos[1];
+            // Respect loaded rotation (camera)
+            const rot = storeRef.current.playerRot;
+            camera.rotation.set(rot[1], rot[0], 0);
+        }
+
         velocity.current.set(0, 0, 0);
         onGround.current = false;
-        fallStart.current = y + 2;
 
         // Force camera to spawn
-        camera.position.set(spawnX, y + 2, spawnZ);
-        camera.rotation.set(0, 0, 0);
+        camera.position.copy(pos.current);
     }, []); // Run once on mount
 
     // Start ambience on first interaction
@@ -154,23 +221,49 @@ const Player: React.FC = () => {
         return () => window.removeEventListener('click', start);
     }, []);
 
+    // Handle physical knockbacks (Explosions)
+    useEffect(() => {
+        const handleImpulse = (e: CustomEvent<{ x: number, y: number, z: number }>) => {
+            if (useGameStore.getState().gameMode !== 'spectator') {
+                velocity.current.x += e.detail.x;
+                velocity.current.y += e.detail.y;
+                velocity.current.z += e.detail.z;
+                onGround.current = false;
+            }
+        };
+        window.addEventListener('player-impulse', handleImpulse as EventListener);
+        return () => window.removeEventListener('player-impulse', handleImpulse as EventListener);
+    }, []);
+
+    // ─── Block Lookup Cache (Cleared per frame) ────────────
+    const blockCache = useRef(new Map<string, number>());
+    const getCachedBlock = useCallback((bx: number, by: number, bz: number) => {
+        const key = `${bx},${by},${bz}`;
+        const cache = blockCache.current;
+        let type = cache.get(key);
+        if (type !== undefined) return type;
+        type = storeRef.current.getBlock(bx, by, bz);
+        cache.set(key, type);
+        return type;
+    }, []);
+
     // ─── Collision ─────────────────────────────────────────
     const isSolid = useCallback((x: number, y: number, z: number): boolean => {
         const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
-        const type = storeRef.current.getBlock(bx, by, bz);
+        const type = getCachedBlock(bx, by, bz);
         if (!type) return false;
         return BLOCK_DATA[type]?.solid ?? false;
-    }, []);
+    }, [getCachedBlock]);
 
     const isInWater = useCallback((x: number, y: number, z: number): boolean => {
-        const type = storeRef.current.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
+        const type = getCachedBlock(Math.floor(x), Math.floor(y), Math.floor(z));
         return type === BlockType.WATER;
-    }, []);
+    }, [getCachedBlock]);
 
     const isInLava = useCallback((x: number, y: number, z: number): boolean => {
-        const type = storeRef.current.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
+        const type = getCachedBlock(Math.floor(x), Math.floor(y), Math.floor(z));
         return type === BlockType.LAVA;
-    }, []);
+    }, [getCachedBlock]);
 
     // ─── Raycast ───────────────────────────────────────────
     const raycastBlock = useCallback((): { block: [number, number, number]; place: [number, number, number] } | null => {
@@ -182,14 +275,14 @@ const Player: React.FC = () => {
             const bx = Math.floor(origin.x + dir.x * t);
             const by = Math.floor(origin.y + dir.y * t);
             const bz = Math.floor(origin.z + dir.z * t);
-            const type = storeRef.current.getBlock(bx, by, bz);
+            const type = getCachedBlock(bx, by, bz);
             if (type && BLOCK_DATA[type]?.solid) {
                 return { block: [bx, by, bz], place: [px, py, pz] };
             }
             px = bx; py = by; pz = bz;
         }
         return null;
-    }, [camera]);
+    }, [camera, getCachedBlock]);
 
     // ─── Bump Version ──────────────────────────────────────
     const bumpAround = useCallback((wx: number, wz: number) => {
@@ -220,20 +313,12 @@ const Player: React.FC = () => {
                 miningHeld.current = true;
                 // ── Break Block or Attack Mob ──
                 const dir = camera.getWorldDirection(new THREE.Vector3());
-                let damage = 2; // Base fist damage
-                if (selected) {
-                    const toolName = BLOCK_DATA[selected]?.name?.toLowerCase() || '';
-                    if (toolName.includes('miecz')) {
-                        if (toolName.includes('diament')) damage = 7;
-                        else if (toolName.includes('żelaz')) damage = 6;
-                        else if (toolName.includes('kamien')) damage = 5;
-                        else damage = 4;
-                    } else if (toolName.includes('siekier')) {
-                        if (toolName.includes('diament')) damage = 6;
-                        else if (toolName.includes('żelaz')) damage = 5;
-                        else damage = 3;
-                    }
-                }
+                // Use ID-based damage map for accuracy
+                let damage = selected ? (WEAPON_DAMAGE[selected] ?? 2) : 2;
+                // Sharpness enchant: +0.5 per level (rounds to +1 per 2 levels)
+                const heldSlotForAtk = s.hotbar[s.hotbarSlot];
+                const sharpLevel = (heldSlotForAtk as any)?.sharpness ?? 0;
+                if (sharpLevel > 0) damage += Math.ceil(sharpLevel * 0.5);
 
                 const hitMob = attackMob(
                     pos.current.x, pos.current.y, pos.current.z,
@@ -384,6 +469,15 @@ const Player: React.FC = () => {
                         return;
                     }
                 }
+                if (selected === BlockType.FLINT_AND_STEEL) {
+                    if (py > hit.block[1]) { // Only place fire on top of blocks
+                        s.addBlock(px, py, pz, BlockType.FIRE);
+                        s.damageTool(s.hotbarSlot);
+                        playSound('place', [px, py, pz]);
+                        bumpAround(px, pz);
+                        return;
+                    }
+                }
 
                 if (BLOCK_DATA[selected]?.isItem) return;
 
@@ -392,6 +486,14 @@ const Player: React.FC = () => {
                 const plX = Math.floor(pos.current.x);
                 const plZ = Math.floor(pos.current.z);
                 if (px === plX && pz === plZ && py >= feet && py <= head) return;
+
+                // Prevent placing block inside a currently falling block (prevents massive physics flying glitches)
+                const isInsideFallingBlock = s.fallingBlocks.some(fb =>
+                    Math.abs(fb.pos[0] - (px + 0.5)) < 0.8 &&
+                    Math.abs(fb.pos[1] - (py + 0.5)) < 0.8 &&
+                    Math.abs(fb.pos[2] - (pz + 0.5)) < 0.8
+                );
+                if (isInsideFallingBlock) return;
 
                 if (selected === BlockType.BED) {
                     import('../core/blockActions').then(({ handleBedPlacement }) => {
@@ -522,6 +624,9 @@ const Player: React.FC = () => {
         const s = storeRef.current;
         if (s.activeOverlay !== 'none' || !s.isLocked || s.screen !== 'playing') return;
 
+        // Clear cache at the start of the frame so physics/raycasts always see fresh data
+        blockCache.current.clear();
+
         if (isChargingBow.current) {
             bowCharge.current += rawDelta;
         }
@@ -544,9 +649,39 @@ const Player: React.FC = () => {
             const right = rightVec.current;
             const flatForward = flatForwardVec.current;
 
+            // ─── Pending Portal Teleport (Wait for chunk) ────────
+            if (pendingPortalRef.current) {
+                const pend = pendingPortalRef.current;
+                if (s.dimension === pend.dim) {
+                    const cx = Math.floor(pend.x / 16);
+                    const cz = Math.floor(pend.z / 16);
+                    const key = `${cx},${cz}`;
+                    if (s.chunks[key] || pend.dim === 'end') {
+                        let sy = 65;
+                        if (pend.dim === 'end') {
+                            sy = 65;
+                            p.set(0, sy, 0);
+                        } else {
+                            const searchRange = pend.dim === 'nether' ? [32, 110] : [62, 150];
+                            sy = getSafeHeight(pend.x, pend.z, searchRange as [number, number]);
+                            p.set(pend.x + 0.5, sy + 1.5, pend.z + 0.5);
+                            buildNetherPortalSafe(pend.x, sy, pend.z);
+                        }
+                        vel.set(0, 0, 0);
+                        fallStart.current = sy + 1.5;
+                        playSound('portal');
+                        pendingPortalRef.current = null;
+                    } else {
+                        vel.set(0, 0, 0);
+                        p.y = 200; // Suspend high up to avoid suffocation
+                    }
+                }
+                continue; // Skip the rest of the physical tick
+            }
+
             camera.getWorldDirection(forward);
             flatForward.copy(forward); flatForward.y = 0; flatForward.normalize();
-            right.crossVectors(flatForward, new THREE.Vector3(0, 1, 0)).normalize();
+            right.crossVectors(flatForward, UP_VEC.current).normalize();
 
             const k = keys.current ?? {};
             const jumpHeld = !!k.Space;
@@ -611,6 +746,7 @@ const Player: React.FC = () => {
                                         playSound('place', [px, py, pz]);
                                         if (held === BlockType.WATER) spreadWater(px, py, pz);
                                         if (held === BlockType.LAVA) spreadLava(px, py, pz);
+                                        if (held === BlockType.SPONGE) placeSponge(px, py, pz);
                                         checkGravityBlock(px, py, pz);
                                     }
                                 }
@@ -624,7 +760,7 @@ const Player: React.FC = () => {
 
             // ─── Spectator ───────────────────────────────────
             if (mode === 'spectator') {
-                const move = new THREE.Vector3();
+                const move = moveVec.current.set(0, 0, 0);
                 const spd = k.ShiftLeft ? SPECTATOR_SPEED * 2 : SPECTATOR_SPEED;
                 if (k.KeyW) move.add(forward);
                 if (k.KeyS) move.sub(forward);
@@ -657,7 +793,7 @@ const Player: React.FC = () => {
             const flying = mode === 'creative' && isFlying.current;
             const baseSpeed = flying ? FLY_SPEED : (isSprinting ? SPRINT_SPEED : WALK_SPEED);
             const speed = inWater ? SWIM_SPEED : (isSneaking && !flying ? WALK_SPEED * CROUCH_SPEED_MULT : baseSpeed);
-            const move = new THREE.Vector3();
+            const move = moveVec.current.set(0, 0, 0);
             if (k.KeyW) move.add(flatForward);
             if (k.KeyS) move.sub(flatForward);
             if (k.KeyA) move.sub(right);
@@ -666,8 +802,11 @@ const Player: React.FC = () => {
             if (hasMoveInput) move.normalize().multiplyScalar(speed);
 
             // Minecraft-like inertia: acceleration + friction instead of instant velocity snap.
-            const accel = inWater ? WATER_ACCEL : (onGround.current ? GROUND_ACCEL : AIR_ACCEL);
-            const friction = inWater ? WATER_FRICTION : (onGround.current ? GROUND_FRICTION : AIR_FRICTION);
+            const blockBelow = getCachedBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
+            const isIce = blockBelow === BlockType.ICE;
+
+            const accel = inWater ? WATER_ACCEL : (onGround.current ? (isIce ? 2.5 : GROUND_ACCEL) : AIR_ACCEL);
+            const friction = inWater ? WATER_FRICTION : (onGround.current ? (isIce ? 1.5 : GROUND_FRICTION) : AIR_FRICTION);
             const accelLerp = Math.min(1, accel * dt);
             vel.x += (move.x - vel.x) * accelLerp;
             vel.z += (move.z - vel.z) * accelLerp;
@@ -679,6 +818,7 @@ const Player: React.FC = () => {
 
             const crouchTarget = isSneaking && onGround.current && !flying ? -CROUCH_CAMERA_DROP : 0;
             crouchVisualOffset.current += (crouchTarget - crouchVisualOffset.current) * Math.min(1, dt * 12);
+            stepVisualOffset.current += (0 - stepVisualOffset.current) * Math.min(1, dt * 15);
 
             if (flying) {
                 vel.y = 0;
@@ -738,7 +878,7 @@ const Player: React.FC = () => {
                     const stepInterval = isSneaking ? 0.62 : (isSprinting ? 0.3 : 0.45);
                     if (stepTimer.current > stepInterval) {
                         stepTimer.current = 0;
-                        const blockBelow = storeRef.current.getBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
+                        const blockBelow = getCachedBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
                         let stepSound: any = 'grass_step';
                         if (blockBelow) {
                             const data = BLOCK_DATA[blockBelow];
@@ -803,6 +943,7 @@ const Player: React.FC = () => {
                 if (!hasSupportBelow(p.x, testZ)) vel.z = 0;
             }
 
+            const wasY = p.y;
             const nx = p.x + vel.x * dt;
             if (collidesAt(nx, p.y, p.z)) {
                 if (canStepTo(nx, p.z)) {
@@ -829,6 +970,10 @@ const Player: React.FC = () => {
                 p.z = nz;
             }
 
+            if (p.y > wasY && p.y - wasY <= STEP_HEIGHT) {
+                stepVisualOffset.current -= (p.y - wasY); // Smooth out the snap
+            }
+
             const ny = p.y + vel.y * dt;
             const wasInAir = !onGround.current;
             onGround.current = false;
@@ -840,25 +985,65 @@ const Player: React.FC = () => {
                 ) {
                     p.y = Math.floor(ny - PLAYER_HEIGHT) + 1 + PLAYER_HEIGHT;
 
-                    // ─── Fall Damage ───────────────────────────
+                    // ─── Fall Damage & Bouncing ────────────────
+                    // MINECRAFT RULE: Armor NEVER reduces fall damage.
+                    // Only Feather Falling enchantment (boots) reduces it.
                     const fallDist = fallStart.current - p.y;
-                    if (wasInAir && mode === 'survival' && !inWater) {
-                        if (fallDist > FALL_DAMAGE_THRESHOLD) {
-                            const damage = Math.floor(fallDist - FALL_DAMAGE_THRESHOLD);
-                            if (damage > 0) {
-                                s.takeDamage(damage, { ignoreArmor: true });
-                                playSound('hurt', [p.x, p.y, p.z]);
+                    const blockBelowImpact = getCachedBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
+
+                    if (blockBelowImpact === BlockType.SLIME_BLOCK && !isSneaking) {
+                        // Slime Block Bounce
+                        if (fallDist > 1.5 && Math.abs(vel.y) > 5) {
+                            vel.y = Math.abs(vel.y) * 0.8; // Lose 20% velocity on max bounce
+                            onGround.current = false;
+                            p.y += 0.05; // Pop slightly above to prevent immediate re-collision
+                            fallStart.current = p.y; // reset fall dist
+                            playSound('slime_step', [p.x, p.y, p.z]);
+                        } else {
+                            vel.y = 0;
+                            onGround.current = true;
+                            isFlying.current = false;
+                            fallStart.current = p.y;
+                        }
+                    } else {
+                        if (wasInAir && mode === 'survival' && !inWater) {
+                            if (fallDist > FALL_DAMAGE_THRESHOLD) {
+                                let damage = Math.floor(fallDist - FALL_DAMAGE_THRESHOLD);
+
+                                // Reduce damage on hay bales
+                                if (blockBelowImpact === BlockType.HAY_BALE) {
+                                    damage = Math.floor(damage * 0.2);
+                                }
+
+                                // Feather Falling: -12% per level (max IV = 48% reduction)
+                                const bootsSlot = s.armor?.boots;
+                                if (bootsSlot?.id && bootsSlot.featherFalling) {
+                                    const ffLevel = Math.min(4, bootsSlot.featherFalling);
+                                    damage = Math.floor(damage * (1 - ffLevel * 0.12));
+                                }
+                                if (damage > 0) {
+                                    // ignoreArmor: true — armor NEVER reduces fall damage
+                                    s.takeDamage(damage, { ignoreArmor: true, source: 'Spadłeś z dużej wysokości!' });
+                                    playSound('hurt', [p.x, p.y, p.z]);
+                                }
+                            }
+                            playSound('land', [p.x, p.y - PLAYER_HEIGHT, p.z]);
+                            // Landing dust on impact
+                            if (blockBelowImpact && blockBelowImpact !== 0) {
+                                emitLandingDust(p.x, p.y - PLAYER_HEIGHT, p.z, blockBelowImpact);
+                            }
+                        } else if (fallDist > 1) {
+                            playSound('land', [p.x, p.y - PLAYER_HEIGHT, p.z]);
+                            if (blockBelowImpact && blockBelowImpact !== 0) {
+                                emitLandingDust(p.x, p.y - PLAYER_HEIGHT, p.z, blockBelowImpact);
                             }
                         }
-                        playSound('land', [p.x, p.y - PLAYER_HEIGHT, p.z]);
-                    } else if (fallDist > 1) {
-                        playSound('land', [p.x, p.y - PLAYER_HEIGHT, p.z]);
-                    }
 
-                    vel.y = 0;
-                    onGround.current = true;
-                    isFlying.current = false;
-                    fallStart.current = p.y;
+                        vel.y = 0;
+                        onGround.current = true;
+                        isFlying.current = false;
+                        fallStart.current = p.y;
+                    }
                 } else { p.y = ny; }
             } else {
                 if (!flying && (
@@ -901,24 +1086,37 @@ const Player: React.FC = () => {
                 starvationTimer.current += dt;
                 if (starvationTimer.current > 4) {
                     starvationTimer.current = 0;
-                    s.takeDamage(1, { ignoreArmor: true });
+                    s.takeDamage(1, { ignoreArmor: true, source: 'Umarłeś z głodu!' });
                 }
             } else {
                 starvationTimer.current = 0;
             }
 
-            // ─── Lava Damage ─────────────────────────────────
             const inLava = isInLava(p.x, p.y - PLAYER_HEIGHT + 0.1, p.z) || isInLava(p.x, p.y - 0.5, p.z);
-            if (mode === 'survival' && inLava) {
+            const inFire = getCachedBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT + 0.1), Math.floor(p.z)) === BlockType.FIRE || getCachedBlock(Math.floor(p.x), Math.floor(p.y - 0.5), Math.floor(p.z)) === BlockType.FIRE;
+            const onMagma = onGround.current && !isSneaking && blockBelow === BlockType.MAGMA_BLOCK;
+            const onCampfire = onGround.current && blockBelow === BlockType.CAMPFIRE;
+            const onHotBlock = onMagma || onCampfire;
+
+            if (mode === 'survival' && (inLava || inFire)) {
                 lavaTimer.current += dt;
                 if (lavaTimer.current >= LAVA_DAMAGE_INTERVAL) {
                     lavaTimer.current = 0;
-                    s.takeDamage(LAVA_DAMAGE_RATE, { ignoreArmor: true });
+                    s.takeDamage(inLava ? LAVA_DAMAGE_RATE : 1, { ignoreArmor: true, source: inLava ? 'Spłonąłeś w lawie!' : 'Spłonąłeś w ogniu!' });
                     playSound('hurt');
                 }
-                // Slow movement in lava
-                vel.x *= 0.4;
-                vel.z *= 0.4;
+                if (inLava) {
+                    // Slow movement in lava
+                    vel.x *= 0.4;
+                    vel.z *= 0.4;
+                }
+            } else if (mode === 'survival' && onHotBlock) {
+                lavaTimer.current += dt;
+                if (lavaTimer.current >= LAVA_DAMAGE_INTERVAL) {
+                    lavaTimer.current = 0;
+                    s.takeDamage(1, { ignoreArmor: true, source: onCampfire ? 'Poparzyłeś się w ognisku!' : 'Stanąłeś na bloku magmy!' });
+                    playSound('hurt');
+                }
             } else {
                 lavaTimer.current = 0;
             }
@@ -947,7 +1145,7 @@ const Player: React.FC = () => {
                             // Drowning damage
                             drowningTimer.current += dt; // Accumulate separate timer for damage
                             if (drowningTimer.current >= 1.0) {
-                                s.takeDamage(2, { ignoreArmor: true });
+                                s.takeDamage(2, { ignoreArmor: true, source: 'Utonąłeś!' });
                                 playSound('hurt');
                                 drowningTimer.current = 0;
                             }
@@ -956,7 +1154,7 @@ const Player: React.FC = () => {
                         // Only accumulate damage timer if O2 is empty
                         drowningTimer.current += dt;
                         if (drowningTimer.current >= 1.0) {
-                            s.takeDamage(2, { ignoreArmor: true });
+                            s.takeDamage(2, { ignoreArmor: true, source: 'Utonąłeś!' });
                             playSound('hurt');
                             drowningTimer.current = 0;
                         }
@@ -979,7 +1177,7 @@ const Player: React.FC = () => {
                 const hitNew = raycastBlock();
                 if (hitNew) {
                     const [tbx, tby, tbz] = hitNew.block;
-                    const tType = s.getBlock(tbx, tby, tbz);
+                    const tType = getCachedBlock(tbx, tby, tbz);
                     if (tType && tType !== BlockType.BEDROCK) {
                         if (mode === 'creative') {
                             emitBlockBreak(tbx, tby, tbz, tType);
@@ -1023,29 +1221,34 @@ const Player: React.FC = () => {
                         miningTarget.current = currentKey;
                         miningProgress.current = 0;
                     }
-                    const mType = s.getBlock(mbx, mby, mbz);
+                    const mType = getCachedBlock(mbx, mby, mbz);
                     if (mType && mType !== BlockType.BEDROCK) {
                         const bData = BLOCK_DATA[mType];
                         if (bData) {
-                            // Tool speed multiplier
+                            // Tool speed multiplier (ID-based, accurate to Minecraft)
                             let breakTime = bData.breakTime;
                             const selectedItem = s.getSelectedBlock();
                             if (selectedItem && BLOCK_DATA[selectedItem]?.isItem) {
-                                // Check if tool matches block type
-                                const toolName = BLOCK_DATA[selectedItem]?.name?.toLowerCase() ?? '';
-                                const isPickaxe = toolName.includes('kilof');
-                                const isAxe = toolName.includes('siekier');
-                                const isShovel = toolName.includes('łopat');
-                                const matchesTool = (bData.tool === 'pickaxe' && isPickaxe) ||
+                                const isPickaxe = PICKAXE_IDS.has(selectedItem);
+                                const isAxe = AXE_IDS.has(selectedItem);
+                                const isShovel = SHOVEL_IDS.has(selectedItem);
+                                const isHoe = HOE_IDS.has(selectedItem);
+                                const matchesTool =
+                                    (bData.tool === 'pickaxe' && isPickaxe) ||
                                     (bData.tool === 'axe' && isAxe) ||
-                                    (bData.tool === 'shovel' && isShovel);
+                                    (bData.tool === 'shovel' && isShovel) ||
+                                    (bData.tool === 'hoe' && isHoe);
                                 if (matchesTool) {
-                                    // Tier bonus: higher tier = faster
-                                    const tierMultiplier = toolName.includes('diament') ? 8 :
-                                        toolName.includes('żelaz') ? 6 :
-                                            toolName.includes('złot') ? 10 :
-                                                toolName.includes('kamien') ? 4 : 2;
-                                    breakTime /= tierMultiplier;
+                                    const tier = TOOL_SPEED[selectedItem] ?? 1;
+                                    breakTime /= tier;
+                                    // Efficiency enchant: reduces break time further
+                                    // Formula: speed += level^2 + 1 (Minecraft Java)
+                                    const heldSlot = s.hotbar[s.hotbarSlot];
+                                    const effLevel = (heldSlot as any)?.efficiency ?? 0;
+                                    if (effLevel > 0) {
+                                        const effBonus = effLevel * effLevel + 1;
+                                        breakTime /= (1 + effBonus / tier);
+                                    }
                                 }
                             }
                             miningProgress.current += dt / Math.max(0.05, breakTime);
@@ -1086,10 +1289,12 @@ const Player: React.FC = () => {
                     miningTarget.current = null;
                     miningProgress.current = 0;
                     s.setMiningProgress(0);
+                    if (miningCrackRef.current) miningCrackRef.current.visible = false;
                 }
             } else if (!miningHeld.current && miningProgress.current > 0) {
                 miningProgress.current = 0;
                 s.setMiningProgress(0);
+                if (miningCrackRef.current) miningCrackRef.current.visible = false;
             }
 
             // ─── Void Safety ─────────────────────────────────
@@ -1110,24 +1315,18 @@ const Player: React.FC = () => {
             }
 
             // ─── Portal Checks ───────────────────────────────
-            const curBlock = s.getBlock(Math.floor(p.x), Math.floor(p.y + 0.1), Math.floor(p.z));
-            const legBlock = s.getBlock(Math.floor(p.x), Math.floor(p.y - 0.5), Math.floor(p.z));
+            const curBlock = getCachedBlock(Math.floor(p.x), Math.floor(p.y + 0.1), Math.floor(p.z));
+            const legBlock = getCachedBlock(Math.floor(p.x), Math.floor(p.y - 0.5), Math.floor(p.z));
 
             if (portalCooldown.current > 0) {
                 portalCooldown.current -= dt;
             } else if (curBlock === BlockType.END_PORTAL_BLOCK || legBlock === BlockType.END_PORTAL_BLOCK) {
                 if (s.dimension === 'overworld' || s.dimension === 'nether') {
                     s.setDimension('end');
-                    p.set(0, 65, 0);
-                    vel.set(0, 0, 0);
-                    fallStart.current = 65;
-                    playSound('portal');
+                    pendingPortalRef.current = { dim: 'end', x: 0, z: 0 };
                 } else if (s.dimension === 'end') {
                     s.setDimension('overworld');
-                    const h = getSpawnHeight(8, 8);
-                    p.set(8, h + 2, 8);
-                    vel.set(0, 0, 0);
-                    fallStart.current = h + 2;
+                    pendingPortalRef.current = { dim: 'overworld', x: 8, z: 8 };
                     if (s.dragonDefeated) {
                         s.setScreen('credits');
                     }
@@ -1136,26 +1335,10 @@ const Player: React.FC = () => {
                 portalCooldown.current = 4.0; // 4 seconds cooldown
                 if (s.dimension === 'overworld') {
                     s.setDimension('nether');
-                    const nx = Math.floor(p.x / 8);
-                    const nz = Math.floor(p.z / 8);
-                    // Search for a safe height in Nether (typical interior is 32-110)
-                    const ny = getSafeHeight(nx, nz, [32, 110]);
-
-                    p.set(nx + 0.5, ny + 1.5, nz + 0.5);
-                    vel.set(0, 0, 0);
-                    buildNetherPortalSafe(nx, ny, nz);
-                    playSound('portal');
+                    pendingPortalRef.current = { dim: 'nether', x: p.x / 8, z: p.z / 8 };
                 } else if (s.dimension === 'nether') {
                     s.setDimension('overworld');
-                    const ox = Math.floor(p.x * 8);
-                    const oz = Math.floor(p.z * 8);
-                    // Search for ground in Overworld (0-150)
-                    const oy = getSafeHeight(ox, oz, [62, 150]);
-
-                    p.set(ox + 0.5, oy + 1.5, oz + 0.5);
-                    vel.set(0, 0, 0);
-                    buildNetherPortalSafe(ox, oy, oz);
-                    playSound('portal');
+                    pendingPortalRef.current = { dim: 'overworld', x: p.x * 8, z: p.z * 8 };
                 }
             }
 
@@ -1164,7 +1347,7 @@ const Player: React.FC = () => {
                 stepTimer.current += dt;
                 const interval = isSneaking ? 0.62 : (isSprinting ? 0.32 : 0.45);
                 if (stepTimer.current > interval) {
-                    const blockBelow = s.getBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
+                    const blockBelow = getCachedBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
                     let stepSound: any = 'step';
                     if (blockBelow && BLOCK_DATA[blockBelow]) {
                         const name = BLOCK_DATA[blockBelow].name.toLowerCase();
@@ -1187,7 +1370,19 @@ const Player: React.FC = () => {
 
         // ── Camera sync (runs every frame for smooth visuals) ──
         camera.position.copy(pos.current);
-        camera.position.y += bobY + crouchVisualOffset.current;
+        camera.position.y += bobY + crouchVisualOffset.current + stepVisualOffset.current;
+
+        // ── Bow FOV Zoom ──
+        const baseFov = 75;
+        if (isChargingBow.current) {
+            const chargePower = Math.min(1.0, bowCharge.current);
+            const targetFov = baseFov - chargePower * 20; // Zoom from 75 → 55
+            (camera as THREE.PerspectiveCamera).fov += (targetFov - (camera as THREE.PerspectiveCamera).fov) * 0.15;
+            (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
+        } else if ((camera as THREE.PerspectiveCamera).fov < baseFov - 0.5) {
+            (camera as THREE.PerspectiveCamera).fov += (baseFov - (camera as THREE.PerspectiveCamera).fov) * 0.2;
+            (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
+        }
 
         const pp = s.playerPos;
         pp[0] = pos.current.x; pp[1] = pos.current.y; pp[2] = pos.current.z;
@@ -1204,15 +1399,37 @@ const Player: React.FC = () => {
             });
         }
 
-        // ─── Block Highlight ─────────────────────────────────
+        // ─── Block Highlight & Mining Crack ──────────────────
         const hit = raycastBlock();
         if (highlightRef.current) {
             if (hit && s.gameMode !== 'spectator') {
                 highlightRef.current.position.set(hit.block[0] + 0.5, hit.block[1] + 0.5, hit.block[2] + 0.5);
                 highlightRef.current.visible = true;
                 s.setLookingAt(hit.block);
+
+                // Update mining crack visuals
+                if (miningCrackRef.current && miningTarget.current === `${hit.block[0]},${hit.block[1]},${hit.block[2]}`) {
+                    const prog = Math.min(1, Math.max(0, s.miningProgressValue));
+                    if (prog > 0) {
+                        miningCrackRef.current.position.set(hit.block[0] + 0.5, hit.block[1] + 0.5, hit.block[2] + 0.5);
+                        miningCrackRef.current.visible = true;
+                        // Use CSS scale-like trick by shrinking the "crack" slightly inwards to avoid z-fighting
+                        miningCrackRef.current.scale.setScalar(1.005);
+                        (miningCrackRef.current.material as THREE.MeshBasicMaterial).opacity = prog * 0.8;
+                        (highlightRef.current.material as THREE.MeshBasicMaterial).opacity = 0.4 + (prog * 0.4);
+                    } else {
+                        miningCrackRef.current.visible = false;
+                        (highlightRef.current.material as THREE.MeshBasicMaterial).opacity = 0.4;
+                    }
+                } else if (miningCrackRef.current) {
+                    miningCrackRef.current.visible = false;
+                    (highlightRef.current.material as THREE.MeshBasicMaterial).opacity = 0.4;
+                }
+
             } else {
                 highlightRef.current.visible = false;
+                if (miningCrackRef.current) miningCrackRef.current.visible = false;
+                (highlightRef.current.material as THREE.MeshBasicMaterial).opacity = 0.4;
                 s.setLookingAt(null);
             }
         }
@@ -1241,8 +1458,13 @@ const Player: React.FC = () => {
             </RigidBody>
             {/* Selection highlight */}
             <mesh ref={highlightRef} visible={false}>
-                <boxGeometry args={[1.01, 1.01, 1.01]} />
-                <meshBasicMaterial color="#ffffff" wireframe transparent opacity={0.4} />
+                <boxGeometry args={[1.002, 1.002, 1.002]} />
+                <meshBasicMaterial color="#000000" wireframe transparent opacity={0.4} />
+            </mesh>
+            {/* Mining crack overlay */}
+            <mesh ref={miningCrackRef} visible={false}>
+                <boxGeometry args={[1, 1, 1]} />
+                <meshBasicMaterial color="#000000" transparent opacity={0.5} wireframe />
             </mesh>
         </>
     );

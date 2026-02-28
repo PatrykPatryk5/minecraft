@@ -78,6 +78,7 @@ export class TerrainWorker {
 
         const solid = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[], lightEmit: [] as number[] };
         const water = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[], lightEmit: [] as number[] };
+        const chestCoords: { x: number, y: number, z: number }[] = [];
         let solidIdx = 0;
         let waterIdx = 0;
 
@@ -97,6 +98,12 @@ export class TerrainWorker {
                     const bt = raw & 0x0FFF;
                     if (!bt) continue;
 
+                    // Chests are rendered as distinct entities via React components (AnimatedChest)
+                    if (bt === BlockType.CHEST || bt === BlockType.ENDER_CHEST) {
+                        if (lod === 0) chestCoords.push({ x: lx, y, z: lz });
+                        continue;
+                    }
+
                     const isLiquidBlock = bt === BlockType.WATER || bt === BlockType.LAVA;
                     const target = isLiquidBlock ? water : solid;
 
@@ -104,7 +111,10 @@ export class TerrainWorker {
                         const face = FACES[f];
 
                         // Visibility check accounting for LOD step
-                        const nbt = getBlockAt(lx + face.dir[0] * step, y + face.dir[1] * step, lz + face.dir[2] * step);
+                        const nx = lx + face.dir[0] * step;
+                        const ny = y + face.dir[1] * step;
+                        const nz = lz + face.dir[2] * step;
+                        const nbt = padded[(nx + 1) * PH * PD + (ny + 1) * PD + (nz + 1)];
 
                         let visible = false;
                         if (nbt === 0x7FFF) visible = true;
@@ -132,14 +142,21 @@ export class TerrainWorker {
                                 const corner = face.corners[i];
                                 const ox = corner[0] * 2 - 1, oy = corner[1] * 2 - 1, oz = corner[2] * 2 - 1;
                                 let aoLevel = 0;
+                                // Optimized padding access
                                 if (Math.abs(dx) === 1) {
-                                    const s1 = isSolidAt(lx + dx, y + corner[1], lz + oz), s2 = isSolidAt(lx + dx, y + oy, lz + corner[2]), c = isSolidAt(lx + dx, y + oy, lz + oz);
+                                    const s1 = padded[(lx + dx + 1) * PH * PD + (y + corner[1] + 1) * PD + (lz + oz + 1)] > 0 && !isTransparent(padded[(lx + dx + 1) * PH * PD + (y + corner[1] + 1) * PD + (lz + oz + 1)]);
+                                    const s2 = padded[(lx + dx + 1) * PH * PD + (y + oy + 1) * PD + (lz + corner[2] + 1)] > 0 && !isTransparent(padded[(lx + dx + 1) * PH * PD + (y + oy + 1) * PD + (lz + corner[2] + 1)]);
+                                    const c = padded[(lx + dx + 1) * PH * PD + (y + oy + 1) * PD + (lz + oz + 1)] > 0 && !isTransparent(padded[(lx + dx + 1) * PH * PD + (y + oy + 1) * PD + (lz + oz + 1)]);
                                     aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
                                 } else if (Math.abs(dy) === 1) {
-                                    const s1 = isSolidAt(lx + ox, y + dy, lz + corner[2]), s2 = isSolidAt(lx + corner[0], y + dy, lz + oz), c = isSolidAt(lx + ox, y + dy, lz + oz);
+                                    const s1 = padded[(lx + ox + 1) * PH * PD + (y + dy + 1) * PD + (lz + corner[2] + 1)] > 0 && !isTransparent(padded[(lx + ox + 1) * PH * PD + (y + dy + 1) * PD + (lz + corner[2] + 1)]);
+                                    const s2 = padded[(lx + corner[0] + 1) * PH * PD + (y + dy + 1) * PD + (lz + oz + 1)] > 0 && !isTransparent(padded[(lx + corner[0] + 1) * PH * PD + (y + dy + 1) * PD + (lz + oz + 1)]);
+                                    const c = padded[(lx + ox + 1) * PH * PD + (y + dy + 1) * PD + (lz + oz + 1)] > 0 && !isTransparent(padded[(lx + ox + 1) * PH * PD + (y + dy + 1) * PD + (lz + oz + 1)]);
                                     aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
                                 } else {
-                                    const s1 = isSolidAt(lx + ox, y + corner[1], lz + dz), s2 = isSolidAt(lx + corner[0], y + oy, lz + dz), c = isSolidAt(lx + ox, y + oy, lz + dz);
+                                    const s1 = padded[(lx + ox + 1) * PH * PD + (y + corner[1] + 1) * PD + (lz + dz + 1)] > 0 && !isTransparent(padded[(lx + ox + 1) * PH * PD + (y + corner[1] + 1) * PD + (lz + dz + 1)]);
+                                    const s2 = padded[(lx + corner[0] + 1) * PH * PD + (y + oy + 1) * PD + (lz + dz + 1)] > 0 && !isTransparent(padded[(lx + corner[0] + 1) * PH * PD + (y + oy + 1) * PD + (lz + dz + 1)]);
+                                    const c = padded[(lx + ox + 1) * PH * PD + (y + oy + 1) * PD + (lz + dz + 1)] > 0 && !isTransparent(padded[(lx + ox + 1) * PH * PD + (y + oy + 1) * PD + (lz + dz + 1)]);
                                     aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
                                 }
                                 cornerAO[i] = aoLevel;
@@ -152,7 +169,21 @@ export class TerrainWorker {
 
                         for (let i = 0; i < 4; i++) {
                             const corner = face.corners[i];
-                            target.positions.push((lx + corner[0] * step), (y + corner[1] * step), (lz + corner[2] * step));
+
+                            let cvx = corner[0];
+                            let cvy = corner[1];
+                            let cvz = corner[2];
+
+                            // Thin blocks custom geometry
+                            if (bt === BlockType.CAMPFIRE) {
+                                cvy = cvy * 0.4; // Campfire is only 40% of block height
+                            } else if (bt === BlockType.GLASS_PANE || bt === BlockType.IRON_BARS) {
+                                // Thin post in the center (0.4 to 0.6)
+                                cvx = 0.4 + cvx * 0.2;
+                                cvz = 0.4 + cvz * 0.2;
+                            }
+
+                            target.positions.push((lx + cvx * step), (y + cvy * step), (lz + cvz * step));
                             target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
                             target.uvs.push(atlasUV.u + face.uv[i][0] * atlasUV.su, atlasUV.v + face.uv[i][1] * atlasUV.sv);
 
@@ -175,7 +206,7 @@ export class TerrainWorker {
             }
         }
 
-        const result = { solid, water };
+        const result = { solid, water, chests: chestCoords };
         const transferables: Transferable[] = [];
         const addTrans = (obj: any) => {
             for (const k in obj) {

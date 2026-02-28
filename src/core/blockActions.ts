@@ -109,6 +109,14 @@ export function explodeAt(x: number, y: number, z: number): void {
 
                 destroyed.push([bx, by, bz]);
                 if (destroyed.length <= MAX_BREAK_PARTICLES) emitBlockBreak(bx, by, bz, type);
+
+                // Spawn debris for ~15% of broken blocks in large radius
+                if (Math.random() < 0.15) {
+                    const vx = dx * 1.5 + (Math.random() - 0.5) * 3;
+                    const vy = 5 + Math.random() * 6;
+                    const vz = dz * 1.5 + (Math.random() - 0.5) * 3;
+                    s.spawnFallingBlock(type, [bx + 0.5, by + 0.5, bz + 0.5], [vx, vy, vz], true);
+                }
             }
         }
     }
@@ -133,13 +141,23 @@ export function explodeAt(x: number, y: number, z: number): void {
         const dmg = Math.max(0, EXPLOSION_DAMAGE * (1 - playerDist / (EXPLOSION_RADIUS * 2)));
         s.takeDamage(Math.round(dmg));
         playSound('hurt');
+
+        // Knockback Impulse
+        const force = Math.max(0, 15 * (1 - playerDist / (EXPLOSION_RADIUS * 2)));
+        if (force > 0 && playerDist > 0) {
+            window.dispatchEvent(new CustomEvent('player-impulse', {
+                detail: {
+                    x: (dx / playerDist) * force,
+                    y: (dy / playerDist) * force + force * 0.3, // slight upward bounce
+                    z: (dz / playerDist) * force
+                }
+            }));
+        }
     }
 }
 
 // ─── Door Toggle ────────────────────────────────────────
-// We use metadata approach: doors are just blocks that we track open/closed state
-const doorStates = new Map<string, number>(); // key -> original blockType
-
+// We use gameStore approach so doors persist
 export function toggleDoor(x: number, y: number, z: number): boolean {
     const key = `${x},${y},${z}`;
     const s = useGameStore.getState();
@@ -147,27 +165,27 @@ export function toggleDoor(x: number, y: number, z: number): boolean {
 
     if (type === BlockType.TRAPDOOR || type === BlockType.DOOR_OAK) {
         // Door is present = closed, remove to open
-        doorStates.set(key, type);
+        s.setDoorState(key, type);
         s.removeBlock(x, y, z);
-        const cx = Math.floor(x / 16);
-        const cz = Math.floor(z / 16);
-        s.bumpVersion(cx, cz);
-        playSound('open');
-        return true;
-    }
-
-    // Check if there was a door/trapdoor here that was opened
-    if (doorStates.has(key)) {
-        const originalType = doorStates.get(key)!;
-        s.addBlock(x, y, z, originalType);
-        doorStates.delete(key);
         const cx = Math.floor(x / 16);
         const cz = Math.floor(z / 16);
         s.bumpVersion(cx, cz);
         playSound('close');
         return true;
     }
-
+    if (type === BlockType.AIR) {
+        // Door might be open
+        const originalType = s.doors[key];
+        if (originalType) {
+            s.addBlock(x, y, z, originalType);
+            s.setDoorState(key, null);
+            const cx = Math.floor(x / 16);
+            const cz = Math.floor(z / 16);
+            s.bumpVersion(cx, cz);
+            playSound('close');
+            return true;
+        }
+    }
     return false;
 }
 
@@ -231,6 +249,129 @@ export function onBlockBroken(x: number, y: number, z: number, type: number): vo
             }
         }
     }
+
+    // Flora Gravity (break flowers/grass/crops above if block below is broken)
+    const aboveType = s.getBlock(x, y + 1, z);
+    if (
+        aboveType === BlockType.TALL_GRASS ||
+        aboveType === BlockType.FLOWER_RED ||
+        aboveType === BlockType.FLOWER_YELLOW ||
+        aboveType === BlockType.OAK_SAPLING ||
+        aboveType === BlockType.CACTUS ||
+        (aboveType >= BlockType.WHEAT_0 && aboveType <= BlockType.WHEAT_7)
+    ) {
+        s.removeBlock(x, y + 1, z);
+    }
+
+    // Tree Felling Gravity
+    if (type === BlockType.OAK_LOG || type === BlockType.BIRCH_LOG) {
+        const logsToBreak: [number, number, number, number, number][] = []; // x, y, z, dist, type
+        const leavesToBreak: [number, number, number, number, number][] = [];
+        const logVisited = new Set<string>();
+        const logQueue: [number, number, number, number][] = [[x, y + 1, z, 1]];
+        const logBaseKey = `${x},${y},${z}`;
+
+        const maxLogs = 30; // Prevent huge lag
+        const maxLeaves = 150;
+        let totalLogs = 0;
+
+        // Phase 1: Only find connected Logs (The Trunk)
+        while (logQueue.length > 0 && totalLogs < maxLogs) {
+            const [cx, cy, cz, dist] = logQueue.shift()!;
+
+            // Limit vertical dist to tree height, but severely limit horizontal dist to prevent
+            // bleeding into adjacent trees. Trunks don't usually go more than 2 blocks sideways from base.
+            const horizDist = Math.max(Math.abs(cx - x), Math.abs(cz - z));
+            if (horizDist > 2 || Math.abs(cy - y) > 20 || dist > 30) continue;
+
+            const key = `${cx},${cy},${cz}`;
+            if (key === logBaseKey || logVisited.has(key)) continue;
+            logVisited.add(key);
+
+            const cType = s.getBlock(cx, cy, cz);
+            if (cType === BlockType.OAK_LOG || cType === BlockType.BIRCH_LOG) {
+                totalLogs++;
+                logsToBreak.push([cx, cy, cz, dist, cType]);
+
+                // Logs generally connect horizontally/vertically without diagonals
+                const neighbors = [
+                    [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
+                    // Occasional diagonal log branches for weirdly shaped trees
+                    [1, 1, 0], [-1, 1, 0], [0, 1, 1], [0, 1, -1]
+                ];
+                for (const [dx, dy, dz] of neighbors) {
+                    logQueue.push([cx + dx, cy + dy, cz + dz, dist + 1]);
+                }
+            }
+        }
+
+        // Phase 2: Find leaves connected to those logs
+        const leafQueue: [number, number, number, number, number][] = []; // x, y, z, leafDist, totalDist
+        const leafVisited = new Set<string>();
+
+        // Seed the leaf queue with neighbors of all trunk logs
+        const leafSeedNeighbors = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+        for (const [lx, ly, lz, logDist] of logsToBreak) {
+            for (const [dx, dy, dz] of leafSeedNeighbors) {
+                leafQueue.push([lx + dx, ly + dy, lz + dz, 1, logDist + 1]);
+            }
+        }
+        // Also queue leaves near the original broken block
+        const startNeighbors = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]];
+        for (const [dx, dy, dz] of startNeighbors) {
+            leafQueue.push([x + dx, y + dy, z + dz, 1, 2]);
+        }
+
+        let totalLeaves = 0;
+        while (leafQueue.length > 0 && totalLeaves < maxLeaves) {
+            const [cx, cy, cz, leafDist, totalDist] = leafQueue.shift()!;
+            if (leafDist > 6) continue; // Minecraft leaves usually don't extend past 6 blocks from log
+
+            const key = `${cx},${cy},${cz}`;
+            if (logVisited.has(key) || leafVisited.has(key) || key === logBaseKey) continue;
+            leafVisited.add(key);
+
+            const cType = s.getBlock(cx, cy, cz);
+            if (cType === BlockType.LEAVES) {
+                totalLeaves++;
+                leavesToBreak.push([cx, cy, cz, totalDist, cType]);
+
+                const neighbors = [
+                    [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
+                    [1, 1, 0], [-1, 1, 0], [0, 1, 1], [0, 1, -1], [1, 0, 1], [-1, 0, -1], [-1, 0, 1], [1, 0, -1]
+                ];
+                for (const [dx, dy, dz] of neighbors) {
+                    leafQueue.push([cx + dx, cy + dy, cz + dz, leafDist + 1, totalDist + 1]);
+                }
+            }
+        }
+
+        const blocksToBreak = [...logsToBreak, ...leavesToBreak];
+
+        // Schedule physical breaks
+        // Need to sort by Y descending so top blocks break first, 
+        // preventing them from resting on lower logs that are being deleted simultaneously
+        blocksToBreak.sort((a, b) => b[1] - a[1]);
+
+        blocksToBreak.forEach(([bx, by, bz, dist, bType], i) => {
+            setTimeout(() => {
+                const sRef = useGameStore.getState();
+                // Double check it's still what we think it is and hasn't been broken manually
+                if (sRef.getBlock(bx, by, bz) === bType) {
+                    sRef.removeBlock(bx, by, bz);
+                    emitBlockBreak(bx, by, bz, bType);
+
+                    // Create falling block entity (unless it's a leaf, leaves just break/disappear)
+                    if (bType === BlockType.OAK_LOG || bType === BlockType.BIRCH_LOG) {
+                        // Small random x/z velocity prevents them perfectly stacking and sleeping in mid-air
+                        const vx = (Math.random() - 0.5) * 0.5;
+                        const vz = (Math.random() - 0.5) * 0.5;
+                        sRef.spawnFallingBlock(bType, [bx + 0.5, by + 0.5, bz + 0.5], [vx, 0, vz], false);
+                    }
+                }
+            }, i * 40); // 40ms delay per block (linear down the tree)
+        });
+    }
 }
 
 // ─── Ladder Climbing ────────────────────────────────────
@@ -278,6 +419,8 @@ export function handleBlockAction(
             return true;
         case BlockType.CHEST: {
             const s = useGameStore.getState();
+            const key = `${blockX},${blockY},${blockZ}`;
+            s.toggleChestOpen(key, true);
             s.setOverlay('chest');
             playSound('open');
             document.exitPointerLock();

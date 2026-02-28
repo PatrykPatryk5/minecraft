@@ -1,12 +1,16 @@
 /**
  * HUD — Crosshair, hotbar with 3D block icons, health/hunger, XP bar, oxygen bar
- * Uses getBlockIcon for 3D isometric rendering.
+ * Features: mining crack overlay, heart shake on damage, absorption hearts,
+ *           durability bar in hotbar, animated status effects.
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import useGameStore from '../store/gameStore';
-import { BLOCK_DATA } from '../core/blockTypes';
+import { BLOCK_DATA, BlockType } from '../core/blockTypes';
 import { getBlockIcon } from '../core/textures';
+
+// Mining crack stages: 0-9 (maps miningProgress 0-1 to 10 visual stages)
+const CRACK_STAGES = 10;
 
 const HUD: React.FC = () => {
     const hotbar = useGameStore((s) => s.hotbar);
@@ -16,6 +20,7 @@ const HUD: React.FC = () => {
     const activeOverlay = useGameStore((s) => s.activeOverlay);
     const gameMode = useGameStore((s) => s.gameMode);
     const health = useGameStore((s) => s.health);
+    const maxHealth = useGameStore((s) => s.maxHealth);
     const hunger = useGameStore((s) => s.hunger);
     const xpLevel = useGameStore((s) => s.xpLevel);
     const xpProgress = useGameStore((s) => s.xpProgress);
@@ -25,6 +30,33 @@ const HUD: React.FC = () => {
     const miningProg = useGameStore((s) => s.miningProgressValue);
     const isUnderwater = useGameStore((s) => s.isUnderwater);
     const armorSlots = useGameStore((s) => s.armor);
+    const absorption = useGameStore((s) => s.absorption);
+
+    // Heart shake animation state
+    const [heartShake, setHeartShake] = useState(false);
+    const prevHealth = useRef(health);
+    useEffect(() => {
+        if (health < prevHealth.current) {
+            setHeartShake(true);
+            const t = setTimeout(() => setHeartShake(false), 500);
+            prevHealth.current = health;
+            return () => clearTimeout(t);
+        }
+        prevHealth.current = health;
+    }, [health]);
+
+    // Golden apple visual tracker is no longer fully needed since we have absorption in store,
+    // but kept if we want pulsing effects
+    const prevWasGoldenApple = useRef(false);
+    useEffect(() => {
+        const unsub = useGameStore.subscribe((s) => {
+            const sel = s.hotbar[s.hotbarSlot];
+            if (sel?.id === BlockType.GOLDEN_APPLE) {
+                prevWasGoldenApple.current = true;
+            }
+        });
+        return unsub;
+    }, []);
 
     const armorPoints = React.useMemo(() => {
         let total = 0;
@@ -65,6 +97,11 @@ const HUD: React.FC = () => {
     const halfHunger = Math.ceil(hunger / 2);
     const showOxygen = oxygen < maxOxygen;
 
+    // Mining crack: map 0-1 progress to 0-9 stage
+    const crackStage = miningProg > 0 && miningProg < 1
+        ? Math.min(CRACK_STAGES - 1, Math.floor(miningProg * CRACK_STAGES))
+        : -1;
+
     return (
         <div className="hud">
             {/* Crosshair */}
@@ -76,17 +113,23 @@ const HUD: React.FC = () => {
             {/* Underwater Overlay */}
             {isUnderwater && <div className="water-overlay" />}
 
-            {/* Mining Progress */}
+            {/* Mining Progress Bar + Crack Stage indicator */}
             {miningProg > 0 && miningProg < 1 && (
-                <div style={{
-                    position: 'absolute', top: '52%', left: '50%', transform: 'translate(-50%, 0)',
-                    width: '80px', height: '4px', background: 'rgba(0,0,0,0.6)', borderRadius: '2px'
-                }}>
-                    <div style={{
-                        width: `${miningProg * 100}%`, height: '100%',
-                        background: 'linear-gradient(90deg, #66ff66, #00cc00)', borderRadius: '2px',
-                        transition: 'width 50ms linear'
-                    }} />
+                <div className="mining-progress-container">
+                    <div className="mining-progress-label">
+                        {[...Array(CRACK_STAGES)].map((_, i) => (
+                            <div
+                                key={i}
+                                className={`mining-crack-pip ${i <= crackStage ? 'active' : ''}`}
+                            />
+                        ))}
+                    </div>
+                    <div className="mining-progress-bar">
+                        <div
+                            className="mining-progress-fill"
+                            style={{ width: `${miningProg * 100}%` }}
+                        />
+                    </div>
                 </div>
             )}
 
@@ -122,28 +165,46 @@ const HUD: React.FC = () => {
                     const data = slot.id ? BLOCK_DATA[slot.id] : null;
                     const sel = i === hotbarSlot;
                     const icon = slot.id ? getBlockIcon(slot.id) : null;
+                    const durPct = (slot.durability !== undefined && data?.maxDurability)
+                        ? slot.durability / data.maxDurability
+                        : null;
+                    const durColor = durPct !== null
+                        ? `hsl(${Math.round(durPct * 120)}, 100%, 45%)`
+                        : 'transparent';
                     return (
                         <div key={i} className={`hotbar-slot${sel ? ' selected' : ''}`} onClick={() => setHotbarSlot(i)}>
                             {slot.id > 0 && icon && (
                                 <>
-                                    <img src={icon} className="block-icon-3d" alt={data?.name ?? ''} draggable={false} />
+                                    <img
+                                        src={icon}
+                                        className={`block-icon-3d${(slot as any).sharpness || (slot as any).efficiency ? ' enchanted-glow' : ''
+                                            }`}
+                                        alt={data?.name ?? ''}
+                                        draggable={false}
+                                    />
                                     {slot.count > 1 && <span className="item-count">{slot.count}</span>}
-                                    {slot.durability !== undefined && data?.maxDurability && (
-                                        <div className="durability-bar" style={{
-                                            position: 'absolute', bottom: '2px', left: '2px', right: '2px',
-                                            height: '3px', backgroundColor: '#000', borderRadius: '1px'
-                                        }}>
-                                            <div style={{
-                                                width: `${(slot.durability / data.maxDurability) * 100}%`,
-                                                height: '100%',
-                                                backgroundColor: `hsl(${((slot.durability / data.maxDurability) * 120).toString(10)}, 100%, 50%)`,
-                                            }} />
+                                    {/* Durability bar */}
+                                    {durPct !== null && durPct < 1 && (
+                                        <div className="durability-bar-bg">
+                                            <div
+                                                className="durability-bar-fill"
+                                                style={{
+                                                    width: `${durPct * 100}%`,
+                                                    backgroundColor: durColor,
+                                                }}
+                                            />
                                         </div>
                                     )}
                                 </>
                             )}
                             <span className="slot-number">{i + 1}</span>
-                            {sel && data && <div className="slot-name">{data.name}</div>}
+                            {sel && data && (
+                                <div className="slot-name">
+                                    {data.name}
+                                    {(slot as any).sharpness ? <span className="enchant-tag"> ✨ Ostrość {(slot as any).sharpness}</span> : null}
+                                    {(slot as any).efficiency ? <span className="enchant-tag"> ⚡ Efektywność {(slot as any).efficiency}</span> : null}
+                                </div>
+                            )}
                         </div>
                     );
                 })}
@@ -153,25 +214,47 @@ const HUD: React.FC = () => {
             {showBars && (
                 <div className="status-bars">
                     {armorPoints > 0 && (
-                        <div className="armor-bar">
+                        <div className="armor-bar" title={`Zbroja: ${armorPoints}/20 punktów`}>
                             {Array.from({ length: 10 }, (_, i) => {
                                 const filled = armorPoints >= (i + 1) * 2;
                                 const partial = !filled && armorPoints >= (i * 2) + 1;
                                 return (
                                     <span key={i} className={`armor-icon${filled ? '' : partial ? ' partial' : ' empty'}`}>
-                                        {filled ? '🛡️' : partial ? '🛡️' /* simplified */ : '🕳️'}
+                                        {filled ? '🛡️' : partial ? '🛡️' : '🕳️'}
                                     </span>
                                 );
                             })}
+                            <span style={{ fontSize: '9px', opacity: 0.7, marginLeft: '2px' }}>{armorPoints}</span>
                         </div>
                     )}
                     <div className="bar-row">
-                        <div className="hearts">
-                            {Array.from({ length: 10 }, (_, i) => (
-                                <span key={i} className={`heart${i < halfHearts ? '' : ' empty'}`}>
-                                    {i < halfHearts ? '❤' : '🖤'}
-                                </span>
-                            ))}
+                        <div className={`hearts${heartShake ? ' shake' : ''}`}>
+                            {Array.from({ length: 10 }, (_, i) => {
+                                const filled = i < halfHearts;
+                                return (
+                                    <span
+                                        key={i}
+                                        className={`heart${filled ? '' : ' empty'}`}
+                                        style={{ animationDelay: heartShake ? `${i * 25}ms` : '0ms' }}
+                                    >
+                                        {filled ? '❤' : '🖤'}
+                                    </span>
+                                );
+                            })}
+                            {/* Absorption Hearts (Golden) */}
+                            {absorption > 0 && Array.from({ length: Math.ceil(absorption / 2) }, (_, i) => {
+                                const filled = absorption >= (i + 1) * 2;
+                                return (
+                                    <span
+                                        key={`abs-${i}`}
+                                        className={`heart absorption${!filled ? ' partial' : ''}`}
+                                        style={{ color: '#FFD700', textShadow: '0 0 4px #FFD700', marginLeft: '2px' }}
+                                        title={!filled ? 'Połowa złotego serca' : 'Złote serce'}
+                                    >
+                                        💛
+                                    </span>
+                                );
+                            })}
                         </div>
                         <div className="hunger">
                             {Array.from({ length: 10 }, (_, i) => (

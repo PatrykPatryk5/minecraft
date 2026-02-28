@@ -85,7 +85,7 @@ const Inventory: React.FC = () => {
         } else {
             s.setCursorItem(null);
         }
-        // setInvCraftGrid(Array(4).fill({ id: 0, count: 0 })); // REMOVED: Keep items in grid if closing? Actually vanilla Minecraft drops them.
+        s.setInventoryCraftingGrid(new Array(4).fill({ id: 0, count: 0 }));
         setOverlay('none');
         playSound('close');
         document.querySelector('canvas')?.requestPointerLock();

@@ -45,9 +45,98 @@ function rebuildActiveChunks(
     cacheExpiryTime = now + ACTIVE_CACHE_MS;
 }
 
+/** Cactus can grow up to 3 blocks tall */
+function tickCactus(s: ReturnType<typeof useGameStore.getState>, wx: number, wy: number, wz: number) {
+    // Count consecutive cactus below
+    let height = 1;
+    for (let y = wy - 1; y >= 0 && height < 3; y--) {
+        if (s.getBlock(wx, y, wz) === BlockType.CACTUS) height++;
+        else break;
+    }
+    if (height >= 3) return; // Already max height
+    const above = s.getBlock(wx, wy + 1, wz);
+    if (above === BlockType.AIR) {
+        if (Math.random() < 0.08) { // ~8% per tick
+            s.addBlock(wx, wy + 1, wz, BlockType.CACTUS);
+        }
+    }
+}
+
+/** Fire spreading and burning out */
+function tickFire(s: ReturnType<typeof useGameStore.getState>, wx: number, wy: number, wz: number) {
+    const blockBelow = s.getBlock(wx, wy - 1, wz);
+
+    // Fire never burns out on Netherrack or Magma
+    if (blockBelow === BlockType.NETHERRACK || blockBelow === BlockType.MAGMA_BLOCK) {
+        // Just spread occasionally
+        if (Math.random() < 0.2) attemptFireSpread(s, wx, wy, wz);
+        return;
+    }
+
+    // High chance to extinguish if not supported by anything
+    if (blockBelow === BlockType.AIR && s.getBlock(wx, wy + 1, wz) === BlockType.AIR) {
+        if (Math.random() < 0.6) {
+            s.addBlock(wx, wy, wz, BlockType.AIR);
+            return;
+        }
+    }
+
+    // Normal extinguish chance (burns out)
+    if (Math.random() < 0.1) { // 10% chance to just die
+        s.addBlock(wx, wy, wz, BlockType.AIR);
+        return;
+    }
+
+    // Spread and consume
+    if (Math.random() < 0.4) {
+        attemptFireSpread(s, wx, wy, wz);
+    }
+}
+
+function attemptFireSpread(s: ReturnType<typeof useGameStore.getState>, x: number, y: number, z: number) {
+    // Only search local 3x3x3 around the fire
+    const nx = x + Math.floor(Math.random() * 3) - 1;
+    const ny = y + Math.floor(Math.random() * 3) - 1;
+    const nz = z + Math.floor(Math.random() * 3) - 1;
+
+    // Check if target space is air, AND has a flammable neighbor
+    if (s.getBlock(nx, ny, nz) === BlockType.AIR) {
+        if (isFlammable(s.getBlock(nx, ny - 1, nz)) ||
+            isFlammable(s.getBlock(nx + 1, ny, nz)) ||
+            isFlammable(s.getBlock(nx - 1, ny, nz)) ||
+            isFlammable(s.getBlock(nx, ny, nz + 1)) ||
+            isFlammable(s.getBlock(nx, ny, nz - 1)) ||
+            isFlammable(s.getBlock(nx, ny + 1, nz))) {
+            s.addBlock(nx, ny, nz, BlockType.FIRE); // Spreads!
+
+            // 25% chance to consume the flammable block below it (burns it)
+            if (isFlammable(s.getBlock(nx, ny - 1, nz)) && Math.random() < 0.25) {
+                s.addBlock(nx, ny - 1, nz, BlockType.AIR);
+            }
+        }
+    } else if (isFlammable(s.getBlock(nx, ny, nz))) {
+        // Direct consumption of a flammable block
+        if (Math.random() < 0.3) {
+            s.addBlock(nx, ny, nz, BlockType.FIRE);
+        }
+    }
+}
+
+function isFlammable(block: number): boolean {
+    if (!block) return false;
+    // Wood blocks, leaves, wool, planks
+    return (
+        block === BlockType.OAK_LOG || block === BlockType.BIRCH_LOG ||
+        block === BlockType.PLANKS || block === BlockType.BIRCH_PLANKS || block === BlockType.SPRUCE_PLANKS ||
+        block === BlockType.LEAVES ||
+        (block >= BlockType.WOOL_WHITE && block <= BlockType.WOOL_BLACK) ||
+        block === BlockType.BOOKSHELF || block === BlockType.TNT
+    );
+}
+
 /**
  * Optimized Random Tick
- * 
+ *
  * Instead of scanning world coords (slow), we pick random indices in chunks.
  * We only convert to world coords if we hit a block that actually needs ticking.
  */
@@ -87,23 +176,23 @@ export const tickWorld = () => {
             const randIdx = Math.floor(Math.random() * CHUNK_VOLUME);
             const block = chunk[randIdx];
 
-            // Fast exit for non-ticking blocks (Air, Stone, etc)
+            // Fast exit for non-ticking blocks (Air, Stone, Dirt, Water)
             if (block === BlockType.AIR || block === BlockType.STONE || block === BlockType.DIRT || block === BlockType.WATER) continue;
 
+            const isCrop = block >= BlockType.WHEAT_0 && block <= BlockType.WHEAT_7;
             const needsTick = (
                 block === BlockType.GRASS ||
                 block === BlockType.FARMLAND ||
                 block === BlockType.OAK_SAPLING ||
-                (block >= BlockType.WHEAT_0 && block < BlockType.WHEAT_7)
+                block === BlockType.CACTUS ||
+                block === BlockType.FIRE ||
+                isCrop
             );
 
             if (!needsTick) continue;
 
             // Reconstruct coordinates only when needed
             // index = (y << 8) | (lz << 4) | lx
-            // y = index >> 8
-            // lz = (index >> 4) & 0xF
-            // lx = index & 0xF
             const ly = randIdx >> 8;
             const lz = (randIdx >> 4) & 0xF;
             const lx = randIdx & 0xF;
@@ -114,26 +203,34 @@ export const tickWorld = () => {
             if (block === BlockType.GRASS) {
                 // Grass Spread / Death
                 if (s.getBlock(wx, ly + 1, wz) !== BlockType.AIR) {
+                    // Block above = no light, grass dies
                     s.addBlock(wx, ly, wz, BlockType.DIRT);
                 } else {
-                    // Spread to dirt
-                    // (Simplified: just check one random neighbor)
-                    const dx = Math.floor(Math.random() * 3) - 1;
-                    const dz = Math.floor(Math.random() * 3) - 1;
-                    const dy = Math.floor(Math.random() * 3) - 1;
-                    if (s.getBlock(wx + dx, ly + dy, wz + dz) === BlockType.DIRT &&
-                        s.getBlock(wx + dx, ly + dy + 1, wz + dz) === BlockType.AIR) {
-                        s.addBlock(wx + dx, ly + dy, wz + dz, BlockType.GRASS);
+                    // Spread to adjacent dirt at same or ±1 Y
+                    const GX = [-1, 1, 0, 0, -1, 1, -1, 1];
+                    const GZ = [0, 0, -1, 1, -1, 1, 1, -1];
+                    const GY = [0, 0, 0, 0, 0, 0, -1, 1];
+                    const gi = Math.floor(Math.random() * GX.length);
+                    const nx = wx + GX[gi], ny = ly + GY[gi], nz = wz + GZ[gi];
+                    if (s.getBlock(nx, ny, nz) === BlockType.DIRT &&
+                        s.getBlock(nx, ny + 1, nz) === BlockType.AIR) {
+                        s.addBlock(nx, ny, nz, BlockType.GRASS);
                     }
                 }
             } else if (block === BlockType.FARMLAND) {
                 updateFarmland(wx, ly, wz);
             } else if (block === BlockType.OAK_SAPLING) {
                 // Chance to grow on random tick
-                if (Math.random() < 0.05) growSapling(wx, ly, wz);
-            } else if (block >= BlockType.WHEAT_0 && block < BlockType.WHEAT_7) {
-                // Crop growth
-                growCrop(wx, ly, wz);
+                if (Math.random() < 0.07) growSapling(wx, ly, wz);
+            } else if (isCrop) {
+                // Crop growth — only grow if not at max stage
+                if (block < BlockType.WHEAT_7) {
+                    growCrop(wx, ly, wz);
+                }
+            } else if (block === BlockType.CACTUS) {
+                tickCactus(s, wx, ly, wz);
+            } else if (block === BlockType.FIRE) {
+                tickFire(s, wx, ly, wz);
             }
         }
     }

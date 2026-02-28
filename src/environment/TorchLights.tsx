@@ -15,6 +15,7 @@ interface LightSource {
     color: string;
     intensity: number;
     distSq: number;
+    isCampfire: boolean;
 }
 
 const TorchLights: React.FC = () => {
@@ -72,14 +73,16 @@ const TorchLights: React.FC = () => {
                     const isRedstone = block === BlockType.REDSTONE_TORCH || block === BlockType.REDSTONE_LAMP;
                     const isSoul = block === BlockType.SOUL_TORCH || block === BlockType.SOUL_LANTERN;
                     const isLava = block === BlockType.LAVA;
+                    const isCampfire = block === BlockType.CAMPFIRE;
 
                     foundLights.push({
                         x: wx + 0.5,
                         y: y + 0.5,
                         z: wz + 0.5,
                         color: isRedstone ? '#ff3300' : isSoul ? '#11ccff' : isLava ? '#ff6600' : '#ffdd88',
-                        intensity: (block === BlockType.TORCH || block === BlockType.LANTERN || block === BlockType.GLOWSTONE || isLava) ? 1.8 : 1.2,
-                        distSq
+                        intensity: (block === BlockType.TORCH || block === BlockType.LANTERN || block === BlockType.GLOWSTONE || isLava || isCampfire) ? 1.8 : 1.2,
+                        distSq,
+                        isCampfire
                     });
                 }
             }
@@ -103,17 +106,52 @@ const TorchLights: React.FC = () => {
 
     return (
         <group>
-            {lights.map((l, i) => (
-                <pointLight
-                    key={`${l.x},${l.y},${l.z}`}
-                    position={[l.x, l.y, l.z]}
-                    color={l.color}
-                    intensity={l.intensity * 1.2}
-                    distance={l.intensity > 1 ? 20 : 12}
-                    decay={1}
-                />
-            ))}
+            {lights.map((l, i) => {
+                // Generate pseudo-random offset based on position to desync flicker
+                const offset = (l.x * 12.5 + l.y * 3.1 + l.z * 7.8) % 100;
+                return (
+                    <FlickeringLight
+                        key={`${l.x},${l.y},${l.z}`}
+                        l={l}
+                        offset={offset}
+                    />
+                );
+            })}
         </group>
+    );
+};
+
+interface FlickeringLightProps {
+    l: LightSource;
+    offset: number;
+}
+
+const FlickeringLight: React.FC<FlickeringLightProps> = ({ l, offset }) => {
+    const lightRef = useRef<THREE.PointLight>(null);
+
+    useFrame((state, delta) => {
+        if (!lightRef.current) return;
+        const t = state.clock.elapsedTime * 4 + offset;
+        // Subtle, chaotic flicker using sine wave combination
+        const flicker = Math.sin(t) * 0.05 + Math.sin(t * 2.3) * 0.03 + Math.sin(t * 4.1) * 0.02;
+        lightRef.current.intensity = Math.max(0.1, (l.intensity * 1.2) + flicker);
+
+        if (l.isCampfire && Math.random() < delta * 15) {
+            import('../core/particles').then(({ emitSmoke }) => {
+                emitSmoke(l.x, l.y, l.z, 1);
+            });
+        }
+    });
+
+    return (
+        <pointLight
+            ref={lightRef}
+            position={[l.x, l.y, l.z]}
+            color={l.color}
+            intensity={l.intensity * 1.2}
+            distance={l.intensity > 1 ? 20 : 12}
+            decay={1}
+        />
     );
 };
 

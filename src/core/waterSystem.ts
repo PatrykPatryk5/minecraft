@@ -215,6 +215,61 @@ function canWaterReplace(blockType: number): boolean {
     return !data.solid && blockType !== BlockType.WATER;
 }
 
+/**
+ * Places a sponge, absorbing water in a 6 block radius.
+ * If water is absorbed, the sponge becomes a wet sponge.
+ */
+export function placeSponge(x: number, y: number, z: number): void {
+    const s = useGameStore.getState();
+    const radius = 6;
+    let absorbed = false;
+    const toRemove: [number, number, number][] = [];
+
+    // Scan standard cube centered around the sponge
+    for (let dx = -radius; dx <= radius; dx++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+            for (let dz = -radius; dz <= radius; dz++) {
+                // Manhattan distance check to make it more spherical (authentic sponge behavior)
+                if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > radius + 1) continue;
+
+                const bx = x + dx;
+                const by = y + dy;
+                const bz = z + dz;
+                const type = s.getBlock(bx, by, bz);
+
+                if (type === BlockType.WATER) {
+                    toRemove.push([bx, by, bz]);
+                    absorbed = true;
+                }
+            }
+        }
+    }
+
+    // Remove the water and convert to wet sponge
+    if (absorbed) {
+        if (toRemove.length > 50) {
+            // Batch remove for performance if huge
+            for (let i = 0; i < toRemove.length; i += 50) {
+                setTimeout(() => s.removeBlocks(toRemove.slice(i, i + 50)), Math.floor(i / 50) * 50);
+            }
+        } else {
+            s.removeBlocks(toRemove);
+        }
+
+        s.addBlock(x, y, z, BlockType.WET_SPONGE);
+
+        // Play fizz sound
+        import('../audio/sounds').then(({ playSound }) => {
+            playSound('fuse'); // generic fizz available
+        });
+
+        // Emit particles
+        import('../core/particles').then(({ emitBlockBreak }) => {
+            emitBlockBreak(x, y + 1, z, BlockType.WATER);
+        });
+    }
+}
+
 function schedulePlace(x: number, y: number, z: number, delay: number): void {
     setTimeout(() => {
         const s = useGameStore.getState();

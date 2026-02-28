@@ -8,6 +8,7 @@ import useGameStore, { chunkKey } from '../store/gameStore';
 import { CHUNK_SIZE, blockIndex, type ChunkData, MAX_HEIGHT } from '../core/terrainGen';
 import { globalTerrainUniforms } from '../core/constants';
 import { getWorkerPool } from '../core/workerPool';
+import { AnimatedChest } from '../environment/AnimatedChest';
 
 // ─── Geometry Pool ───────────────────────────────────────
 const geoPool: THREE.BufferGeometry[] = [];
@@ -57,7 +58,8 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
 
     const smoothLighting = useGameStore((s) => s.settings.smoothLighting);
     const useShadows = useGameStore((s) => s.settings.graphics !== 'fast');
-    const [meshData, setMeshData] = React.useState<{ solidGeo: THREE.BufferGeometry | null, waterGeo: THREE.BufferGeometry | null, atlas: THREE.Texture } | null>(null);
+
+    const [meshData, setMeshData] = React.useState<{ solidGeo: THREE.BufferGeometry | null, waterGeo: THREE.BufferGeometry | null, atlas: THREE.Texture, chests: { x: number, y: number, z: number }[] } | null>(null);
 
     const activeLod = lod;
 
@@ -130,7 +132,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                 const solidGeo = createGeo(result.solid);
                 const waterGeo = createGeo(result.water);
 
-                setMeshData({ solidGeo, waterGeo, atlas });
+                setMeshData({ solidGeo, waterGeo, atlas, chests: result.chests || [] });
             } catch (err) {
                 console.error("Meshing error:", err);
             }
@@ -324,6 +326,19 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                     />
                 </mesh>
             )}
+
+            {/* Dynamic Entities (Chests) */}
+            {meshData.chests && meshData.chests.map(chest => (
+                <AnimatedChest
+                    key={`chest-${chest.x}-${chest.y}-${chest.z}`}
+                    x={chest.x}
+                    y={chest.y}
+                    z={chest.z}
+                    worldX={cx * CHUNK_SIZE + chest.x}
+                    worldY={chest.y}
+                    worldZ={cz * CHUNK_SIZE + chest.z}
+                />
+            ))}
         </group>
     );
 });

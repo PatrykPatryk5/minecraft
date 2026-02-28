@@ -6,57 +6,57 @@
  * - File API: For exporting/importing .mcraft save files.
  */
 
-import { get, set, clear, entries, setMany } from 'idb-keyval';
+import StorageWorker from './storage.worker?worker';
+
+// Instantiate the worker once
+const worker = new StorageWorker();
+let nextId = 0;
+const callbacks = new Map<number, { resolve: (val: any) => void, reject: (err: any) => void }>();
+
+worker.onmessage = (e: MessageEvent) => {
+    const { id, type, payload, error } = e.data;
+    const cb = callbacks.get(id);
+    if (!cb) return;
+
+    if (error) {
+        cb.reject(new Error(error));
+    } else {
+        cb.resolve(payload);
+    }
+    callbacks.delete(id);
+};
+
+function sendRequest<T>(type: string, payload?: any): Promise<T> {
+    const id = ++nextId;
+    return new Promise((resolve, reject) => {
+        callbacks.set(id, { resolve, reject });
+        worker.postMessage({ id, type, payload });
+    });
+}
 
 export async function saveChunk(key: string, data: Uint16Array): Promise<void> {
-    try {
-        await set(key, data);
-    } catch (e) {
-        console.error('Failed to save chunk to IndexedDB', e);
-    }
+    worker.postMessage({ type: 'SAVE_CHUNK', payload: { key, data } }); // Fire & Forget
 }
 
 export async function loadChunk(key: string): Promise<Uint16Array | null> {
-    try {
-        const data = await get<Uint16Array>(key);
-        return data || null;
-    } catch (e) {
-        console.error('Failed to load chunk from IndexedDB', e);
-        return null;
-    }
+    return sendRequest<Uint16Array | null>('LOAD_CHUNK', { key });
+}
+
+export async function getSavedChunkKeys(): Promise<Set<string>> {
+    const keysArray = await sendRequest<string[]>('GET_KEYS');
+    return new Set(keysArray);
 }
 
 export async function clearAllChunks(): Promise<void> {
-    try {
-        await clear();
-    } catch (e) {
-        console.error('Failed to clear chunks', e);
-    }
+    await sendRequest<boolean>('CLEAR_ALL');
 }
 
 export async function getAllChunksData(): Promise<Record<string, number[]>> {
-    try {
-        const allEntries = await entries<string, Uint16Array>();
-        const allData: Record<string, number[]> = {};
-        for (const [key, chunkData] of allEntries) {
-            allData[key] = Array.from(chunkData);
-        }
-        return allData;
-    } catch (e) {
-        console.error('Failed to get all chunks data', e);
-        return {};
-    }
+    return sendRequest<Record<string, number[]>>('EXPORT_ALL');
 }
 
 export async function importChunksData(chunksRecord: Record<string, number[]>): Promise<void> {
-    try {
-        const elements: [string, Uint16Array][] = Object.entries(chunksRecord).map(
-            ([k, v]) => [k, new Uint16Array(v)]
-        );
-        await setMany(elements);
-    } catch (e) {
-        console.error('Failed to import chunks data', e);
-    }
+    await sendRequest<boolean>('IMPORT_ALL', chunksRecord);
 }
 
 
@@ -65,14 +65,38 @@ const PLAYER_STATE_KEY = 'mcraft_player_state';
 
 export type Dimension = 'overworld' | 'nether' | 'end';
 
+export interface SavedSlot {
+    id: number;
+    count: number;
+    durability?: number;
+    featherFalling?: number;
+}
+
+export interface SavedArmor {
+    helmet: SavedSlot;
+    chestplate: SavedSlot;
+    leggings: SavedSlot;
+    boots: SavedSlot;
+}
+
+export interface SavedChest {
+    slots: SavedSlot[];
+    isOpen?: boolean;
+}
+
 export interface PlayerSaveState {
     pos: [number, number, number];
     rot: [number, number];
-    inventory: (number | null)[];
+    inventory: (number | null | SavedSlot)[]; // union for legacy support
+    hotbar?: SavedSlot[];
+    armor?: SavedArmor;
+    chests?: Record<string, SavedChest>;
     health: number;
     dayTime: number;
     dimension: Dimension;
     seed: number;
+    doors?: Record<string, number>;
+    gameMode?: 'creative' | 'survival' | 'spectator';
 }
 
 export function savePlayerState(state: PlayerSaveState): void {

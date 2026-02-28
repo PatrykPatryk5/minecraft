@@ -145,3 +145,51 @@ export function emitExplosion(x: number, y: number, z: number): void {
     // High intensity sparks
     emitSpark(x, y, z, 40);
 }
+
+/** Landing dust — spawned when player hits ground */
+export function emitLandingDust(x: number, y: number, z: number, blockType: number): void {
+    const data = BLOCK_DATA[blockType];
+    if (!data) return;
+    const color = data.top ?? data.color ?? '#888888';
+    for (let i = 0; i < 8; i++) {
+        spawnParticle(
+            new THREE.Vector3(x + (Math.random() - 0.5) * 0.6, y + 0.05, z + (Math.random() - 0.5) * 0.6),
+            new THREE.Vector3((Math.random() - 0.5) * 1.5, Math.random() * 0.8 + 0.2, (Math.random() - 0.5) * 1.5),
+            0.4 + Math.random() * 0.3,
+            color,
+            0.06 + Math.random() * 0.04,
+            'block',
+            0.93
+        );
+    }
+}
+
+/** XP orb glitter — green sparkles on XP collect */
+export function emitXPOrb(x: number, y: number, z: number): void {
+    for (let i = 0; i < 8; i++) {
+        spawnParticle(
+            new THREE.Vector3(x + (Math.random() - 0.5) * 0.4, y + Math.random() * 0.5, z + (Math.random() - 0.5) * 0.4),
+            new THREE.Vector3((Math.random() - 0.5) * 1.5, Math.random() * 2 + 1, (Math.random() - 0.5) * 1.5),
+            0.5 + Math.random() * 0.5,
+            Math.random() > 0.5 ? '#55ff55' : '#00cc00',
+            0.06 + Math.random() * 0.04,
+            'spark',
+            0.94
+        );
+    }
+}
+
+/** Water splash — blue droplets when hitting water surface */
+export function emitWaterSplash(x: number, y: number, z: number): void {
+    for (let i = 0; i < 12; i++) {
+        spawnParticle(
+            new THREE.Vector3(x + (Math.random() - 0.5) * 0.5, y, z + (Math.random() - 0.5) * 0.5),
+            new THREE.Vector3((Math.random() - 0.5) * 3, Math.random() * 4 + 1, (Math.random() - 0.5) * 3),
+            0.4 + Math.random() * 0.3,
+            '#3399ff',
+            0.05 + Math.random() * 0.04,
+            'block',
+            0.92
+        );
+    }
+}

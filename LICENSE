@@ -1,28 +1,106 @@
-# ⚖️ Custom Source-Available License
+# ⚖️ Licencja — Custom Source-Available License
 
-Copyright (c) 2026 MUZYKANT TEAM & PatrykPatryk5.
-
-## 1. Permission and Usage
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to use the Software for **Private and Educational Purposes** only.
-
-### 🏠 Private Use: ALLOWED
-You are free to:
-- Clone the repository for personal study.
-- Run the game locally for testing and enjoyment.
-- Modify the source code for personal, non-distributed projects.
-
-### 💼 Commercial & Public Use: PROHIBITED
-You are **NOT** allowed to:
-- Use the Software or any of its components for commercial purposes.
-- Host a public version of this game or a derivative work without explicit, written consent from the **MUZYKANT TEAM**.
-- Sell, lease, or monetize access to any part of this project.
-
-## 2. Redistribution
-Redistribution of the source code or compiled binaries, with or without modifications, is prohibited unless authorized by the authors.
-
-## 3. Disclaimers
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+**Copyright (c) 2024–2026 MUZYKANT TEAM & PatrykPatryk5**  
+Wszelkie prawa zastrzeżone.
 
 ---
 
-📧 For licensing inquiries or commercial partnership requests, please contact: **[r3f@muzykant.xyz](mailto:r3f@muzykant.xyz)**
+## 1. Definicje
+
+- **„Oprogramowanie"** — kod źródłowy, zasoby graficzne i dźwiękowe, pliki konfiguracyjne oraz dokumentacja opublikowana w tym repozytorium.
+- **„Autorzy"** — MUZYKANT TEAM, PatrykPatryk5 oraz wszyscy wymienieni kontrybutorzy.
+- **„Użycie prywatne"** — uruchamianie, studiowanie i modyfikowanie Oprogramowania na własnym komputerze, bez udostępniania wyników publicznie.
+- **„Użycie komercyjne"** — jakiekolwiek użycie Oprogramowania w celu osiągania zysku, w tym hosting publiczny, sprzedaż, reklamy lub monetyzacja.
+
+---
+
+## 2. Dozwolone użycia
+
+### 🏠 Użytek osobisty i edukacyjny
+Każda osoba posiadająca kopię Oprogramowania ma prawo do:
+
+- **Klonowania** repozytorium i uruchamiania gry lokalnie na własnym komputerze
+- **Studiowania** kodu źródłowego w celach edukacyjnych i naukowych
+- **Modyfikowania** kodu na potrzeby własne, prywatne projekty
+- **Tworzenia treści** (filmy, streamy, zrzuty ekranu) przedstawiających grę — z podaniem źródła
+
+### 🎓 Wykorzystanie akademickie
+Oprogramowanie może być przedmiotem:
+- Prac zaliczeniowych, dyplomowych i naukowych
+- Prezentacji na konferencjach i meetupach
+- Artykułów edukacyjnych i tutoriali
+
+W każdym przypadku wymagane jest podanie pełnej atrybucji (patrz sekcja 5).
+
+---
+
+## 3. Zabrania się
+
+### 💼 Użycie komercyjne i publiczne — ZABRONIONE
+
+Bez pisemnej zgody Autorów **zabrania się**:
+
+- ❌ Używania Oprogramowania lub jego fragmentów w celach komercyjnych
+- ❌ Hostowania publicznej wersji gry lub jej pochodnych (w tym na serwerach gier)
+- ❌ Sprzedawania, wynajmowania, sublicencjonowania lub monetyzowania dostępu do jakiejkolwiek części projektu
+- ❌ Integrowania kodu z komercyjnymi produktami lub usługami
+- ❌ Używania nazwy „Better Minecraft", „MUZYKANT TEAM" lub logo projektu w kontekstach komercyjnych
+
+---
+
+## 4. Redystrybucja
+
+- ❌ Redystrybucja kodu źródłowego — **zabroniona** bez autoryzacji
+- ❌ Redystrybucja skompilowanych wersji (build/dist) — **zabroniona** bez autoryzacji
+- ✅ Linkowanie do oficjalnego repozytorium GitHub — **dozwolone i zachęcane**
+- ✅ Forki na GitHub w celach edukacyjnych — **dozwolone** z atrybucją
+
+---
+
+## 5. Atrybucja
+
+W przypadkach dozwolonych użyć, każde publiczne odniesienie do Oprogramowania musi zawierać:
+
+```
+Minecraft R3F — © 2024–2026 MUZYKANT TEAM & PatrykPatryk5
+https://github.com/PatrykPatryk5/minecraft
+```
+
+---
+
+## 6. Współtwórcy (Contributors)
+
+Osoby przesyłające pull requesty wyrażają zgodę na:
+- Udzielenie Autorom niewyłącznej, nieodpłatnej licencji na ich wkład
+- Włączenie ich wkładu do Oprogramowania na warunkach niniejszej licencji
+- Wymienienie ich w sekcji Contributors repozytorium
+
+---
+
+## 7. Znaki towarowe
+
+> **„Minecraft"** jest zarejestrowanym znakiem towarowym **Mojang Studios / Microsoft Corporation**.
+
+Ten projekt jest **niezależną twórczością fanowską** i **nie jest** powiązany z, zatwierdzony przez, ani wspierany przez Mojang Studios lub Microsoft Corporation w jakikolwiek sposób.
+
+Wszystkie odwołania do Minecrafta w tym projekcie służą wyłącznie celom identyfikacji i edukacji.
+
+---
+
+## 8. Wyłączenie odpowiedzialności
+
+OPROGRAMOWANIE JEST DOSTARCZANE „TAK JAK JEST" (AS IS), BEZ JAKIEJKOLWIEK GWARANCJI, WYRAŻONEJ LUB DOROZUMIANEJ, W TYM MIĘDZY INNYMI GWARANCJI PRZYDATNOŚCI HANDLOWEJ, PRZYDATNOŚCI DO OKREŚLONEGO CELU I NIENARUSZALNOŚCI.
+
+W ŻADNYM WYPADKU AUTORZY LUB POSIADACZE PRAW AUTORSKICH NIE PONOSZĄ ODPOWIEDZIALNOŚCI ZA JAKIEKOLWIEK ROSZCZENIA, SZKODY LUB INNE ZOBOWIĄZANIA, CZY TO W RAMACH DZIAŁANIA KONTRAKTOWEGO, DELIKTOWEGO, CZY INNEGO, WYNIKAJĄCE Z, LUB W ZWIĄZKU Z OPROGRAMOWANIEM LUB UŻYTKOWANIEM LUB INNYMI CZYNNOŚCIAMI W OPROGRAMOWANIU.
+
+---
+
+## 9. Zmiany licencji
+
+Autorzy zastrzegają sobie prawo do zmiany warunków niniejszej licencji w dowolnym momencie. Zmiany mają zastosowanie wyłącznie do wersji Oprogramowania opublikowanych po dacie zmiany.
+
+---
+
+📧 Zapytania licencyjne i propozycje współpracy komercyjnej:  
+**[r3f@muzykant.xyz](mailto:r3f@muzykant.xyz)**  
+🌐 [muzykant.xyz](https://muzykant.xyz)

@@ -72,8 +72,8 @@ const EnderPearl: React.FC<{ id: string; initialPos: [number, number, number]; i
             const s = useGameStore.getState();
             // Teleport player
             s.setPlayerPos([hitPos.x, hitPos.y + 1.8, hitPos.z]);
-            s.takeDamage(5, { ignoreArmor: true }); // Pearl damage
-            playSound('step');
+            s.takeDamage(5, { ignoreArmor: true, source: 'Uderzyłeś zbyt mocno przy teleportacji!' }); // Pearl damage
+            playSound('step', initialPos);
             s.removePearl(id);
         }
     };

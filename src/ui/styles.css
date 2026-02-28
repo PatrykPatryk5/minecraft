@@ -701,12 +701,114 @@
     font-size: 10px;
     filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .8));
     text-shadow: 0 0 3px #f00;
+    display: inline-block;
+    transition: filter 0.15s;
+}
+
+/* Heart shake on damage */
+.hearts.shake .heart {
+    animation: heartShake 0.45s ease-out;
+}
+
+@keyframes heartShake {
+    0% {
+        transform: translateY(0) rotate(0deg);
+    }
+
+    15% {
+        transform: translateY(-3px) rotate(-6deg);
+        filter: brightness(2) drop-shadow(0 0 4px #f66);
+    }
+
+    35% {
+        transform: translateY(2px) rotate(4deg);
+    }
+
+    55% {
+        transform: translateY(-2px) rotate(-3deg);
+    }
+
+    75% {
+        transform: translateY(1px) rotate(2deg);
+    }
+
+    100% {
+        transform: translateY(0) rotate(0deg);
+    }
 }
 
 .drumstick {
     font-size: 10px;
     filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .8));
 }
+
+/* ─── Mining Crack Progress ───────────────────────── */
+.mining-progress-container {
+    position: absolute;
+    top: 52%;
+    left: 50%;
+    transform: translate(-50%, 10px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    pointer-events: none;
+}
+
+.mining-progress-label {
+    display: flex;
+    gap: 3px;
+}
+
+.mining-crack-pip {
+    width: 8px;
+    height: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 1px;
+    transition: background 0.05s, border-color 0.05s;
+}
+
+.mining-crack-pip.active {
+    background: linear-gradient(135deg, #ffcc33, #ff6600);
+    border-color: rgba(255, 200, 50, 0.8);
+    box-shadow: 0 0 4px rgba(255, 150, 30, 0.7);
+}
+
+.mining-progress-bar {
+    width: 90px;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.mining-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #66ff66, #00cc00);
+    border-radius: 2px;
+    transition: width 50ms linear;
+}
+
+/* ─── Durability Bar in Hotbar ────────────────────── */
+.durability-bar-bg {
+    position: absolute;
+    bottom: 2px;
+    left: 3px;
+    right: 3px;
+    height: 3px;
+    background: rgba(0, 0, 0, 0.8);
+    border-radius: 1px;
+    overflow: hidden;
+}
+
+.durability-bar-fill {
+    height: 100%;
+    border-radius: 1px;
+    transition: width 0.2s ease, background-color 0.3s ease;
+}
+
 
 /* ─── Debug ───────────────────────────────────────── */
 .debug-screen {
@@ -1623,6 +1725,136 @@
     z-index: 300;
 }
 
+/* ================================================================
+   DEATH SCREEN
+   ================================================================ */
+.death-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    background: rgba(80, 0, 0, 0);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font);
+    transition: background 0.6s ease;
+    backdrop-filter: blur(0px);
+    -webkit-backdrop-filter: blur(0px);
+}
+
+.death-overlay.death-visible {
+    background: rgba(80, 0, 0, 0.72);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.death-content {
+    background: linear-gradient(160deg, rgba(30, 0, 0, 0.95), rgba(10, 0, 0, 0.98));
+    border: 2px solid rgba(200, 30, 30, 0.6);
+    border-radius: 6px;
+    padding: 36px 48px;
+    min-width: 360px;
+    max-width: 480px;
+    text-align: center;
+    box-shadow: 0 0 40px rgba(200, 0, 0, 0.4), inset 0 1px 0 rgba(255, 100, 100, 0.1);
+    animation: deathSlideIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes deathSlideIn {
+    0% {
+        transform: scale(0.85) translateY(-20px);
+        opacity: 0;
+    }
+
+    100% {
+        transform: scale(1) translateY(0);
+        opacity: 1;
+    }
+}
+
+.death-skull {
+    font-size: 48px;
+    margin-bottom: 12px;
+    animation: deathSkull 2s ease-in-out infinite;
+    display: block;
+    filter: drop-shadow(0 0 12px rgba(255, 50, 50, 0.8));
+}
+
+@keyframes deathSkull {
+
+    0%,
+    100% {
+        transform: scale(1) rotate(-5deg);
+    }
+
+    50% {
+        transform: scale(1.08) rotate(5deg);
+        filter: drop-shadow(0 0 20px rgba(255, 80, 80, 1));
+    }
+}
+
+.death-title {
+    font-size: 18px;
+    color: #ff4444;
+    text-shadow: 2px 2px 0 #000, 0 0 20px rgba(255, 50, 50, 0.7);
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+    line-height: 1.5;
+}
+
+.death-divider {
+    width: 80%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(200, 30, 30, 0.5), transparent);
+    margin: 16px auto;
+}
+
+.death-score {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.death-score-label {
+    font-size: 7px;
+    color: #999;
+    text-transform: uppercase;
+}
+
+.death-score-value {
+    font-size: 22px;
+    color: #ffee44;
+    text-shadow: 2px 2px 0 #000, 0 0 10px rgba(255, 220, 50, 0.5);
+}
+
+.death-score-suffix {
+    font-size: 7px;
+    color: #aaa;
+}
+
+.death-xp-note {
+    font-size: 7px;
+    color: #7fff7f;
+    margin-bottom: 4px;
+    text-shadow: 0 0 6px rgba(100, 255, 100, 0.4);
+}
+
+.death-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.death-btn {
+    font-size: 9px !important;
+    padding: 12px !important;
+}
+
+
+
 .debug-screen {
     z-index: 50;
 }
@@ -1704,4 +1936,53 @@
 
 .armor-placeholder.boots {
     background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M12 2L4 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm1 16h-2v-2h2v2zm0-4h-2V7h2v7z"/></svg>');
+}
+
+/* ─── Enchantment Visual Effects ─────────────────────────── */
+@keyframes enchantShimmer {
+    0% {
+        filter: brightness(1) hue-rotate(0deg) saturate(1.5);
+    }
+
+    25% {
+        filter: brightness(1.3) hue-rotate(120deg) saturate(2);
+    }
+
+    50% {
+        filter: brightness(1) hue-rotate(240deg) saturate(1.5);
+    }
+
+    75% {
+        filter: brightness(1.3) hue-rotate(300deg) saturate(2);
+    }
+
+    100% {
+        filter: brightness(1) hue-rotate(360deg) saturate(1.5);
+    }
+}
+
+.block-icon-3d.enchanted-glow {
+    animation: enchantShimmer 2.5s ease-in-out infinite;
+    filter: hue-rotate(200deg) saturate(2);
+}
+
+.enchant-tag {
+    font-size: 6px;
+    color: #b060ff;
+    display: inline-block;
+    margin-left: 4px;
+    font-style: italic;
+    text-shadow: 0 0 4px #8800ff;
+    vertical-align: middle;
+}
+
+/* Feather Falling indicator on boots armor slot */
+.boots-ff-indicator {
+    position: absolute;
+    bottom: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 7px;
+    color: #aae;
+    white-space: nowrap;
 }

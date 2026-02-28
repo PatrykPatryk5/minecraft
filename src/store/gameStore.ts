@@ -38,12 +38,13 @@ export type Dimension = 'overworld' | 'nether' | 'end';
 
 // ── GameState Interface ───────────────────────────────────
 /** Which overlay is open (only one at a time) */
-export type ActiveOverlay = 'none' | 'pause' | 'inventory' | 'crafting' | 'furnace' | 'chest';
+export type ActiveOverlay = 'none' | 'pause' | 'inventory' | 'crafting' | 'furnace' | 'chest' | 'moduleCrash';
 
 export interface InventorySlot {
     id: number;   // block/item type
     count: number;
     durability?: number; // current durability left
+    featherFalling?: number; // enchantment level 1-4 (only for boots)
 }
 
 export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard';
@@ -90,6 +91,7 @@ export interface ArmorSlots {
 
 export interface ChestData {
     slots: InventorySlot[];
+    isOpen?: boolean;
 }
 
 export interface DroppedItem {
@@ -104,6 +106,8 @@ export interface FallingBlock {
     id: string;
     type: number;
     pos: [number, number, number];
+    velocity?: [number, number, number];
+    isDebris?: boolean;
 }
 
 export interface ArrowEntity {
@@ -219,8 +223,10 @@ export interface GameState {
     maxHealth: number;
     hunger: number;
     maxHunger: number;
-    setHealth: (h: number) => void;
-    takeDamage: (amount: number, options?: { ignoreArmor?: boolean }) => void;
+    absorption: number;
+    setAbsorption: (a: number) => void;
+    setHealth: (h: number, source?: string) => void;
+    takeDamage: (amount: number, options?: { ignoreArmor?: boolean, source?: string }) => void;
     setHunger: (h: number) => void;
 
     // ── Settings ──────────────────────────────────────────
@@ -240,7 +246,12 @@ export interface GameState {
 
     // ── Death ──────────────────────────────────────────────
     isDead: boolean;
-    setDead: (v: boolean) => void;
+    deathReason: string | null;
+    setDead: (v: boolean, reason?: string | null) => void;
+
+    // ── Additional block states ────────────────────────────
+    doors: Record<string, number>;
+    setDoorState: (key: string, originalType: number | null) => void;
 
     // ── Hotbar / Inventory / Item Collection ──────────────
     hotbarSlot: number;
@@ -350,6 +361,11 @@ export interface GameState {
     serverWarning: { message: string; severity: 'low' | 'medium' | 'high' | 'critical' } | null;
     setServerWarning: (warning: { message: string; severity: 'low' | 'medium' | 'high' | 'critical' } | null) => void;
 
+    // ── Modules / Error Boundaries ────────────────────────
+    crashedModules: Record<string, { error: Error; disabled: boolean; timestamp: number }>;
+    reportModuleCrash: (name: string, error: Error) => void;
+    setModuleState: (name: string, disabled: boolean, resetCrash?: boolean) => void;
+
     // ── Armor ──────────────────────────────────────────────
     armor: ArmorSlots;
     setArmor: (a: ArmorSlots) => void;
@@ -362,13 +378,15 @@ export interface GameState {
 
     // ── Falling/Gravity Blocks ─────────────────────────────
     fallingBlocks: FallingBlock[];
-    spawnFallingBlock: (type: number, pos: [number, number, number]) => void;
+    spawnFallingBlock: (type: number, pos: [number, number, number], velocity?: [number, number, number], isDebris?: boolean) => void;
     landFallingBlock: (id: string, pos: [number, number, number], type: number) => void;
+    removeFallingBlock: (id: string) => void;
 
     // ── Chests ─────────────────────────────────────────────
     chests: Record<string, ChestData>;
     getChest: (key: string) => ChestData | null;
     setChest: (key: string, data: ChestData, fromNetwork?: boolean) => void;
+    toggleChestOpen: (key: string, open: boolean) => void;
 
     // ── Pistons ────────────────────────────────────────────
     pistons: Record<string, PistonData>;
@@ -570,6 +588,8 @@ const useGameStore = create<GameState>((set, get) => ({
         const affectedChunks = new Map<string, Uint16Array>();
         const newLightSources = { ...s.lightSources };
         const versions = { ...s.chunkVersions };
+        let newChests = { ...s.chests };
+        let chestsChanged = false;
 
         for (const b of blocks) {
             if (b.y < 0 || b.y > 255) continue;
@@ -592,6 +612,23 @@ const useGameStore = create<GameState>((set, get) => ({
             // If it's the original from state, copy it
             if (chunk === s.chunks[key]) {
                 chunk = new Uint16Array(chunk);
+            }
+
+            if (oldType === BlockType.CHEST || oldType === BlockType.ENDER_CHEST) {
+                if (newType !== BlockType.CHEST && newType !== BlockType.ENDER_CHEST) {
+                    const ckey = `${b.x},${b.y},${b.z}`;
+                    if (newChests[ckey]) {
+                        delete newChests[ckey];
+                        chestsChanged = true;
+                    }
+                }
+            }
+            if (newType === BlockType.CHEST || newType === BlockType.ENDER_CHEST) {
+                const ckey = `${b.x},${b.y},${b.z}`;
+                if (!newChests[ckey]) {
+                    newChests[ckey] = { slots: makeSlots(27), isOpen: false };
+                    chestsChanged = true;
+                }
             }
 
             chunk[idx] = newType;
@@ -646,12 +683,13 @@ const useGameStore = create<GameState>((set, get) => ({
             saveChunk(`${s.dimension}:${parts[0]},${parts[1]}`, chunk);
         }
 
-        set({
+        set((state) => ({
             chunks: newChunks,
             lightSources: newLightSources,
             chunkVersions: versions,
-            generatedChunks: newGen
-        });
+            generatedChunks: newGen,
+            ...(chestsChanged ? { chests: newChests } : {})
+        }));
 
         // Simplified: just trigger one redstone update for each affected position
         import('../core/redstoneSystem').then(({ updateRedstone }) => {
@@ -745,6 +783,14 @@ const useGameStore = create<GameState>((set, get) => ({
             }));
         }
 
+        if (oldType === BlockType.CHEST || oldType === BlockType.ENDER_CHEST) {
+            set((state) => {
+                const newChests = { ...state.chests };
+                delete newChests[`${x},${y},${z}`];
+                return { chests: newChests };
+            });
+        }
+
         // Trigger Linked breaking & actions
         import('../core/blockActions').then(({ onBlockBroken }) => {
             onBlockBroken(x, y, z, oldRaw);
@@ -788,6 +834,8 @@ const useGameStore = create<GameState>((set, get) => ({
         const redstoneTargets: [number, number, number][] = [];
         const bumpCounts = new Map<string, number>();
         const newLightSources = { ...s.lightSources };
+        let newChests = { ...s.chests };
+        let chestsChanged = false;
 
         const queueBump = (cx: number, cz: number) => {
             const k = chunkKey(cx, cz);
@@ -815,6 +863,14 @@ const useGameStore = create<GameState>((set, get) => ({
                 newLightSources[key] = lights.filter(i => i !== idx);
             }
 
+            if (oldType === BlockType.CHEST || oldType === BlockType.ENDER_CHEST) {
+                const ckey = `${x},${y},${z}`;
+                if (newChests[ckey]) {
+                    delete newChests[ckey];
+                    chestsChanged = true;
+                }
+            }
+
             if (redstoneTargets.length < 256) redstoneTargets.push([x, y, z]);
         }
 
@@ -831,7 +887,7 @@ const useGameStore = create<GameState>((set, get) => ({
             queueBump(cx, cz - 1);
         }
 
-        if (bumpCounts.size > 0 || Object.keys(newLightSources).length !== Object.keys(s.lightSources).length) {
+        if (bumpCounts.size > 0 || Object.keys(newLightSources).length !== Object.keys(s.lightSources).length || chestsChanged) {
             set((state) => {
                 const chunkVersions = { ...state.chunkVersions };
                 for (const [key, delta] of bumpCounts) {
@@ -839,7 +895,8 @@ const useGameStore = create<GameState>((set, get) => ({
                 }
                 return {
                     chunkVersions,
-                    lightSources: newLightSources
+                    lightSources: newLightSources,
+                    ...(chestsChanged ? { chests: newChests } : {})
                 };
             });
         }
@@ -899,10 +956,14 @@ const useGameStore = create<GameState>((set, get) => ({
     maxHealth: 20,
     hunger: 20,
     maxHunger: 20,
-    setHealth: (h) => {
+    absorption: 0,
+    setAbsorption: (a) => set({ absorption: Math.max(0, a) }),
+    setHealth: (h, source) => {
         const clamped = Math.max(0, Math.min(get().maxHealth, h));
         set({ health: clamped });
-        if (clamped <= 0 && !get().isDead) set({ isDead: true });
+        if (clamped <= 0 && !get().isDead) {
+            set({ isDead: true, deathReason: source || 'Zginąłeś!' });
+        }
     },
     takeDamage: (amount, options = {}) => {
         if (get().gameMode === 'creative' || get().isDead) return;
@@ -921,7 +982,18 @@ const useGameStore = create<GameState>((set, get) => ({
         const finalDamage = Math.max(options.ignoreArmor ? 0.5 : 1, amount * reduction);
 
         const currentHealth = get().health;
-        get().setHealth(currentHealth - finalDamage);
+        const currentAbsorb = get().absorption;
+
+        if (currentAbsorb > 0) {
+            if (finalDamage <= currentAbsorb) {
+                get().setAbsorption(currentAbsorb - finalDamage);
+            } else {
+                get().setAbsorption(0);
+                get().setHealth(currentHealth - (finalDamage - currentAbsorb), options.source);
+            }
+        } else {
+            get().setHealth(currentHealth - finalDamage, options.source);
+        }
 
         // Damage armor durability
         if (armorPoints > 0 && !options.ignoreArmor) {
@@ -972,7 +1044,8 @@ const useGameStore = create<GameState>((set, get) => ({
 
     // ── Death ──────────────────────────────────────────────
     isDead: false,
-    setDead: (v) => set({ isDead: v }),
+    deathReason: null,
+    setDead: (v, reason = null) => set({ isDead: v, deathReason: reason }),
 
     // ── Hotbar / Inventory ────────────────────────────────
     hotbarSlot: 0,
@@ -1200,9 +1273,30 @@ const useGameStore = create<GameState>((set, get) => ({
         if (!slot || !slot.id) return;
         const info = BLOCK_DATA[slot.id];
         if (!info?.foodRestore) return;
-        if (s.hunger >= s.maxHunger) return;
+
+        // Golden apple always allowed; others need hungry belly
+        const isGoldenApple = slot.id === BlockType.GOLDEN_APPLE;
+        const canEat = isGoldenApple || s.hunger < s.maxHunger;
+        if (!canEat) return;
+
+        // Restore hunger (capped at max)
         s.setHunger(Math.min(s.maxHunger, s.hunger + info.foodRestore));
+
+        // Food saturation: high-calorie foods slow hunger drain
+        // Saturation = foodRestore * saturationModifier (stored in blockData or default 0.6)
+        const satMod = (info as any).saturation ?? 0.6;
+        const newSat = Math.min(s.maxHunger, (s as any).saturation ?? 0 + info.foodRestore * satMod);
+        set({ saturation: newSat } as any);
+
+        // Golden Apple: +4 HP + absorption effect
+        if (isGoldenApple) {
+            const newHp = Math.min(s.maxHealth, s.health + 4);
+            s.setHealth(newHp);
+            s.setAbsorption(4); // Grants 2 golden hearts (4 points)
+        }
+
         s.consumeHotbarItem(s.hotbarSlot);
+        // playSound('eat') would go here — add if sound is available
     },
 
     // ── Day/Night ─────────────────────────────────────────
@@ -1342,7 +1436,36 @@ const useGameStore = create<GameState>((set, get) => ({
         return pts;
     },
 
-    // ── Chests ─────────────────────────────────────────────
+    // ── Modules / Error Boundaries ────────────────────────
+    crashedModules: {},
+    reportModuleCrash: (name, error) => set((s) => {
+        console.warn(`[SafeModule] Module crashed: ${name}`, error);
+        return {
+            crashedModules: {
+                ...s.crashedModules,
+                [name]: { error, disabled: false, timestamp: Date.now() }
+            },
+            activeOverlay: 'moduleCrash' // Force open crash overlay
+        };
+    }),
+    setModuleState: (name, disabled, resetCrash = false) => set((s) => {
+        const next = { ...s.crashedModules };
+        if (resetCrash) {
+            delete next[name];
+        } else if (next[name]) {
+            next[name] = { ...next[name], disabled };
+        } else {
+            next[name] = { error: new Error('Disabled manually'), disabled, timestamp: Date.now() };
+        }
+
+        // If no non-disabled active crashes remain, and overlay was crash, close it
+        const hasActiveCrash = Object.values(next).some(m => !m.disabled && m.timestamp > 0);
+        return {
+            crashedModules: next,
+            activeOverlay: s.activeOverlay === 'moduleCrash' && !hasActiveCrash ? 'none' : s.activeOverlay
+        };
+    }),
+
     chests: {},
     getChest: (key) => get().chests[key] || null,
     setChest: (key: string, data: ChestData, fromNetwork: boolean = false) => {
@@ -1354,6 +1477,26 @@ const useGameStore = create<GameState>((set, get) => ({
                 getConnection().sendInventoryUpdate({ type: 'chest', key, data });
             });
         }
+    },
+    toggleChestOpen: (key: string, open: boolean) => {
+        const chest = get().chests[key];
+        if (!chest && open) {
+            // Initialize chest if it doesn't exist yet but user tries to open
+            get().setChest(key, { slots: Array.from({ length: 27 }, () => ({ id: 0, count: 0 })), isOpen: true });
+        } else if (chest) {
+            get().setChest(key, { ...chest, isOpen: open });
+        }
+    },
+
+    // ── Doors ─────────────────────────────────────────────
+    doors: {},
+    setDoorState: (key, originalType) => {
+        set((s) => {
+            const next = { ...s.doors };
+            if (originalType === null) delete next[key];
+            else next[key] = originalType;
+            return { doors: next };
+        });
     },
 
     // ── Dropped Items ──────────────────────────────────────
@@ -1383,14 +1526,39 @@ const useGameStore = create<GameState>((set, get) => ({
 
     // ── Falling/Gravity Blocks ─────────────────────────────
     fallingBlocks: [],
-    spawnFallingBlock: (type, pos) => set((s) => ({
-        fallingBlocks: [...s.fallingBlocks, { id: Math.random().toString(36).substr(2, 9), type, pos }]
+    spawnFallingBlock: (type, pos, velocity, isDebris) => set((s) => ({
+        fallingBlocks: [...s.fallingBlocks, { id: Math.random().toString(36).substr(2, 9), type, pos, velocity, isDebris }]
     })),
     landFallingBlock: (id, pos, type) => {
         const s = get();
-        s.addBlock(pos[0], pos[1], pos[2], type);
+        let [x, y, z] = pos;
+
+        // Prevent multiple falling blocks from merging into a single voxel
+        // by scanning upwards for the first empty/replaceable space.
+        while (y <= 255) {
+            const currentObj = s.getBlock(x, y, z);
+            const isReplaceable =
+                currentObj === 0 ||
+                currentObj === 0x7FFF ||
+                currentObj === 8 || // WATER
+                currentObj === 9 || // LAVA
+                currentObj === 31 || // TALL GRASS
+                currentObj === 37 || // DANDELION
+                currentObj === 38 || // POPPY
+                currentObj === 106;  // VINES
+
+            if (isReplaceable) {
+                break;
+            }
+            y++;
+        }
+
+        s.addBlock(x, y, z, type);
         set((s) => ({ fallingBlocks: s.fallingBlocks.filter(b => b.id !== id) }));
     },
+    removeFallingBlock: (id: string) => set((s) => ({
+        fallingBlocks: s.fallingBlocks.filter(b => b.id !== id)
+    })),
 
     primedTNT: [],
     spawnTNT: (pos: [number, number, number], fuse: number = 80, fromNetwork: boolean = false) => {
@@ -1497,14 +1665,23 @@ const useGameStore = create<GameState>((set, get) => ({
     // ── Storage / Persistence ─────────────────────────────
     saveGame: () => {
         const s = get();
+        // Keep inventory as (number | null | SavedSlot)[] for backward compat
+        const inventorySave = s.inventory.map(slot => slot.id === 0 ? null : slot);
+        const hotbarSave = s.hotbar.map(slot => slot.id === 0 ? null : slot).map(s => s || { id: 0, count: 0 }); // guarantee no nulls if typed strict, but we can save exactly as is. Actually storage expects SavedSlot
+
         const state: PlayerSaveState = {
             pos: s.playerPos,
             rot: [0, 0], // Optional, can add pitch/yaw later
-            inventory: s.inventory.map(slot => slot.id === 0 ? null : slot.id),
+            inventory: inventorySave as any,
+            hotbar: s.hotbar as any,
+            armor: s.armor as any,
+            chests: s.chests as any,
             health: s.health,
             dayTime: s.dayTime,
             dimension: s.dimension,
-            seed: s.worldSeed
+            seed: s.worldSeed,
+            doors: s.doors,
+            gameMode: s.gameMode
         };
         savePlayerState(state);
     },
@@ -1513,17 +1690,37 @@ const useGameStore = create<GameState>((set, get) => ({
         const state = loadPlayerState();
         if (state) {
             // Inventory translation (null index format to InventorySlot format)
-            const loadedInventory = state.inventory.map(id =>
-                id ? { id, count: 64 } : emptySlot()
-            );
+            const loadedInventory = state.inventory.map(item => {
+                if (item === null) return emptySlot();
+                if (typeof item === 'number') return { id: item, count: 64 };
+                return item as InventorySlot; // Using the new SavedSlot format
+            });
+
+            // Hotbar translation
+            let loadedHotbar = get().hotbar;
+            if (state.hotbar && state.hotbar.length === 9) {
+                loadedHotbar = state.hotbar as unknown as InventorySlot[];
+            }
+
+            // Armor translation
+            const defaultArmor = { helmet: emptySlot(), chestplate: emptySlot(), leggings: emptySlot(), boots: emptySlot() };
+            const loadedArmor = state.armor ? (state.armor as unknown as ArmorSlots) : defaultArmor;
+
+            // Chests translation
+            const loadedChests = state.chests ? (state.chests as unknown as Record<string, ChestData>) : {};
 
             set({
                 playerPos: state.pos,
                 inventory: loadedInventory,
+                hotbar: loadedHotbar,
+                armor: loadedArmor,
+                chests: loadedChests,
                 health: state.health,
-                dayTime: state.dayTime,
+                dayTime: Math.min(Math.max(state.dayTime, 0), 1) || 0,
                 dimension: state.dimension,
-                worldSeed: state.seed
+                worldSeed: state.seed,
+                doors: state.doors || {},
+                gameMode: state.gameMode || 'survival'
             });
             return true;
         }

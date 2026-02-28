@@ -417,12 +417,14 @@ export const SMELTING_RECIPES: SmeltingRecipe[] = [
     { input: B.BEEF_RAW, output: B.STEAK, count: 1, name: 'Stek', duration: 200 },
     { input: B.CHICKEN_RAW, output: B.CHICKEN_COOKED, count: 1, name: 'Pieczony Kurczak', duration: 200 },
     { input: B.POTATO, output: B.BAKED_POTATO, count: 1, name: 'Pieczony Ziemniak', duration: 200 },
-    { input: B.NETHERRACK, output: B.BRICK_ITEM, count: 1, name: 'Cegła Netheru', duration: 200 },
+    { input: B.NETHERRACK, output: B.NETHER_BRICKS, count: 1, name: 'Cegły Netheru', duration: 200 },
     // ─── Raw Ore Smelting ─────────────────────────────
     { input: B.COPPER_ORE, output: B.COPPER_INGOT, count: 1, name: 'Sztabka Miedzi', duration: 200 },
     { input: B.RAW_IRON, output: B.IRON_INGOT, count: 1, name: 'Sztabka Żelaza', duration: 200 },
     { input: B.RAW_GOLD, output: B.GOLD_INGOT, count: 1, name: 'Sztabka Złota', duration: 200 },
     { input: B.RAW_COPPER, output: B.COPPER_INGOT, count: 1, name: 'Sztabka Miedzi', duration: 200 },
+    { input: B.DEEPSLATE_COPPER_ORE, output: B.COPPER_INGOT, count: 1, name: 'Sztabka Miedzi (łupek)', duration: 200 },
+    { input: B.COBBLED_DEEPSLATE, output: B.DEEPSLATE, count: 1, name: 'Łupek', duration: 200 },
 ];
 
 /** Fuel values: how many items one piece of fuel can smelt */

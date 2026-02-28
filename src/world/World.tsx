@@ -48,10 +48,11 @@ const World: React.FC = () => {
     const { camera } = useThree();
     const renderDistance = useGameStore((s) => s.renderDistance);
 
+    const activeChunksRef = useRef<ChunkEntry[]>([]);
     const loadQueueRef = useRef<ChunkEntry[]>([]);
     const loadedKeysRef = useRef(new Set<string>());
     const pendingKeysRef = useRef(new Set<string>());
-    const activeChunksRef = useRef<ChunkEntry[]>([]);
+    const failedKeysRef = useRef(new Map<string, number>()); // Tracks retry counts for broken chunks
     const lastPlayerChunkRef = useRef<string>('');
     const lastRecalcTime = useRef(0);
     const needsRerenderRef = useRef(false);
@@ -61,6 +62,7 @@ const World: React.FC = () => {
     const lastWorldTickRef = useRef(0);
     const worldTickQueuedRef = useRef(false);
     const lastFurnaceTickRef = useRef(0);
+    const savedKeysCacheRef = useRef<Set<string> | null>(null);
 
     // Minimal state — only updated when the chunk LIST changes (not every arrival)
     const [visibleChunks, setVisibleChunks] = useState<ChunkEntry[]>([]);
@@ -122,11 +124,26 @@ const World: React.FC = () => {
         lastDimensionRef.current = dimension;
         loadedKeysRef.current.clear();
         pendingKeysRef.current.clear();
+        failedKeysRef.current.clear();
         activeChunksRef.current = [];
         loadQueueRef.current = [];
         lastPlayerChunkRef.current = '';
+        savedKeysCacheRef.current = null; // Re-fetch on dimension change
         getWorkerPool()?.clearQueue(); // Cancel pending generation for old dimension
     }
+
+    // Lazy load saved keys from IDB once per dimension
+    useEffect(() => {
+        if (!savedKeysCacheRef.current) {
+            import('../core/storage').then(({ getSavedChunkKeys }) => {
+                getSavedChunkKeys().then((keys) => {
+                    savedKeysCacheRef.current = keys;
+                    // Trigger a recalculation now that we know what chunks exist
+                    recalculate();
+                });
+            });
+        }
+    }, [dimension]);
 
     // ── Handle worker results — NO setState ─────────────
     const onChunkReady = useCallback((result: any) => {
@@ -153,21 +170,72 @@ const World: React.FC = () => {
     // ── Request chunk generation ─────────────────────────
     const requestChunk = useCallback((cx: number, cz: number) => {
         const key = chunkKey(cx, cz);
+
+        // If it's already loaded or currently pending, skip
         if (loadedKeysRef.current.has(key) || pendingKeysRef.current.has(key)) return;
+
+        // If it failed too many times, perma-ban it to prevent locking the queue
+        const failCount = failedKeysRef.current.get(key) || 0;
+        if (failCount >= 3) return;
 
         pendingKeysRef.current.add(key);
 
         const dim = useGameStore.getState().dimension;
+        const storageKey = `${dim}:${key}`;
 
+        // Check cache first if it exists
+        if (savedKeysCacheRef.current && !savedKeysCacheRef.current.has(storageKey)) {
+            // Chunk definitely doesn't exist in IndexedDB, generate immediately without async hit
+            generateFreshChunk(cx, cz, dim, key);
+            return;
+        }
+
+        // Try to load from IndexedDB first
+        import('../core/storage').then(({ loadChunk }) => {
+            loadChunk(storageKey).then((savedData) => {
+                // If chunk was already loaded/generated while we were reading from DB, skip
+                if (!pendingKeysRef.current.has(key)) return;
+
+                if (savedData) {
+                    // We have saved data, use it directly!
+                    useGameStore.getState().setChunkData(cx, cz, dim, savedData);
+                    loadedKeysRef.current.add(key);
+                    pendingKeysRef.current.delete(key);
+                    checkChunkBorders(cx, cz);
+                    chunkArrivedCountRef.current++;
+                } else {
+                    // Cache misses or it wasn't there
+                    if (savedKeysCacheRef.current) savedKeysCacheRef.current.delete(storageKey);
+                    // No saved data, we must generate a fresh chunk
+                    generateFreshChunk(cx, cz, dim, key);
+                }
+            }).catch(e => {
+                console.error(`IDB load error for ${storageKey}:`, e);
+                // Fallback to generation on IDB crash
+                generateFreshChunk(cx, cz, dim, key);
+            });
+        }).catch(e => {
+            console.error("Storage import error:", e);
+            generateFreshChunk(cx, cz, dim, key);
+        });
+    }, [onChunkReady]);
+
+    const generateFreshChunk = useCallback((cx: number, cz: number, dim: string, key: string) => {
         const pool = getWorkerPool();
         if (pool?.isReady()) {
             pool.submit(cx, cz, dim, (result) => {
                 if (!result) {
                     pendingKeysRef.current.delete(key);
-                    const known = loadQueueRef.current.some((e) => e.key === key);
-                    if (!known) {
+
+                    const failCount = (failedKeysRef.current.get(key) || 0) + 1;
+                    failedKeysRef.current.set(key, failCount);
+
+                    if (failCount < 3) {
+                        // Put it back in the queue, we'll try again later
                         const active = activeChunksRef.current.find((e) => e.key === key);
                         if (active) loadQueueRef.current.unshift(active);
+                    } else {
+                        console.warn(`Chunk ${key} generation failed 3 times. Banning from queue.`);
                     }
                     return;
                 }
@@ -183,6 +251,8 @@ const World: React.FC = () => {
             useGameStore.getState().setChunkData(cx, cz, dim, data);
             loadedKeysRef.current.add(key);
             pendingKeysRef.current.delete(key);
+            checkChunkBorders(cx, cz);
+            chunkArrivedCountRef.current++;
         }
     }, [onChunkReady]);
 
@@ -236,6 +306,13 @@ const World: React.FC = () => {
         loadQueueRef.current = toLoad;
         activeChunksRef.current = active;
 
+        // Drop stale generation tasks from the worker queue
+        const pool = getWorkerPool();
+        if (pool) {
+            const activeKeySet = new Set(active.map(a => a.key));
+            pool.cancelStale(activeKeySet);
+        }
+
         // Unload distant chunks
         const unloadDist = rd + UNLOAD_BUFFER;
         const toRemove: string[] = [];
@@ -251,7 +328,16 @@ const World: React.FC = () => {
             loadedKeysRef.current.delete(k);
         }
         if (toRemove.length > 0) {
-            useGameStore.getState().unloadChunkData(toRemove);
+            const s = useGameStore.getState();
+            import('../core/storage').then(({ saveChunk }) => {
+                for (const key of toRemove) {
+                    const chunkData = s.chunks[key];
+                    if (chunkData) {
+                        saveChunk(`${dimension}:${key}`, chunkData);
+                    }
+                }
+                s.unloadChunkData(toRemove);
+            });
         }
 
         // Only update state when chunk list actually changed
@@ -307,7 +393,8 @@ const World: React.FC = () => {
         // Retry safety: if a visible chunk is neither loaded nor pending, queue it again.
         for (let i = 0; i < activeChunksRef.current.length && sent < BATCH_PER_FRAME; i++) {
             const c = activeChunksRef.current[i];
-            if (!loadedKeysRef.current.has(c.key) && !pendingKeysRef.current.has(c.key)) {
+            const failCount = failedKeysRef.current.get(c.key) || 0;
+            if (!loadedKeysRef.current.has(c.key) && !pendingKeysRef.current.has(c.key) && failCount < 3) {
                 requestChunk(c.cx, c.cz);
                 sent++;
             }

@@ -134,7 +134,7 @@ export type SoundType =
     | 'explode' | 'bow' | 'pop' | 'fuse'
     | 'anvil' | 'xp' | 'fireball' | 'portal'
     | 'piston_out' | 'piston_in' | 'gravel' | 'roar'
-    | 'grass_step' | 'stone_step' | 'wood_step' | 'sand_step';
+    | 'grass_step' | 'stone_step' | 'wood_step' | 'sand_step' | 'slime_step';
 
 // ─── 3D Audio Listener ───────────────────────────────────
 export function updateListener(x: number, y: number, z: number, fx: number, fy: number, fz: number): void {
@@ -281,6 +281,27 @@ export function playSound(type: SoundType, pos?: [number, number, number]): void
                 env.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
                 noise.connect(filter).connect(env).connect(output);
                 noise.start(now); noise.stop(now + 0.12);
+                break;
+            }
+            case 'slime_step': {
+                // Squishy bounce
+                const osc = createTone(ctx, 400 + Math.random() * 100, 0.15, 'sine');
+                osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
+                const env = ctx.createGain();
+                env.gain.setValueAtTime(0.3, now);
+                env.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+                osc.connect(env).connect(output);
+
+                const noise = createNoise(ctx, 0.1);
+                const lp = ctx.createBiquadFilter();
+                lp.type = 'bandpass'; lp.frequency.value = 2000;
+                const nEnv = ctx.createGain();
+                nEnv.gain.setValueAtTime(0.1, now);
+                nEnv.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+                noise.connect(lp).connect(nEnv).connect(output);
+
+                osc.start(now); osc.stop(now + 0.15);
+                noise.start(now); noise.stop(now + 0.1);
                 break;
             }
             case 'click': {

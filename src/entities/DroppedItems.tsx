@@ -60,6 +60,39 @@ const DroppedItem: React.FC<{ id: string; type: number; initialPos: [number, num
         }
     });
 
+    // Listen to explosive physics shockwaves
+    React.useEffect(() => {
+        const onExplosion = (e: Event) => {
+            const ev = e as CustomEvent;
+            if (!rbRef.current || pickedUp.current) return;
+            const pos = rbRef.current.translation();
+            const dx = pos.x - ev.detail.x;
+            const dy = pos.y - ev.detail.y;
+            const dz = pos.z - ev.detail.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+            if (dist < ev.detail.radius) {
+                const force = Math.max(0, ev.detail.maxForce * (1 - dist / ev.detail.radius));
+                if (force > 0 && dist > 0) {
+                    rbRef.current.applyImpulse({
+                        x: (dx / dist) * force * 0.2,
+                        y: ((dy / dist) * force + force * 0.5) * 0.2, // Items are light, send them flying up
+                        z: (dz / dist) * force * 0.2
+                    }, true);
+                    // Add random spin
+                    rbRef.current.applyTorqueImpulse({
+                        x: (Math.random() - 0.5) * 0.5,
+                        y: (Math.random() - 0.5) * 0.5,
+                        z: (Math.random() - 0.5) * 0.5
+                    }, true);
+                }
+            }
+        };
+
+        window.addEventListener('explosion-knockback', onExplosion);
+        return () => window.removeEventListener('explosion-knockback', onExplosion);
+    }, []);
+
     return (
         <RigidBody
             ref={rbRef}

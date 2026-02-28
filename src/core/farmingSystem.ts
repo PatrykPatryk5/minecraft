@@ -104,6 +104,12 @@ export const growCrop = (x: number, y: number, z: number) => {
 export const growSapling = (x: number, y: number, z: number) => {
     const s = useGameStore.getState();
     const block = s.getBlock(x, y, z);
+    const below = s.getBlock(x, y - 1, z);
+
+    // Saplings can only grow on grass, dirt, rooted dirt, mud, etc.
+    if (below !== BlockType.GRASS && below !== BlockType.DIRT && below !== BlockType.MUD) {
+        return; // Invalid growing condition
+    }
 
     if (block === BlockType.OAK_SAPLING) {
         // Use shared tree generation logic

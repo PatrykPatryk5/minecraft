@@ -12,7 +12,7 @@ import { BlockType, BLOCK_DATA } from './blockTypes';
 import { CHUNK_SIZE, MAX_HEIGHT } from './terrainGen';
 
 // Blocks affected by gravity
-const GRAVITY_BLOCKS = new Set([BlockType.SAND, BlockType.GRAVEL]);
+const GRAVITY_BLOCKS = new Set([BlockType.SAND, BlockType.GRAVEL, BlockType.ANVIL]);
 
 export function checkGravityAbove(x: number, y: number, z: number): void {
     const s = useGameStore.getState();

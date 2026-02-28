@@ -12,6 +12,8 @@ const DebugScreen: React.FC = () => {
     const fov = useGameStore((s) => s.fov);
     const dimension = useGameStore((s) => s.dimension);
     const worldSeed = useGameStore((s) => s.worldSeed);
+    const isMultiplayer = useGameStore((s) => s.isMultiplayer);
+    const ping = useGameStore((s) => (s as any).ping ?? 0);
     const mobsCount = useGameStore((s) => s.mobs.length);
     const itemsCount = useGameStore((s) => s.droppedItems.length);
 
@@ -155,6 +157,9 @@ const DebugScreen: React.FC = () => {
                 <p>Items: <span ref={itemsRef}>0</span> | Seed: {worldSeed}</p>
                 <p>&nbsp;</p>
                 <p>E — inventory | C — crafting | ESC — pause</p>
+                {isMultiplayer && (
+                    <p>🌐 Multiplayer | Ping: <strong style={{ color: ping < 60 ? '#55ff55' : ping < 150 ? '#ffaa00' : '#ff4444' }}>{ping}ms</strong></p>
+                )}
             </div>
         </div>
     );

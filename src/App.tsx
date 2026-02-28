@@ -10,6 +10,8 @@ import Player from './player/Player';
 import DayNightCycle from './environment/DayNightCycle';
 import Clouds from './environment/Clouds';
 import TorchLights from './environment/TorchLights';
+import HandheldLight from './environment/HandheldLight';
+import EnchantingTables from './environment/EnchantingTables';
 import BlockParticles from './effects/BlockParticles';
 import HUD from './ui/HUD';
 import DebugScreen from './ui/DebugScreen';
@@ -20,6 +22,7 @@ import { Physics } from '@react-three/rapier';
 import Inventory from './ui/Inventory';
 import CraftingScreen from './ui/CraftingScreen';
 import FurnaceScreen from './ui/FurnaceScreen';
+import ChestScreen from './ui/ChestScreen';
 import ChatBox from './ui/ChatBox';
 import DeathScreen from './ui/DeathScreen';
 import ErrorBoundary from './ui/ErrorBoundary';
@@ -42,7 +45,8 @@ import { ThrowablesManager } from './entities/Throwables';
 import MobileControls from './ui/MobileControls';
 import PreJoinShield from './ui/PreJoinShield';
 import TabList from './ui/TabList';
-
+import SafeModule from './ui/SafeModule';
+import ModuleCrashOverlay from './ui/ModuleCrashOverlay';
 
 const UnderwaterOverlay = () => {
     const isUnderwater = useGameStore((s) => s.isUnderwater);
@@ -61,21 +65,27 @@ const SceneContent: React.FC = () => {
     return (
         <>
             <DayNightCycle />
-            <Physics>
+            <Physics
+                timeStep="vary"
+                interpolate
+                numSolverIterations={10}
+            >
                 <World />
                 <Player />
-                <MobRenderer />
-                <MultiplayerRenderer />
-                <DroppedItemsManager />
-                <FallingBlocksManager />
-                <ArrowsManager />
-                <TNTManager />
-                <ThrowablesManager />
+                <SafeModule name="MobRenderer"><MobRenderer /></SafeModule>
+                <SafeModule name="MultiplayerRenderer"><MultiplayerRenderer /></SafeModule>
+                <SafeModule name="DroppedItems"><DroppedItemsManager /></SafeModule>
+                <SafeModule name="FallingBlocks"><FallingBlocksManager /></SafeModule>
+                <SafeModule name="Arrows"><ArrowsManager /></SafeModule>
+                <SafeModule name="TNT"><TNTManager /></SafeModule>
+                <SafeModule name="Throwables"><ThrowablesManager /></SafeModule>
             </Physics>
-            {dimension === 'overworld' && <Clouds />}
-            {dimension === 'overworld' && <Weather />}
-            <TorchLights />
-            <BlockParticles />
+            {dimension === 'overworld' && <SafeModule name="Clouds"><Clouds /></SafeModule>}
+            {dimension === 'overworld' && <SafeModule name="Weather"><Weather /></SafeModule>}
+            <SafeModule name="TorchLights"><TorchLights /></SafeModule>
+            <SafeModule name="HandheldLight"><HandheldLight /></SafeModule>
+            <SafeModule name="EnchantingTables"><EnchantingTables /></SafeModule>
+            <SafeModule name="BlockParticles"><BlockParticles /></SafeModule>
 
             {usePostProcessing && isFabulous && (
                 <EffectComposer multisampling={graphics === 'fabulous' ? 4 : 0}>
@@ -228,7 +238,9 @@ const App: React.FC = () => {
             {isPlaying && <Inventory />}
             {isPlaying && <CraftingScreen />}
             {isPlaying && <FurnaceScreen />}
+            {isPlaying && <ChestScreen />}
             {isPlaying && <DeathScreen />}
+            {isPlaying && <ModuleCrashOverlay />}
 
             {/* Chat */}
             {isPlaying && <ChatBox />}

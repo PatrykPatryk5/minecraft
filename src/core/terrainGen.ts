@@ -97,12 +97,27 @@ function isCave(x: number, y: number, z: number): boolean {
 function getOre(x: number, y: number, z: number): number | null {
     const o = n3(x * 0.1, y * 0.1, z * 0.1);
     const o2 = n3(x * 0.15 + 300, y * 0.15, z * 0.15 + 300);
+    const o3 = n3(x * 0.12 + 600, y * 0.12, z * 0.12 + 600);
+    const deepslate = y < 16; // Below Y 16 = deepslate zone
+
+    // Diamond: Y < 16
     if (y < 16 && o > 0.74) return BlockType.DIAMOND;
+    // Emerald: Y < 32
     if (y < 32 && o2 > 0.78) return BlockType.EMERALD_ORE;
-    if (y < 32 && o > 0.7) return BlockType.GOLD_ORE;
+    // Redstone: Y < 16, peak Y 0
     if (y < 16 && o2 > 0.65) return BlockType.REDSTONE_ORE;
-    if (y < 30 && o > 0.72 && o2 > 0.5) return BlockType.LAPIS_ORE;
+    // Gold: Y < 32
+    if (y < 32 && o > 0.7) return BlockType.GOLD_ORE;
+    // Lapis: Y < 64, peak Y 0
+    if (y < 64 && o > 0.73 && o2 > 0.5) return BlockType.LAPIS_ORE;
+    // Copper: Y 0-96, peak Y 48
+    const copperThreshold = 0.67 + Math.abs(y - 48) / 250;
+    if (y < 96 && o3 > copperThreshold) {
+        return deepslate ? BlockType.DEEPSLATE_COPPER_ORE : BlockType.COPPER_ORE;
+    }
+    // Iron: Y < 64 (also deep variant)
     if (y < 64 && o > 0.65) return BlockType.IRON_ORE;
+    // Coal: Y < 128
     if (y < 128 && o > 0.6) return BlockType.COAL_ORE;
     return null;
 }
@@ -147,14 +162,13 @@ export function generateChunk(cx: number, cz: number): ChunkData {
                 } else if (y === h) {
                     switch (biome) {
                         case 'desert': bt = BlockType.SAND; break;
-                        case 'snowy': bt = BlockType.SNOW; break;
                         case 'swamp': bt = BlockType.DIRT; break;
                         default: bt = BlockType.GRASS; break;
                     }
                 } else if (y > h - 4) {
                     bt = biome === 'desert' ? BlockType.SAND : BlockType.DIRT;
                 } else {
-                    bt = getOre(wx, y, wz) ?? BlockType.STONE;
+                    bt = getOre(wx, y, wz) ?? (y < 16 ? BlockType.DEEPSLATE : BlockType.STONE);
                 }
                 blocks[blockIndex(lx, y, lz)] = bt;
             }
@@ -185,6 +199,9 @@ export function generateChunk(cx: number, cz: number): ChunkData {
 
             // Flora
             if (h > SEA_LEVEL) {
+                if (biome === 'snowy') {
+                    blocks[blockIndex(lx, h + 1, lz)] = BlockType.SNOW;
+                }
                 const fn = n2(wx * 0.8, wz * 0.8);
                 if ((biome === 'plains' || biome === 'forest') && fn > 0.3 && (wx + wz) % 3 === 0) {
                     blocks[blockIndex(lx, h + 1, lz)] = BlockType.TALL_GRASS;

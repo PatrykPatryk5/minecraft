@@ -879,13 +879,17 @@ export class ConnectionManager {
                         store.connectedPlayers[id].nid = nid;
                     }
                 }
-                store.addChatMessage('System', `${name} joined!`, 'system');
+                store.addChatMessage('System', `§a${name} dołączył do gry!`, 'system');
                 break;
             }
 
             case 'player_leave': {
-                store.removeConnectedPlayer(packet.payload.id);
-                store.addChatMessage('System', `A player left.`, 'system');
+                const leavingId = packet.payload.id;
+                // Get name before removing
+                const leavingPlayer = store.connectedPlayers[leavingId];
+                const leavingName = leavingPlayer?.name ?? 'Gracz';
+                store.removeConnectedPlayer(leavingId);
+                store.addChatMessage('System', `§e${leavingName} wylogował się.`, 'system');
                 break;
             }
 
