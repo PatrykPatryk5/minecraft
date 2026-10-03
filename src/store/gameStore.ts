@@ -16,6 +16,7 @@ import { BlockType, DEFAULT_HOTBAR, EMPTY_HOTBAR, BLOCK_DATA } from '../core/blo
 import { saveChunk, savePlayerState, loadPlayerState, clearAllChunks, clearPlayerState, PlayerSaveState } from '../core/storage';
 import { blockIndex, CHUNK_VOLUME } from '../core/terrainGen';
 import { SMELTING_RECIPES, FUEL_VALUES } from '../core/crafting';
+import { playSound } from '../audio/sounds';
 
 // ─── Helpers ─────────────────────────────────────────────
 export const chunkKey = (cx: number, cz: number): string => `${cx},${cz}`;
@@ -169,6 +170,8 @@ export interface GameState {
 
     // ── World ─────────────────────────────────────────────
     chunks: Record<string, Uint16Array>;
+    /** Network edits kept until their base terrain chunk has loaded. */
+    networkBlockOverrides: Record<string, Record<number, number>>;
     lightSources: Record<string, number[]>; // indices of light-emitting blocks
     chunkVersions: Record<string, number>;
 
@@ -196,9 +199,9 @@ export interface GameState {
     setChunkData: (cx: number, cz: number, dimension: string, data: Uint16Array) => void;
     getBlock: (x: number, y: number, z: number) => number;
     addBlock: (x: number, y: number, z: number, typeId: number, fromNetwork?: boolean) => void;
-    addBlocks: (blocks: { x: number, y: number, z: number, typeId: number }[], fromNetwork?: boolean) => void;
+    addBlocks: (blocks: { x: number, y: number, z: number, typeId: number }[], fromNetwork?: boolean, skipRedstone?: boolean) => void;
     removeBlock: (x: number, y: number, z: number, fromNetwork?: boolean) => void;
-    removeBlocks: (blocks: [number, number, number][], fromNetwork?: boolean) => void;
+    removeBlocks: (blocks: [number, number, number][], fromNetwork?: boolean, skipRedstone?: boolean) => void;
     bumpVersion: (cx: number, cz: number) => void;
     resetWorld: () => void;
     setWorldSeed: (seed: number) => void;
@@ -350,10 +353,11 @@ export interface GameState {
         health?: number;
         latency?: number;
         ts?: number;
+        receivedAt?: number;
         lastAction?: { type: string; time: number };
         nid?: number;
     }>;
-    addConnectedPlayer: (id: string, name?: string, pos?: [number, number, number], rot?: [number, number], dimension?: Dimension, isUnderwater?: boolean, health?: number, latency?: number, ts?: number, nid?: number) => void;
+    addConnectedPlayer: (id: string, name?: string, pos?: [number, number, number], rot?: [number, number], dimension?: Dimension, isUnderwater?: boolean, health?: number, latency?: number, ts?: number, nid?: number, receivedAt?: number) => void;
     removeConnectedPlayer: (id: string) => void;
     clearConnectedPlayers: () => void;
     chatMessages: { sender: string; text: string; time: number; type?: 'info' | 'error' | 'success' | 'system' | 'player' }[];
@@ -479,6 +483,7 @@ const useGameStore = create<GameState>((set, get) => ({
 
     // ── World ─────────────────────────────────────────────
     chunks: {},
+    networkBlockOverrides: {},
     lightSources: {},
     chunkVersions: {},
     generatedChunks: new Set(),
@@ -489,7 +494,8 @@ const useGameStore = create<GameState>((set, get) => ({
         if (dimension !== get().dimension) return;
         const key = chunkKey(cx, cz);
 
-        const existing = get().chunks[key];
+        const state = get();
+        const existing = state.chunks[key];
         let finalData = data;
 
         if (existing) {
@@ -506,9 +512,18 @@ const useGameStore = create<GameState>((set, get) => ({
             if (existing.every((val, i) => val === finalData[i])) return;
         }
 
+        const overrideKey = `${dimension}|${key}`;
+        const chunkOverrides = state.networkBlockOverrides[overrideKey];
+        if (chunkOverrides) {
+            finalData = new Uint16Array(finalData);
+            for (const [index, blockType] of Object.entries(chunkOverrides)) {
+                finalData[Number(index)] = blockType;
+            }
+        }
+
         const lightIndices: number[] = [];
         for (let i = 0; i < CHUNK_VOLUME; i++) {
-            if (LIGHT_SOURCE_IDS.has(data[i] & 0x0FFF)) {
+            if (LIGHT_SOURCE_IDS.has(finalData[i] & 0x0FFF)) {
                 lightIndices.push(i);
             }
         }
@@ -536,9 +551,16 @@ const useGameStore = create<GameState>((set, get) => ({
                 newGen.add(key);
             }
 
+            let networkBlockOverrides = s.networkBlockOverrides;
+            if (chunkOverrides) {
+                networkBlockOverrides = { ...networkBlockOverrides };
+                delete networkBlockOverrides[overrideKey];
+            }
+
             return {
                 chunks: { ...s.chunks, [key]: finalData },
                 lightSources: { ...s.lightSources, [key]: lightIndices },
+                networkBlockOverrides,
                 generatedChunks: newGen,
                 chunkVersions: versions,
             };
@@ -583,9 +605,12 @@ const useGameStore = create<GameState>((set, get) => ({
         get().addBlocks([{ x, y, z, typeId }], fromNetwork);
     },
 
-    addBlocks: (blocks, fromNetwork = false) => {
+    addBlocks: (blocks, fromNetwork = false, skipRedstone = false) => {
         const s = get();
         const affectedChunks = new Map<string, Uint16Array>();
+        let networkBlockOverrides = s.networkBlockOverrides;
+        let overridesChanged = false;
+        const clonedOverrideChunks = new Set<string>();
         const newLightSources = { ...s.lightSources };
         const versions = { ...s.chunkVersions };
         let newChests = { ...s.chests };
@@ -600,6 +625,19 @@ const useGameStore = create<GameState>((set, get) => ({
             const lz = ((b.z % 16) + 16) % 16;
 
             let chunk = affectedChunks.get(key) || s.chunks[key];
+            if (!chunk && fromNetwork) {
+                if (!overridesChanged) {
+                    networkBlockOverrides = { ...networkBlockOverrides };
+                    overridesChanged = true;
+                }
+                const overrideKey = `${s.dimension}|${key}`;
+                if (!clonedOverrideChunks.has(overrideKey)) {
+                    networkBlockOverrides[overrideKey] = { ...(networkBlockOverrides[overrideKey] || {}) };
+                    clonedOverrideChunks.add(overrideKey);
+                }
+                networkBlockOverrides[overrideKey][blockIndex(lx, b.y, lz)] = b.typeId & 0x0FFF;
+                continue;
+            }
             if (!chunk) {
                 chunk = new Uint16Array(CHUNK_VOLUME);
             }
@@ -664,6 +702,7 @@ const useGameStore = create<GameState>((set, get) => ({
             if (lz === 15) bump(cx, cz + 1);
         }
 
+        if (overridesChanged) set({ networkBlockOverrides });
         if (affectedChunks.size === 0) return;
 
         const newChunks = { ...s.chunks };
@@ -692,9 +731,11 @@ const useGameStore = create<GameState>((set, get) => ({
         }));
 
         // Simplified: just trigger one redstone update for each affected position
-        import('../core/redstoneSystem').then(({ updateRedstone }) => {
-            for (const b of blocks) updateRedstone(b.x, b.y, b.z);
-        });
+        if (!skipRedstone) {
+            import('../core/redstoneSystem').then(({ updateRedstone }) => {
+                for (const b of blocks) updateRedstone(b.x, b.y, b.z);
+            });
+        }
 
         if (!fromNetwork && s.isMultiplayer) {
             import('../multiplayer/ConnectionManager').then(({ getConnection }) => {
@@ -765,8 +806,26 @@ const useGameStore = create<GameState>((set, get) => ({
         const lx = ((x % 16) + 16) % 16;
         const lz = ((z % 16) + 16) % 16;
         const chunk = get().chunks[key];
-        if (!chunk) return;
         const idx = blockIndex(lx, y, lz);
+        if (!chunk) {
+            // Remote single-block updates can beat chunk generation. Preserve
+            // the air value as a tombstone so the terrain generator cannot
+            // resurrect this block when the chunk eventually loads.
+            if (fromNetwork) {
+                const state = get();
+                const overrideKey = `${state.dimension}|${key}`;
+                set((current) => ({
+                    networkBlockOverrides: {
+                        ...current.networkBlockOverrides,
+                        [overrideKey]: {
+                            ...(current.networkBlockOverrides[overrideKey] || {}),
+                            [idx]: 0,
+                        },
+                    },
+                }));
+            }
+            return;
+        }
         if (chunk[idx] === 0) return; // Already air
 
         const oldRaw = chunk[idx];
@@ -828,9 +887,12 @@ const useGameStore = create<GameState>((set, get) => ({
         }
     },
 
-    removeBlocks: (blocks: [number, number, number][], fromNetwork = false) => {
+    removeBlocks: (blocks: [number, number, number][], fromNetwork = false, skipRedstone = false) => {
         const s = get();
         const affectedChunks = new Set<string>();
+        let networkBlockOverrides = s.networkBlockOverrides;
+        let overridesChanged = false;
+        const clonedOverrideChunks = new Set<string>();
         const redstoneTargets: [number, number, number][] = [];
         const bumpCounts = new Map<string, number>();
         const newLightSources = { ...s.lightSources };
@@ -850,6 +912,19 @@ const useGameStore = create<GameState>((set, get) => ({
             const lx = ((x % 16) + 16) % 16;
             const lz = ((z % 16) + 16) % 16;
             const chunk = s.chunks[key];
+            if (!chunk && fromNetwork) {
+                if (!overridesChanged) {
+                    networkBlockOverrides = { ...networkBlockOverrides };
+                    overridesChanged = true;
+                }
+                const overrideKey = `${s.dimension}|${key}`;
+                if (!clonedOverrideChunks.has(overrideKey)) {
+                    networkBlockOverrides[overrideKey] = { ...(networkBlockOverrides[overrideKey] || {}) };
+                    clonedOverrideChunks.add(overrideKey);
+                }
+                networkBlockOverrides[overrideKey][blockIndex(lx, y, lz)] = 0;
+                continue;
+            }
             if (!chunk) continue;
             const idx = blockIndex(lx, y, lz);
             if (chunk[idx] === 0) continue;
@@ -871,8 +946,10 @@ const useGameStore = create<GameState>((set, get) => ({
                 }
             }
 
-            if (redstoneTargets.length < 256) redstoneTargets.push([x, y, z]);
+            if (!skipRedstone && redstoneTargets.length < 256) redstoneTargets.push([x, y, z]);
         }
+
+        if (overridesChanged) set({ networkBlockOverrides });
 
         // Save and bump versions once per chunk
         for (const key of affectedChunks) {
@@ -933,6 +1010,7 @@ const useGameStore = create<GameState>((set, get) => ({
 
     resetWorld: () => set({
         chunks: {},
+        networkBlockOverrides: {},
         chunkVersions: {},
         generatedChunks: new Set(),
         playerPos: [0, 80, 0] as [number, number, number],
@@ -942,7 +1020,10 @@ const useGameStore = create<GameState>((set, get) => ({
         activeOverlay: 'none' as ActiveOverlay,
     }),
 
-    setWorldSeed: (seed) => set({ worldSeed: seed }),
+    setWorldSeed: (seed) => set((s) => ({
+        worldSeed: seed,
+        ...(s.worldSeed !== seed ? { networkBlockOverrides: {} } : {}),
+    })),
 
     // ── Player ────────────────────────────────────────────
     playerPos: [8, 80, 8] as [number, number, number],
@@ -1013,7 +1094,7 @@ const useGameStore = create<GameState>((set, get) => ({
             if (changed) set({ armor: nextArmor });
         }
 
-        import('../audio/sounds').then(({ playSound }) => playSound('hurt'));
+        playSound('hurt');
     },
     setHunger: (h) => set({ hunger: Math.max(0, Math.min(get().maxHunger, h)) }),
 
@@ -1370,7 +1451,14 @@ const useGameStore = create<GameState>((set, get) => ({
     miningProgressValue: 0,
     setMiningProgress: (p: number) => set({ miningProgressValue: p }),
     lookingAt: null,
-    setLookingAt: (pos) => set({ lookingAt: pos }),
+    setLookingAt: (pos) => set((state) => {
+        const current = state.lookingAt;
+        if (current === pos || (current === null && pos === null) || (
+            current !== null && pos !== null &&
+            current[0] === pos[0] && current[1] === pos[1] && current[2] === pos[2]
+        )) return state;
+        return { lookingAt: pos };
+    }),
 
     // ── Mobile / Virtual Input ────────────────────────────
     isMobile: /iPhone|iPad|iPod|Android/i.test(typeof navigator !== 'undefined' ? navigator.userAgent : ''),
@@ -1391,7 +1479,7 @@ const useGameStore = create<GameState>((set, get) => ({
     setIsMultiplayer: (v) => set({ isMultiplayer: v }),
     setPing: (v) => set({ ping: v }),
     connectedPlayers: {},
-    addConnectedPlayer: (id, name, pos, rot, dimension, isUnderwater, health, latency, ts, nid) => {
+    addConnectedPlayer: (id, name, pos, rot, dimension, isUnderwater, health, latency, ts, nid, receivedAt) => {
         set((s) => {
             const next = { ...s.connectedPlayers };
             const existing = next[id] || {};
@@ -1404,6 +1492,7 @@ const useGameStore = create<GameState>((set, get) => ({
                 health: health !== undefined ? health : (existing.health || 20),
                 latency: latency !== undefined ? latency : existing.latency,
                 ts: ts !== undefined ? ts : existing.ts,
+                receivedAt: pos !== undefined ? (receivedAt ?? performance.now()) : existing.receivedAt,
                 lastAction: existing.lastAction,
                 nid: nid !== undefined ? nid : existing.nid
             };
@@ -1540,12 +1629,7 @@ const useGameStore = create<GameState>((set, get) => ({
             const isReplaceable =
                 currentObj === 0 ||
                 currentObj === 0x7FFF ||
-                currentObj === 8 || // WATER
-                currentObj === 9 || // LAVA
-                currentObj === 31 || // TALL GRASS
-                currentObj === 37 || // DANDELION
-                currentObj === 38 || // POPPY
-                currentObj === 106;  // VINES
+                BLOCK_DATA[currentObj]?.solid === false;
 
             if (isReplaceable) {
                 break;

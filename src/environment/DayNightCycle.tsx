@@ -15,18 +15,15 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
     return t * t * (3 - 2 * t);
 }
 
-function lerpColor(a: THREE.Color, b: THREE.Color, t: number): THREE.Color {
-    return new THREE.Color(lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t));
-}
-
 const DayNightCycle: React.FC = () => {
     const graphics = useGameStore((s) => s.settings.graphics);
     const renderDist = useGameStore((s) => s.settings.renderDistance);
     const brightness = useGameStore((s) => s.settings.brightness || 0.5);
     const currentDim = useGameStore((s) => s.dimension);
     const brightnessMultiplier = 0.95 + brightness * 1.6;
-    const useShadows = graphics !== 'fast';
-    const shadowMapSize = graphics === 'fabulous' ? 4096 : 2048;
+    const useShadows = graphics === 'fancy' || graphics === 'fabulous';
+    // A 4096² depth map costs four times the memory of 2048² for a subtle gain.
+    const shadowMapSize = 2048;
 
     const dirLightRef = useRef<THREE.DirectionalLight>(null);
     const ambLightRef = useRef<THREE.AmbientLight>(null);
@@ -50,6 +47,7 @@ const DayNightCycle: React.FC = () => {
         night: new THREE.Color('#080812'),
         storm: new THREE.Color('#444a55'),
     }), []);
+    const colorScratch = useMemo(() => ({ base: new THREE.Color(), warm: new THREE.Color(), fog: new THREE.Color() }), []);
 
     const weather = useGameStore((s) => s.weather);
     const weatherIntensity = useGameStore((s) => s.weatherIntensity);
@@ -132,9 +130,9 @@ const DayNightCycle: React.FC = () => {
                 }
             }
 
-            const baseColor = lerpColor(sunColors.moonlight, sunColors.day, daylight);
-            const warmTint = lerpColor(baseColor, sunColors.dawn, twilight * 0.45);
-            dirLightRef.current.color.copy(warmTint);
+            colorScratch.base.copy(sunColors.moonlight).lerp(sunColors.day, daylight);
+            colorScratch.warm.copy(colorScratch.base).lerp(sunColors.dawn, twilight * 0.45);
+            dirLightRef.current.color.copy(colorScratch.warm);
             const weatherFactor = 1.0 - (weatherIntensity * 0.35);
             const sunIntensity = lerp(0.03, 1.0, daylight) + twilight * 0.08;
             dirLightRef.current.intensity = sunIntensity * weatherFactor * brightnessMultiplier;
@@ -149,12 +147,14 @@ const DayNightCycle: React.FC = () => {
                 ambLightRef.current.color.set('#2a1a35');
             } else {
                 ambLightRef.current.intensity = lerp(0.08, 0.3, daylight) * brightnessMultiplier;
-                ambLightRef.current.color.copy(lerpColor(skyColors.night, skyColors.day, daylight));
+                colorScratch.fog.copy(skyColors.night).lerp(skyColors.day, daylight);
+                ambLightRef.current.color.copy(colorScratch.fog);
             }
         }
 
         if (hemiRef.current) {
-            hemiRef.current.color.copy(lerpColor(skyColors.night, skyColors.day, daylight));
+            colorScratch.fog.copy(skyColors.night).lerp(skyColors.day, daylight);
+            hemiRef.current.color.copy(colorScratch.fog);
             hemiRef.current.groundColor.set('#553322');
             hemiRef.current.intensity = lerp(0.015, 0.11, daylight) * brightnessMultiplier;
         }
@@ -166,13 +166,12 @@ const DayNightCycle: React.FC = () => {
                 scene.fog.near = 1;
                 scene.fog.far = 25;
             } else {
-                let fogColor = lerpColor(skyColors.night, skyColors.day, daylight);
-                fogColor = lerpColor(fogColor, skyColors.dawn, twilight * 0.4);
+                colorScratch.fog.copy(skyColors.night).lerp(skyColors.day, daylight).lerp(skyColors.dawn, twilight * 0.4);
 
                 if (weather !== 'clear') {
-                    fogColor = lerpColor(fogColor, skyColors.storm, weatherIntensity);
+                    colorScratch.fog.lerp(skyColors.storm, weatherIntensity);
                 }
-                scene.fog.color.copy(fogColor);
+                scene.fog.color.copy(colorScratch.fog);
 
                 const maxFog = renderDist * 16;
                 scene.fog.near = lerp(maxFog * 0.45, maxFog * 0.82, daylight);
@@ -180,10 +179,6 @@ const DayNightCycle: React.FC = () => {
             }
         }
 
-        // Keep UI stars transition smooth enough without per-frame React re-renders.
-        if (isNight && uiTime >= 0.25 && uiTime <= 0.75) {
-            setUiTime(t);
-        }
     });
 
     const angle = uiTime * Math.PI * 2;

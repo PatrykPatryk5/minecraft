@@ -371,6 +371,7 @@ export enum BlockType {
     LEAD = 812,
     FISHING_ROD = 813,
     DIAMOND_HORSE_ARMOR = 814,
+    COPPER_GRATE = 815,
 }
 
 // ─── Block Data Interface ────────────────────────────────
@@ -774,6 +775,7 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.END_CRYSTAL]: { name: 'Kryształ Endu', color: '#ff55ff', transparent: true, solid: false, breakTime: 0, isItem: true },
     [BlockType.DRAGON_BREATH]: { name: 'Smoczy Oddech', color: '#ff33ff', transparent: true, solid: false, breakTime: 0, isItem: true },
     [BlockType.TOTEM_OF_UNDYING]: { name: 'Totem Nieśmiertelności', color: '#ffff55', transparent: true, solid: false, breakTime: 0, isItem: true },
+    [BlockType.COPPER_GRATE]: { name: 'Miedziana Krata', color: '#b86d52', transparent: false, solid: true, breakTime: 3.0, tool: 'pickaxe' },
 };
 
 /** Get block info safely */

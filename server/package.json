@@ -2,10 +2,11 @@
     "name": "minecraft-server",
     "version": "1.0.0",
     "description": "Minecraft Clone WebSocket Server",
-    "main": "server.ts",
+    "type": "module",
+    "main": "server.js",
     "scripts": {
-        "start": "npx ts-node server.ts",
-        "dev": "npx ts-node-dev --respawn server.ts"
+        "start": "node server.js",
+        "dev": "node --watch server.js"
     },
     "dependencies": {
         "ws": "^8.16.0"

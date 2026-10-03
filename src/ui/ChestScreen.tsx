@@ -4,6 +4,7 @@ import { playSound } from '../audio/sounds';
 import { getBlockIcon } from '../core/textures';
 import { BLOCK_DATA } from '../core/blockTypes';
 import type { InventorySlot } from '../store/gameStore';
+import { safeRequestPointerLock } from '../core/pointerLock';
 
 const ChestScreen: React.FC = () => {
     const activeOverlay = useGameStore((s) => s.activeOverlay);
@@ -53,7 +54,7 @@ const ChestScreen: React.FC = () => {
         }
         setOverlay('none');
         playSound('close');
-        document.querySelector('canvas')?.requestPointerLock();
+        safeRequestPointerLock();
     };
 
     const handleSlotClick = (source: 'chest' | 'inv' | 'hotbar', index: number) => {

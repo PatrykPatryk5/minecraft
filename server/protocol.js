@@ -28,13 +28,13 @@ export function encodeMoveBinary(pos, rot, health, dimension = 'overworld', isUn
     const buffer = new ArrayBuffer(23);
     const view = new DataView(buffer);
     view.setUint8(0, 0x01); // Client -> Host: Move
-    view.setUint32(1, Date.now() % 0xFFFFFFFF);
+    view.setUint32(1, Date.now() >>> 0);
     view.setFloat32(5, pos[0]);
     view.setFloat32(9, pos[1]);
     view.setFloat32(13, pos[2]);
     view.setInt16(17, Math.round(rot[0] * 32767 / Math.PI));
     view.setInt16(19, Math.round(rot[1] * 32767 / Math.PI));
-    view.setUint8(21, health || 20);
+    view.setUint8(21, health ?? 20);
 
     let dimIdx = 0;
     if (dimension === 'nether') dimIdx = 1;
@@ -48,14 +48,14 @@ export function encodePlayerMoveBinary(nid, pos, rot, health, latency, dimension
     const buffer = new ArrayBuffer(26);
     const view = new DataView(buffer);
     view.setUint8(0, 0x02); // Host -> Client: PlayerMove
-    view.setUint32(1, Date.now() % 0xFFFFFFFF);
+    view.setUint32(1, Date.now() >>> 0);
     view.setUint16(5, nid || 0);
     view.setFloat32(7, pos[0]);
     view.setFloat32(11, pos[1]);
     view.setFloat32(15, pos[2]);
     view.setInt16(19, Math.round((rot ? rot[0] : 0) * 32767 / Math.PI));
     view.setInt16(21, Math.round((rot ? rot[1] : 0) * 32767 / Math.PI));
-    view.setUint8(23, health || 20);
+    view.setUint8(23, health ?? 20);
     view.setUint8(24, Math.min(255, latency || 0));
 
     let dimIdx = 0;
@@ -137,11 +137,11 @@ export function decodePacket(data) {
 export function encodePacket(packet) {
     if (packet.type === 'move') {
         const { pos, rot, health, dimension, isUnderwater } = packet.payload;
-        return encodeMoveBinary(pos, rot || [0, 0], health || 20, dimension, isUnderwater);
+        return encodeMoveBinary(pos, rot || [0, 0], health ?? 20, dimension, isUnderwater);
     }
     if (packet.type === 'player_move' && packet.payload.nid !== undefined) {
         const { nid, pos, rot, health, latency, dimension, isUnderwater } = packet.payload;
-        return encodePlayerMoveBinary(nid, pos, rot || [0, 0], health || 20, latency, dimension, isUnderwater);
+        return encodePlayerMoveBinary(nid, pos, rot || [0, 0], health ?? 20, latency, dimension, isUnderwater);
     }
 
     const json = JSON.stringify(packet);

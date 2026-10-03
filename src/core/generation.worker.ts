@@ -76,8 +76,8 @@ export class TerrainWorker {
             return 0;
         };
 
-        const solid = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[], lightEmit: [] as number[] };
-        const water = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[], lightEmit: [] as number[] };
+        const solid = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[] };
+        const water = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[] };
         const chestCoords: { x: number, y: number, z: number }[] = [];
         let solidIdx = 0;
         let waterIdx = 0;
@@ -187,9 +187,12 @@ export class TerrainWorker {
                             target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
                             target.uvs.push(atlasUV.u + face.uv[i][0] * atlasUV.su, atlasUV.v + face.uv[i][1] * atlasUV.sv);
 
-                            const br = (lod === 0 && !isLiquidBlock) ? (1.0 - cornerAO[i] * 0.2) : 1.0;
-                            target.colors.push(br, br, br);
-                            target.lightEmit.push(isLightSource ? 1 : 0);
+                            const ao = (lod === 0 && !isLiquidBlock) ? (1.0 - cornerAO[i] * 0.2) : 1.0;
+                            const directionalShade = isLightSource ? 1 : isLiquidBlock
+                                ? (face.dir[1] > 0 ? 1 : face.dir[1] < 0 ? 0.6 : Math.abs(face.dir[2]) > 0.5 ? 0.85 : 0.75)
+                                : (face.dir[1] > 0 ? 1.05 : face.dir[1] < 0 ? 0.85 : Math.abs(face.dir[2]) > 0.5 ? 0.95 : 0.9);
+                            const brightness = ao * directionalShade;
+                            target.colors.push(brightness, brightness, brightness);
                             target.isFlora.push(isFloraBlock ? 1 : 0);
                             target.isLiquid.push(isLiquidBlock ? 1 : 0);
                         }
@@ -206,7 +209,9 @@ export class TerrainWorker {
             }
         }
 
-        const result = { solid, water, chests: chestCoords };
+        // Pass a conservative local-space bound to Three.js so the main thread
+        // does not scan every generated vertex to compute a bounding sphere.
+        const result = { solid, water, chests: chestCoords, maxY: maxChunkHeight };
         const transferables: Transferable[] = [];
         const addTrans = (obj: any) => {
             for (const k in obj) {

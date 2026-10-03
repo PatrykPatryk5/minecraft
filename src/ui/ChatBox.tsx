@@ -23,6 +23,7 @@ import type { GameMode } from '../store/gameStore';
 import { BLOCK_DATA, BlockType } from '../core/blockTypes';
 import { getSpawnHeight } from '../core/terrainGen';
 import { playSound } from '../audio/sounds';
+import { safeRequestPointerLock } from '../core/pointerLock';
 
 interface ChatMessage {
     text: string;
@@ -319,9 +320,7 @@ const ChatBox: React.FC = () => {
         setIsOpen(false);
         setChatOpen(false);
         setInput('');
-        setTimeout(() => {
-            document.querySelector('canvas')?.requestPointerLock();
-        }, 50);
+        safeRequestPointerLock();
     };
 
     // Handle T key to open chat — CAPTURE PHASE blocks all keys when open

@@ -5,8 +5,8 @@
 import React, { useEffect, useCallback, useState } from 'react';
 import useGameStore from '../store/gameStore';
 import type { GameMode, Difficulty } from '../store/gameStore';
-import { getConnection } from '../multiplayer/ConnectionManager';
 import { exportWorldToFile } from '../core/storage';
+import { safeRequestPointerLock } from '../core/pointerLock';
 
 const PauseMenu: React.FC = () => {
     const isPaused = useGameStore((s) => s.isPaused);
@@ -32,10 +32,15 @@ const PauseMenu: React.FC = () => {
         e.preventDefault();
         const next = !isPaused;
         setPaused(next);
-        setLocked(!next);
 
         if (next) {
+            setLocked(false);
             document.exitPointerLock?.();
+        } else {
+            // PointerLockControls is bound to the game canvas. Locking `body`
+            // can leave the store claiming the player is locked while the
+            // controls never receive mouse movement.
+            safeRequestPointerLock();
         }
     }, [isPaused, setPaused, setLocked, activeOverlay, screen]);
 
@@ -48,7 +53,7 @@ const PauseMenu: React.FC = () => {
 
     const returnToMenu = () => {
         if (lanActive) {
-            getConnection().disconnect();
+            import('../multiplayer/ConnectionManager').then(({ getConnection }) => getConnection().disconnect());
             setLanActive(false);
         }
         useGameStore.getState().saveGame();
@@ -59,11 +64,13 @@ const PauseMenu: React.FC = () => {
 
     const resume = () => {
         setPaused(false);
-        setLocked(true);
-        document.body.requestPointerLock?.();
+        // The controls' onLock handler is the source of truth for isLocked;
+        // don't resume player simulation until the browser grants the lock.
+        safeRequestPointerLock();
     };
 
     const toggleLAN = async () => {
+        const { getConnection } = await import('../multiplayer/ConnectionManager');
         const conn = getConnection();
         if (lanActive) {
             conn.disconnect();

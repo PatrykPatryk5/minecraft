@@ -8,9 +8,11 @@
 import useGameStore from '../store/gameStore';
 import { attemptNetherPortalIgnite } from './portalSystem';
 import { BlockType, BLOCK_DATA } from './blockTypes';
-import { playSound } from '../audio/sounds';
+import { playMusicDisc, playSound, stopMusicDisc } from '../audio/sounds';
 import { emitBlockBreak, emitExplosion } from '../core/particles';
 import { MAX_HEIGHT } from './terrainGen';
+
+const buttonReleaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
  * End Portal Activation
@@ -438,19 +440,24 @@ export function handleBlockAction(
             return true;
         }
         case BlockType.BUTTON: {
+            const buttonKey = `${blockX},${blockY},${blockZ}`;
+            const previousTimer = buttonReleaseTimers.get(buttonKey);
+            if (previousTimer) clearTimeout(previousTimer);
             import('./redstoneSystem').then(({ updateRedstone }) => {
                 const s = useGameStore.getState();
                 s.setBlockPower(blockX, blockY, blockZ, 15);
                 updateRedstone(blockX, blockY, blockZ);
 
                 // Reset button after 1s
-                setTimeout(() => {
+                const timer = setTimeout(() => {
+                    buttonReleaseTimers.delete(buttonKey);
                     const innerState = useGameStore.getState();
                     if (innerState.getBlock(blockX, blockY, blockZ) === BlockType.BUTTON) {
                         innerState.setBlockPower(blockX, blockY, blockZ, 0);
                         updateRedstone(blockX, blockY, blockZ);
                     }
                 }, 1000);
+                buttonReleaseTimers.set(buttonKey, timer);
             });
             playSound('click');
             return true;
@@ -472,9 +479,7 @@ export function handleBlockAction(
                 if (heldItem === BlockType.MUSIC_DISC_8) track = 'synth';
 
                 // Play disc
-                import('../audio/sounds').then(({ playMusicDisc }) => {
-                    playMusicDisc(track);
-                });
+                playMusicDisc(track);
                 s.addChatMessage('System', `Teraz odtwarzane: ${info.name}`);
 
                 // Swap to playing block visual
@@ -484,9 +489,7 @@ export function handleBlockAction(
                 return true;
             } else if (blockType === BlockType.JUKEBOX_PLAYING) {
                 // Stop music
-                import('../audio/sounds').then(({ stopMusicDisc }) => {
-                    stopMusicDisc();
-                });
+                stopMusicDisc();
                 // Swap back to normal jukebox
                 s.addBlock(blockX, blockY, blockZ, BlockType.JUKEBOX);
                 return true;

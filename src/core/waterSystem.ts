@@ -9,6 +9,7 @@
 import useGameStore, { chunkKey } from '../store/gameStore';
 import { BlockType, BLOCK_DATA } from './blockTypes';
 import { blockIndex } from './terrainGen';
+import { playSound } from '../audio/sounds';
 
 const MAX_SPREAD = 7;
 const SPREAD_DELAY = 100; // ms between spread ticks
@@ -259,9 +260,7 @@ export function placeSponge(x: number, y: number, z: number): void {
         s.addBlock(x, y, z, BlockType.WET_SPONGE);
 
         // Play fizz sound
-        import('../audio/sounds').then(({ playSound }) => {
-            playSound('fuse'); // generic fizz available
-        });
+        playSound('fuse'); // generic fizz available
 
         // Emit particles
         import('../core/particles').then(({ emitBlockBreak }) => {

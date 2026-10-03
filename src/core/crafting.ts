@@ -379,6 +379,8 @@ export const RECIPES: CraftingRecipe[] = [
     { type: 'shaped', name: 'Kowadło', result: B.ANVIL, count: 1, ingredients: [[B.IRON_BLOCK, B.IRON_BLOCK, B.IRON_BLOCK], [0, B.IRON_INGOT, 0], [B.IRON_INGOT, B.IRON_INGOT, B.IRON_INGOT]] },
     { type: 'shaped', name: 'Stół Zaklęć', result: B.ENCHANTING_TABLE, count: 1, ingredients: [[0, B.BOOK, 0], [B.DIAMOND_GEM, B.OBSIDIAN, B.DIAMOND_GEM], [B.OBSIDIAN, B.OBSIDIAN, B.OBSIDIAN]] },
     { type: 'shaped', name: 'Blok Miedzi', result: B.COPPER_BLOCK, count: 1, ingredients: [[B.COPPER_INGOT, B.COPPER_INGOT], [B.COPPER_INGOT, B.COPPER_INGOT]] },
+    { type: 'shapeless', name: 'Wycinana Miedź', result: B.CUT_COPPER, count: 4, ingredients: [B.COPPER_BLOCK] },
+    { type: 'shaped', name: 'Miedziane Kraty', result: B.COPPER_GRATE, count: 4, ingredients: [[B.CUT_COPPER, B.CUT_COPPER], [B.CUT_COPPER, B.CUT_COPPER]] },
     { type: 'shaped', name: 'Blok Amethystu', result: B.AMETHYST_BLOCK, count: 1, ingredients: [[B.AMETHYST_SHARD, B.AMETHYST_SHARD], [B.AMETHYST_SHARD, B.AMETHYST_SHARD]] },
 
     // ─── Building Blocks (Advanced) ────────────────────

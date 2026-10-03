@@ -1,14 +1,12 @@
 import React, { useMemo, useRef, useEffect } from 'react';
-import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { BLOCK_DATA, BlockType } from '../core/blockTypes';
-import { getBlockMaterial, getAtlasTexture, getAtlasUV } from '../core/textures';
+import { getAtlasTexture } from '../core/textures';
 import { RigidBody } from '@react-three/rapier';
 import useGameStore, { chunkKey } from '../store/gameStore';
 import { CHUNK_SIZE, blockIndex, type ChunkData, MAX_HEIGHT } from '../core/terrainGen';
-import { globalTerrainUniforms } from '../core/constants';
 import { getWorkerPool } from '../core/workerPool';
 import { AnimatedChest } from '../environment/AnimatedChest';
+import { createTerrainMaterial } from './terrainMaterial';
 
 // ─── Geometry Pool ───────────────────────────────────────
 const geoPool: THREE.BufferGeometry[] = [];
@@ -21,6 +19,10 @@ function getPooledGeo(): THREE.BufferGeometry {
 }
 
 function returnToPool(geo: THREE.BufferGeometry): void {
+    // Release renderer-side vertex/index buffers before reusing this JS object.
+    // Clearing attributes alone leaves the previous GPU allocations attached
+    // to Three.js's geometry cache until the object is disposed.
+    geo.dispose();
     if (geoPool.length < MAX_POOL) {
         geo.deleteAttribute('position');
         geo.deleteAttribute('normal');
@@ -28,11 +30,8 @@ function returnToPool(geo: THREE.BufferGeometry): void {
         geo.deleteAttribute('color');
         geo.deleteAttribute('isFlora');
         geo.deleteAttribute('isLiquid');
-        geo.deleteAttribute('lightEmit');
         geo.setIndex(null);
         geoPool.push(geo);
-    } else {
-        geo.dispose();
     }
 }
 
@@ -56,8 +55,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
     const v_nPz = useGameStore((s) => s.chunkVersions[cx + ',' + (cz + 1)] ?? -1);
     const v_nNz = useGameStore((s) => s.chunkVersions[cx + ',' + (cz - 1)] ?? -1);
 
-    const smoothLighting = useGameStore((s) => s.settings.smoothLighting);
-    const useShadows = useGameStore((s) => s.settings.graphics !== 'fast');
+    const useShadows = useGameStore((s) => s.settings.graphics === 'fancy' || s.settings.graphics === 'fabulous');
 
     const [meshData, setMeshData] = React.useState<{ solidGeo: THREE.BufferGeometry | null, waterGeo: THREE.BufferGeometry | null, atlas: THREE.Texture, chests: { x: number, y: number, z: number }[] } | null>(null);
 
@@ -121,11 +119,13 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
                     if (data.isLiquid && data.isLiquid.length > 0) {
                         g.setAttribute('isLiquid', new THREE.BufferAttribute(data.isLiquid, 1));
                     }
-                    if (data.lightEmit && data.lightEmit.length > 0) {
-                        g.setAttribute('lightEmit', new THREE.BufferAttribute(data.lightEmit, 1));
-                    }
                     g.setIndex(new THREE.BufferAttribute(data.indices, 1));
-                    g.computeBoundingSphere();
+                    const halfWidth = CHUNK_SIZE / 2;
+                    const halfHeight = result.maxY / 2;
+                    g.boundingSphere = new THREE.Sphere(
+                        new THREE.Vector3(halfWidth, halfHeight, halfWidth),
+                        Math.sqrt(halfWidth * halfWidth * 2 + halfHeight * halfHeight),
+                    );
                     return g;
                 };
 
@@ -150,92 +150,14 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key, version, v_nPx, v_nNx, v_nPz, v_nNz, lod, cx, cz]);
 
+    const solidMaterial = useMemo(() => createTerrainMaterial(getAtlasTexture()), []);
+    const waterMaterial = useMemo(() => createTerrainMaterial(getAtlasTexture(), true), []);
+
     if (!meshData) return null;
 
     const renderSolidMesh = () => (
         <mesh geometry={meshData.solidGeo!} frustumCulled={true} castShadow={useShadows && lod <= 1} receiveShadow={useShadows}>
-            <meshStandardMaterial
-                map={meshData.atlas}
-                vertexColors
-                alphaTest={0.5}
-                alphaToCoverage={false}
-                transparent={false}
-                roughness={0.9}
-                metalness={0.05}
-                onBeforeCompile={(shader) => {
-                    shader.uniforms.uTime = globalTerrainUniforms.uTime;
-                    shader.uniforms.uChunkOffset = { value: new THREE.Vector2(cx * CHUNK_SIZE, cz * CHUNK_SIZE) };
-                    // Add attribute and uniform
-                    shader.vertexShader = shader.vertexShader.replace(
-                        '#include <common>',
-                        `
-                        #include <common>
-                        attribute float isFlora;
-                        attribute float isLiquid;
-                        attribute float lightEmit;
-                        uniform float uTime;
-                        uniform vec2 uChunkOffset;
-                        varying float vShade;
-                        varying float vLightEmit;
-                        `
-                    );
-
-                    // Add displacement and directional shading math
-                    shader.vertexShader = shader.vertexShader.replace(
-                        '#include <begin_vertex>',
-                        `
-                        #include <begin_vertex>
-                        float worldX = position.x + uChunkOffset.x;
-                        float worldZ = position.z + uChunkOffset.y;
-                        if (isFlora > 0.0) {
-                            float speed = uTime * 2.0;
-                            float swayX = sin(worldX * 2.0 + position.y * 3.0 + speed) * 0.08 * isFlora;
-                            float swayZ = cos(worldZ * 2.0 + position.y * 3.0 + (speed * 1.2)) * 0.08 * isFlora;
-                            transformed.x += swayX;
-                            transformed.z += swayZ;
-                        }
-                        if (isLiquid > 0.0) {
-                            float speed = uTime * 1.5;
-                            float wave = sin(worldX * 2.0 + worldZ * 2.0 + speed) * 0.06 * isLiquid;
-                            transformed.y += wave;
-                        }
-
-                        // Minecraft-like directional shading + Top Highlight
-                        vShade = 1.0;
-                        vLightEmit = lightEmit;
-                        if (lightEmit > 0.0) {
-                           vShade = 1.0; // No shading for light sources
-                        } else if (normal.y > 0.5) {
-                           vShade = 1.05; // Slightly brighter top
-                        } else if (normal.y < -0.5) {
-                           vShade = 0.85; // Less dark bottom
-                        } else if (abs(normal.z) > 0.5) {
-                           vShade = 0.95; // North/South
-                        } else if (abs(normal.x) > 0.5) {
-                           vShade = 0.9; // East/West
-                        }
-                        `
-                    );
-
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        '#include <common>',
-                        `
-                        #include <common>
-                        varying float vShade;
-                        varying float vLightEmit;
-                        `
-                    );
-
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        '#include <color_fragment>',
-                        `
-                         #include <color_fragment>
-                         diffuseColor.rgb *= vShade;
-                         diffuseColor.rgb = pow(diffuseColor.rgb, vec3(1.05)); // Subtle contrast punch
-                         `
-                    );
-                }}
-            />
+            <primitive object={solidMaterial} attach="material" />
         </mesh>
     );
 
@@ -250,80 +172,7 @@ const Chunk: React.FC<ChunkProps> = React.memo(({ cx, cz, lod = 0, hasPhysics = 
             )}
             {meshData.waterGeo && (
                 <mesh geometry={meshData.waterGeo} frustumCulled={true} renderOrder={1} receiveShadow={useShadows}>
-                    <meshStandardMaterial
-                        map={meshData.atlas}
-                        vertexColors
-                        transparent={true}
-                        opacity={0.8}
-                        side={THREE.DoubleSide}
-                        depthWrite={false}
-                        roughness={0.1}
-                        metalness={0.1}
-                        onBeforeCompile={(shader) => {
-                            shader.uniforms.uTime = globalTerrainUniforms.uTime;
-                            shader.uniforms.uChunkOffset = { value: new THREE.Vector2(cx * CHUNK_SIZE, cz * CHUNK_SIZE) };
-                            shader.vertexShader = shader.vertexShader.replace(
-                                '#include <common>',
-                                `
-                                #include <common>
-                                attribute float isLiquid;
-                                attribute float lightEmit;
-                                uniform float uTime;
-                                uniform vec2 uChunkOffset;
-                                varying float vShade;
-                                varying float vLightEmit;
-                                `
-                            );
-
-                            shader.vertexShader = shader.vertexShader.replace(
-                                '#include <begin_vertex>',
-                                `
-                                #include <begin_vertex>
-                                float worldX = position.x + uChunkOffset.x;
-                                float worldZ = position.z + uChunkOffset.y;
-                                if (isLiquid > 0.0) {
-                                    float speed = uTime * 1.5;
-                                    float wave = sin(worldX * 2.0 + worldZ * 2.0 + speed) * 0.06 * isLiquid;
-                                    transformed.y += wave;
-                                }
-
-                                // Minecraft-like directional shading for water
-                                vShade = 1.0;
-                                vLightEmit = lightEmit;
-                                if (lightEmit > 0.0) {
-                                   vShade = 1.0;
-                                } else if (normal.y > 0.5) {
-                                   vShade = 1.0;
-                                } else if (normal.y < -0.5) {
-                                   vShade = 0.6;
-                                } else if (abs(normal.z) > 0.5) {
-                                   vShade = 0.85;
-                                } else if (abs(normal.x) > 0.5) {
-                                   vShade = 0.75;
-                                }
-                                `
-                            );
-
-                            shader.fragmentShader = shader.fragmentShader.replace(
-                                '#include <common>',
-                                `
-                                #include <common>
-                                varying float vShade;
-                                varying float vLightEmit;
-                                `
-                            );
-
-                            shader.fragmentShader = shader.fragmentShader.replace(
-                                '#include <color_fragment>',
-                                `
-                                #include <color_fragment>
-                                diffuseColor.rgb *= vShade;
-                                // Add a subtle water-like shimmer
-                                diffuseColor.rgb += vec3(0.02, 0.04, 0.08) * vShade;
-                                `
-                            );
-                        }}
-                    />
+                    <primitive object={waterMaterial} attach="material" />
                 </mesh>
             )}
 

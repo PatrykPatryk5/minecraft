@@ -8,6 +8,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { safeRequestPointerLock } from '../core/pointerLock';
 import useGameStore from '../store/gameStore';
 import { getSpawnHeight } from '../core/terrainGen';
 import { playSound } from '../audio/sounds';
@@ -53,7 +54,7 @@ const DeathScreen: React.FC = () => {
         s.setDead(false);
         s.setOverlay('none');
         playSound('xp');
-        document.querySelector('canvas')?.requestPointerLock();
+        safeRequestPointerLock();
     };
 
     const toMenu = () => {

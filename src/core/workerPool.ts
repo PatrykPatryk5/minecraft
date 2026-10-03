@@ -2,6 +2,7 @@ import * as Comlink from 'comlink';
 import type { TerrainWorker } from './generation.worker';
 
 type WorkerCallback = (data: any) => void;
+const TASK_CANCELLED = { cancelled: true } as const;
 
 export let globalPool: WorkerPool | null = null;
 export const getWorkerPool = () => globalPool;
@@ -142,16 +143,20 @@ export class WorkerPool {
                 : worker.mesh(task.args[0], task.args[1], task.args[2], task.args[3], task.args[4]);
 
             // timeout to prevent zombie tasks
-            const timeoutPromise = new Promise<null>((_, reject) =>
-                setTimeout(() => reject(new Error(`Worker timeout [${task.id}]`)), 15000)
-            );
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            try {
+                const timeoutPromise = new Promise<never>((_, reject) => {
+                    timeoutId = setTimeout(() => reject(new Error(`Worker timeout [${task.id}]`)), 15000);
+                });
+                const result = await Promise.race([workerPromise, timeoutPromise]);
 
-            const result = await Promise.race([workerPromise, timeoutPromise]);
-
-            if (task.type === 'gen') {
-                task.resolve({ cx: task.args[0], cz: task.args[1], id: task.id, data: result, dimension: task.args[2] });
-            } else {
-                task.resolve(result);
+                if (task.type === 'gen') {
+                    task.resolve({ cx: task.args[0], cz: task.args[1], id: task.id, data: result, dimension: task.args[2] });
+                } else {
+                    task.resolve(result);
+                }
+            } finally {
+                if (timeoutId !== undefined) clearTimeout(timeoutId);
             }
         } catch (e) {
             console.error(`[WorkerPool] Task ${task.id} failed:`, e);
@@ -172,7 +177,12 @@ export class WorkerPool {
     }
 
     clearQueue(): void {
-        this.taskQueue.length = 0;
+        const queuedTasks = this.taskQueue.splice(0);
+        // Tell generation callers their work was cancelled so they can clear
+        // their pending chunk keys instead of waiting forever.
+        for (const task of queuedTasks) {
+            if (task.type === 'gen') task.resolve(TASK_CANCELLED);
+        }
         // Do not clear `pending`/`activeTasks`: running tasks cannot be cancelled safely.
         // Resolve queued waiters now so callers can recover quickly.
         for (const [id, waiters] of this.meshWaiters) {
@@ -188,22 +198,22 @@ export class WorkerPool {
      * Prevents worker lock-ups and memory leaks when the player is moving fast.
      */
     cancelStale(activeKeys: Set<string>): void {
-        const originalLength = this.taskQueue.length;
         this.taskQueue = this.taskQueue.filter(task => {
             if (task.type === 'gen') {
                 // Determine the chunk key from the task's arguments
                 const key = `${task.args[0]},${task.args[1]}`;
                 if (!activeKeys.has(key)) {
-                    // Task is stale, discard
+                    // Notify World so it removes its pending flag. Otherwise
+                    // this chunk can never be queued again after becoming visible.
+                    task.resolve(TASK_CANCELLED);
                     return false;
                 }
             }
             return true;
         });
 
-        // Note: we don't resolve the discarded gen tasks here because the callers
-        // (pool.submit callback) handle nulls implicitly or discard them later.
-        // The primary goal is unblocking the queue from thousands of stale chunks.
+        // The primary goal is unblocking the queue from stale chunks without
+        // leaving the corresponding World-side requests stuck as pending.
     }
 
     terminate(): void {

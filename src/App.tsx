@@ -2,23 +2,10 @@
  * Main App — Full game with main menu, modes, crafting, inventory.
  */
 
-import React, { Suspense, useEffect, useState, useRef } from 'react';
-import * as THREE from 'three';
-import { Canvas } from '@react-three/fiber';
-import World from './world/World';
-import Player from './player/Player';
-import DayNightCycle from './environment/DayNightCycle';
-import Clouds from './environment/Clouds';
-import TorchLights from './environment/TorchLights';
-import HandheldLight from './environment/HandheldLight';
-import EnchantingTables from './environment/EnchantingTables';
-import BlockParticles from './effects/BlockParticles';
+import React, { Suspense, lazy, useEffect, useState, useRef } from 'react';
 import HUD from './ui/HUD';
 import DebugScreen from './ui/DebugScreen';
 import PauseMenu from './ui/PauseMenu';
-import { EffectComposer, Vignette, SMAA, N8AO } from '@react-three/postprocessing';
-import { BlendFunction } from 'postprocessing';
-import { Physics } from '@react-three/rapier';
 import Inventory from './ui/Inventory';
 import CraftingScreen from './ui/CraftingScreen';
 import FurnaceScreen from './ui/FurnaceScreen';
@@ -29,73 +16,21 @@ import ErrorBoundary from './ui/ErrorBoundary';
 import MainMenu from './ui/MainMenu';
 import CreditsScreen from './ui/CreditsScreen';
 import KeybindScreen from './ui/KeybindScreen';
-import MultiplayerScreen from './ui/MultiplayerScreen';
-import MobRenderer from './mobs/MobRenderer';
-import { MultiplayerRenderer } from './multiplayer/MultiplayerRenderer';
-import Weather from './environment/Weather';
 import NetworkHUD from './ui/NetworkHUD';
 import useGameStore from './store/gameStore';
 import { getRendererCaps, type RendererCapabilities } from './core/renderer';
-import { preloadAllTextures } from './core/textures';
-import DroppedItemsManager from './entities/DroppedItems';
-import FallingBlocksManager from './entities/FallingBlocks';
-import ArrowsManager from './entities/Arrows';
-import TNTManager from './entities/TNTPrimed';
-import { ThrowablesManager } from './entities/Throwables';
 import MobileControls from './ui/MobileControls';
 import PreJoinShield from './ui/PreJoinShield';
 import TabList from './ui/TabList';
-import SafeModule from './ui/SafeModule';
 import ModuleCrashOverlay from './ui/ModuleCrashOverlay';
+
+const GameCanvas = lazy(() => import('./GameCanvas'));
+const MultiplayerScreen = lazy(() => import('./ui/MultiplayerScreen'));
 
 const UnderwaterOverlay = () => {
     const isUnderwater = useGameStore((s) => s.isUnderwater);
     if (!isUnderwater) return null;
     return <div className="water-overlay" />;
-};
-
-const SceneContent: React.FC = () => {
-    const dimension = useGameStore((s) => s.dimension);
-    const graphics = useGameStore((s) => s.settings.graphics);
-    const usePostProcessing = graphics !== 'fast';
-    const isFabulous = graphics === 'fabulous';
-
-    const renderDist = useGameStore((s) => s.settings.renderDistance);
-
-    return (
-        <>
-            <DayNightCycle />
-            <Physics
-                timeStep="vary"
-                interpolate
-                numSolverIterations={10}
-            >
-                <World />
-                <Player />
-                <SafeModule name="MobRenderer"><MobRenderer /></SafeModule>
-                <SafeModule name="MultiplayerRenderer"><MultiplayerRenderer /></SafeModule>
-                <SafeModule name="DroppedItems"><DroppedItemsManager /></SafeModule>
-                <SafeModule name="FallingBlocks"><FallingBlocksManager /></SafeModule>
-                <SafeModule name="Arrows"><ArrowsManager /></SafeModule>
-                <SafeModule name="TNT"><TNTManager /></SafeModule>
-                <SafeModule name="Throwables"><ThrowablesManager /></SafeModule>
-            </Physics>
-            {dimension === 'overworld' && <SafeModule name="Clouds"><Clouds /></SafeModule>}
-            {dimension === 'overworld' && <SafeModule name="Weather"><Weather /></SafeModule>}
-            <SafeModule name="TorchLights"><TorchLights /></SafeModule>
-            <SafeModule name="HandheldLight"><HandheldLight /></SafeModule>
-            <SafeModule name="EnchantingTables"><EnchantingTables /></SafeModule>
-            <SafeModule name="BlockParticles"><BlockParticles /></SafeModule>
-
-            {usePostProcessing && isFabulous && (
-                <EffectComposer multisampling={graphics === 'fabulous' ? 4 : 0}>
-                    <N8AO aoRadius={2} intensity={0.8} color="black" />
-                    <SMAA edgeDetectionMode={1} />
-                    <Vignette eskil={false} offset={0.1} darkness={0.2} />
-                </EffectComposer>
-            )}
-        </>
-    );
 };
 
 const App: React.FC = () => {
@@ -105,7 +40,6 @@ const App: React.FC = () => {
     const showHUD = useGameStore((s) => s.showHUD);
     const activeOverlay = useGameStore((s) => s.activeOverlay);
     const graphics = useGameStore((s) => s.settings.graphics);
-    const useShadows = graphics !== 'fast';
     const [caps, setCaps] = useState<RendererCapabilities | null>(null);
     const [ready, setReady] = useState(false);
     const prevScreenRef = useRef(screen);
@@ -115,7 +49,6 @@ const App: React.FC = () => {
             const detected = await getRendererCaps();
             setCaps(detected);
             console.log(`[MC R3F] Renderer: ${detected.label} | GPU: ${detected.gpuName}`);
-            preloadAllTextures();
             setTimeout(() => {
                 setReady(true);
                 // Smoothly hide HTML loading screen after React is mounted
@@ -189,40 +122,29 @@ const App: React.FC = () => {
         <ErrorBoundary>
             <MainMenu />
             <KeybindScreen />
-            <MultiplayerScreen />
+            {screen === 'multiplayer' && (
+                <Suspense fallback={(
+                    <div className="loading-screen" role="status" aria-live="polite">
+                        <div className="loading-icon">🌐</div>
+                        <div className="loading-text">Ładowanie trybu wieloosobowego…</div>
+                        <div className="loading-bar"><div className="loading-fill" /></div>
+                    </div>
+                )}>
+                    <MultiplayerScreen />
+                </Suspense>
+            )}
             <PreJoinShield />
 
             {isPlaying && (
-                <Canvas
-                    camera={{ fov, near: 0.1, far: 1000, position: [0, 80, 0] }}
-                    gl={{
-                        antialias: graphics !== 'fast',
-                        powerPreference: 'high-performance',
-                        stencil: false,
-                        depth: true,
-                        alpha: false,
-                        failIfMajorPerformanceCaveat: false,
-                    }}
-                    shadows={useShadows ? { type: graphics === 'fabulous' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap } : false}
-                    dpr={graphics === 'fabulous' ? [1, Math.min(window.devicePixelRatio, 2)] : [1, 1]}
-                    style={{ width: '100%', height: '100%' }}
-                    onContextMenu={(e) => e.preventDefault()}
-                    frameloop="always"
-                    performance={{ min: 0.5 }}
-                    onCreated={({ gl }) => {
-                        gl.outputColorSpace = THREE.SRGBColorSpace;
-                        gl.toneMapping = graphics === 'fast' ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
-                        gl.toneMappingExposure = graphics === 'fabulous' ? 1.06 : 1.0;
-                        gl.shadowMap.enabled = useShadows;
-                        if (useShadows) {
-                            gl.shadowMap.type = graphics === 'fabulous' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
-                        }
-                    }}
-                >
-                    <Suspense fallback={null}>
-                        <SceneContent />
-                    </Suspense>
-                </Canvas>
+                <Suspense fallback={(
+                    <div className="loading-screen" role="status" aria-live="polite">
+                        <div className="loading-icon">⛏</div>
+                        <div className="loading-text">Ładowanie świata…</div>
+                        <div className="loading-bar"><div className="loading-fill" /></div>
+                    </div>
+                )}>
+                    <GameCanvas fov={fov} graphics={graphics} />
+                </Suspense>
             )}
 
             {isPlaying && showHUD && (

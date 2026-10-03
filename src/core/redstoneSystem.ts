@@ -39,22 +39,19 @@ export function toggleLever(x: number, y: number, z: number): boolean {
 /** BFS propagation of redstone signal from sources. */
 function propagateSignal(x: number, y: number, z: number) {
     const s = useGameStore.getState();
-    const queue: [number, number, number][] = [[x, y, z]];
-    const visited = new Set<number>(); // Use bit-packed integer key for performance
+    const queue: [number, number, number][] = [];
+    const visited = new Set<string>();
+    let queueIndex = 0;
 
-    const getKey = (vx: number, vy: number, vz: number) => {
-        // Shift bits to create a unique 32-bit integer for a reasonable world area
-        return ((vx + 1000) & 0x7FF) | (((vy & 0xFF) | ((vz + 1000) & 0x7FF) << 8) << 11);
-    };
-
-    // Add neighbors of start too
+    // Include the origin so a source can update its own stored power as well.
+    queue.push([x, y, z]);
     for (const [dx, dy, dz] of DIRS) {
         queue.push([x + dx, y + dy, z + dz]);
     }
 
-    while (queue.length > 0) {
-        const [cx, cy, cz] = queue.shift()!;
-        const k = getKey(cx, cy, cz);
+    while (queueIndex < queue.length) {
+        const [cx, cy, cz] = queue[queueIndex++];
+        const k = `${cx},${cy},${cz}`;
         if (visited.has(k)) continue;
         visited.add(k);
 

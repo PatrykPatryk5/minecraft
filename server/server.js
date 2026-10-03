@@ -9,9 +9,11 @@ const LOBBY_SERVER = process.env.LOBBY_SERVER || 'http://localhost:3000';
 const SERVER_NAME = process.env.SERVER_NAME || 'Oddany Serwer Minecraft';
 const PASSWORD = process.env.PASSWORD || '';
 const VERSION = `4.0.0-dedicated-v${PROTOCOL_VERSION}`;
-const WORLD_FILE = './server/world.json';
+const WORLD_FILE = new URL('./world.json', import.meta.url);
 const ONLINE_MODE = process.env.ONLINE_MODE === 'true'; // Verify UUID via index.js
 const LEGACY_MODE = process.env.LEGACY_MODE === 'true'; // Host as P2P if possible
+const MAX_PLAYERS = 20;
+const MAX_CHAT_LENGTH = 256;
 
 let outSeq = 0;
 
@@ -34,11 +36,24 @@ const wss = new WebSocketServer({ port: PORT });
 
 // State
 const players = new Map();
-const worldBlocks = []; // Snapshot of placed blocks
+const worldBlocks = new Map(); // "x,y,z" -> block for constant-time updates
 let worldTime = 0;
 let weather = 'clear';
 let worldSeed = Math.floor(Math.random() * 1000000);
 let nextNid = 1;
+
+function isValidPosition(pos) {
+    return Array.isArray(pos) && pos.length === 3 && pos.every(Number.isFinite) &&
+        Math.abs(pos[0]) <= 30_000_000 && Math.abs(pos[2]) <= 30_000_000 && pos[1] >= -64 && pos[1] <= 512;
+}
+
+function isValidRotation(rot) {
+    return Array.isArray(rot) && rot.length === 2 && rot.every((value) => Number.isFinite(value) && Math.abs(value) <= Math.PI * 4);
+}
+
+function blockKey(x, y, z) {
+    return `${x},${y},${z}`;
+}
 
 // Lobby Registration
 async function registerLobby() {
@@ -80,11 +95,15 @@ async function reportStatus() {
 }
 
 // Persist world occasionally
-function saveWorld() {
+let saveInProgress = false;
+async function saveWorld() {
+    if (saveInProgress) return;
+    saveInProgress = true;
     try {
-        fs.writeFileSync(WORLD_FILE, JSON.stringify({ worldSeed, worldBlocks }));
+        await fs.promises.writeFile(WORLD_FILE, JSON.stringify({ worldSeed, worldBlocks: [...worldBlocks.values()] }));
         console.log('[SERVER] World saved.');
     } catch (e) { console.error('[SERVER] Save failed:', e); }
+    finally { saveInProgress = false; }
 }
 
 function loadWorld() {
@@ -92,9 +111,13 @@ function loadWorld() {
         if (fs.existsSync(WORLD_FILE)) {
             const data = JSON.parse(fs.readFileSync(WORLD_FILE));
             if (data.worldSeed !== undefined) worldSeed = data.worldSeed;
-            if (data.worldBlocks) worldBlocks.push(...data.worldBlocks);
-            else if (Array.isArray(data)) worldBlocks.push(...data); // Legacy support
-            console.log(`[SERVER] Loaded world (Seed: ${worldSeed}, Blocks: ${worldBlocks.length}).`);
+            const savedBlocks = Array.isArray(data.worldBlocks) ? data.worldBlocks : Array.isArray(data) ? data : [];
+            for (const block of savedBlocks) {
+                if (Number.isInteger(block?.x) && Number.isInteger(block?.y) && Number.isInteger(block?.z) && Number.isInteger(block?.type)) {
+                    worldBlocks.set(blockKey(block.x, block.y, block.z), block);
+                }
+            }
+            console.log(`[SERVER] Loaded world (Seed: ${worldSeed}, Blocks: ${worldBlocks.size}).`);
         }
     } catch (e) { }
 }
@@ -126,10 +149,19 @@ setInterval(() => {
 wss.on('connection', (ws) => {
     let playerId = null;
     let lastInSeq = -1;
+    let rateWindowStart = Date.now();
+    let packetCount = 0;
 
     ws.on('message', async (data) => {
         const packet = decodePacket(data);
         if (!packet) return;
+
+        const now = Date.now();
+        if (now - rateWindowStart >= 1000) {
+            rateWindowStart = now;
+            packetCount = 0;
+        }
+        if (++packetCount > 120) return;
 
         // V7 Sequence Check
         if (packet.seq !== undefined) {
@@ -138,7 +170,13 @@ wss.on('connection', (ws) => {
         }
 
         if (packet.type === 'join') {
-            const { name, password, version } = packet.payload;
+            if (playerId) return;
+            if (players.size >= MAX_PLAYERS) {
+                ws.send(encodePacket({ type: 'error', payload: { message: 'Serwer jest pełny.' } }));
+                return ws.close();
+            }
+            const name = String(packet.payload?.name || 'Player').trim().slice(0, 24) || 'Player';
+            const { password, version } = packet.payload || {};
 
             // Security: Password
             if (PASSWORD && password !== PASSWORD) {
@@ -195,10 +233,10 @@ wss.on('connection', (ws) => {
             const playerInfo = {
                 id: playerId,
                 nid: nextNid++,
-                name: packet.payload.name,
-                pos: packet.payload.pos || [0, 64, 0],
-                rot: packet.payload.rot || [0, 0],
-                dimension: packet.payload.dimension || 'overworld',
+                name,
+                pos: isValidPosition(packet.payload.pos) ? packet.payload.pos : [0, 64, 0],
+                rot: isValidRotation(packet.payload.rot) ? packet.payload.rot : [0, 0],
+                dimension: packet.payload.dimension === 'nether' || packet.payload.dimension === 'end' ? packet.payload.dimension : 'overworld',
                 isUnderwater: !!packet.payload.isUnderwater,
                 health: 20,
                 latency: 0
@@ -218,11 +256,16 @@ wss.on('connection', (ws) => {
             }));
 
             // Send World State (Blocks)
-            if (worldBlocks.length > 0) {
-                ws.send(encodePacket({
-                    type: 'world_data',
-                    payload: { blocks: worldBlocks }
-                }));
+            if (worldBlocks.size > 0) {
+                // Keep individual WebSocket frames small so large persistent worlds
+                // do not create a single multi-megabyte allocation on the client.
+                const snapshot = [...worldBlocks.values()];
+                for (let i = 0; i < snapshot.length; i += 256) {
+                    ws.send(encodePacket({
+                        type: 'world_data',
+                        payload: { blocks: snapshot.slice(i, i + 256) }
+                    }));
+                }
             }
 
             // Notify others
@@ -251,11 +294,12 @@ wss.on('connection', (ws) => {
             case 'move':
                 const p = players.get(playerId);
                 if (!p) return;
+                if (!isValidPosition(packet.payload?.pos) || !isValidRotation(packet.payload?.rot)) return;
                 p.info.pos = packet.payload.pos;
                 p.info.rot = packet.payload.rot;
                 // p.info.health ignores client payload for security
                 p.info.isUnderwater = packet.payload.isUnderwater;
-                p.info.dimension = packet.payload.dimension || p.info.dimension;
+                p.info.dimension = packet.payload.dimension === 'nether' || packet.payload.dimension === 'end' ? packet.payload.dimension : 'overworld';
 
                 // Binary Broadcast with current latency and full state
                 broadcast({
@@ -275,29 +319,31 @@ wss.on('connection', (ws) => {
 
             case 'block_place':
             case 'block_break':
+                if (!players.has(playerId)) return;
+                const { x, y, z } = packet.payload || {};
+                if (![x, y, z].every(Number.isInteger) || Math.abs(x) > 30_000_000 || Math.abs(z) > 30_000_000 || y < 0 || y > 255) return;
                 const bt = packet.type === 'block_place' ? packet.payload.blockType : 0;
-                // Update world snapshot
-                const blockIdx = worldBlocks.findIndex(b => b.x === packet.payload.x && b.y === packet.payload.y && b.z === packet.payload.z);
+                if (bt !== 0 && (!Number.isInteger(bt) || bt < 1 || bt > 4095 || bt === 9)) return;
+                const actor = players.get(playerId).info.pos;
+                if ((x + 0.5 - actor[0]) ** 2 + (y + 0.5 - actor[1]) ** 2 + (z + 0.5 - actor[2]) ** 2 > 64) return;
+                const key = blockKey(x, y, z);
+                const current = worldBlocks.get(key);
 
-                // Optimization: Skip if already this type
-                if (blockIdx !== -1 && worldBlocks[blockIdx].type === bt) return;
-                if (blockIdx === -1 && bt === 0) return;
+                if (current?.type === bt) return;
 
-                if (bt === 0) {
-                    if (blockIdx !== -1) worldBlocks.splice(blockIdx, 1);
-                } else {
-                    if (blockIdx !== -1) worldBlocks[blockIdx].type = bt;
-                    else worldBlocks.push({ x: packet.payload.x, y: packet.payload.y, z: packet.payload.z, type: bt });
-                }
+                // Persist air as a tombstone too: the client regenerates base terrain
+                // from the seed, so deleting this entry would make broken blocks return.
+                worldBlocks.set(key, { x, y, z, type: bt });
 
                 broadcast({
                     type: 'block_update',
-                    payload: { x: packet.payload.x, y: packet.payload.y, z: packet.payload.z, blockType: bt }
+                    payload: { x, y, z, blockType: bt }
                 }, playerId);
                 break;
 
             case 'chat':
-                const text = packet.payload.text;
+                if (!players.has(playerId) || typeof packet.payload?.text !== 'string') return;
+                const text = packet.payload.text.slice(0, MAX_CHAT_LENGTH);
                 if (text.startsWith('/')) {
                     const args = text.slice(1).split(' ');
                     const cmd = args[0].toLowerCase();

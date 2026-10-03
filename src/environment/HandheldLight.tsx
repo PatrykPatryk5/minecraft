@@ -26,6 +26,7 @@ const EMISSIVE_ITEMS: Record<number, { color: string; intensity: number; distanc
 
 const HandheldLight: React.FC = () => {
     const lightRef = useRef<THREE.PointLight>(null);
+    const forward = useRef(new THREE.Vector3());
     const currentIntensity = useRef(0);
     const { camera } = useThree();
 
@@ -56,13 +57,12 @@ const HandheldLight: React.FC = () => {
         lightRef.current.visible = true;
 
         // Follow player camera position (slightly below and in front)
-        const forward = new THREE.Vector3();
-        camera.getWorldDirection(forward);
+        camera.getWorldDirection(forward.current);
 
         lightRef.current.position.set(
-            camera.position.x + forward.x * 0.3,
+            camera.position.x + forward.current.x * 0.3,
             camera.position.y - 0.3,
-            camera.position.z + forward.z * 0.3
+            camera.position.z + forward.current.z * 0.3
         );
 
         // Subtle flicker for held torch

@@ -16,11 +16,14 @@ export default defineConfig({
         target: 'esnext',
         sourcemap: false,
         chunkSizeWarningLimit: 800,
-        rollupOptions: {
+        rolldownOptions: {
             output: {
-                manualChunks: {
-                    three: ['three'],
-                    r3f: ['@react-three/fiber', '@react-three/drei'],
+                codeSplitting: {
+                    groups: [
+                        { name: 'three', test: /node_modules[\\/]three[\\/]/, priority: 10 },
+                        { name: 'r3f', test: /node_modules[\\/]@react-three[\\/]/, maxSize: 700_000, includeDependenciesRecursively: false, priority: 5 },
+                        { name: 'vendor', test: /node_modules[\\/]/, maxSize: 700_000, priority: -1 },
+                    ],
                 },
             },
         },

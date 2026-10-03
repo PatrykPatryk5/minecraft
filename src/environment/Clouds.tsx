@@ -34,8 +34,8 @@ const Clouds: React.FC = () => {
     const wrapRef = useRef<THREE.Group>(null);
     const windOffset = useRef(0);
     const graphics = useGameStore((s) => s.settings.graphics);
-    const isVolumetric = graphics !== 'fast';
-    const useShadows = graphics !== 'fast';
+    const isVolumetric = graphics === 'fancy' || graphics === 'fabulous';
+    const useShadows = graphics === 'fancy' || graphics === 'fabulous';
 
     const cloudData = useMemo(() => {
         const positions: [number, number, number][] = [];

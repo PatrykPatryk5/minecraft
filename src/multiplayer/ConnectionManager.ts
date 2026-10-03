@@ -21,13 +21,25 @@
  *   conn.disconnect();
  */
 
-import Peer, { DataConnection } from 'peerjs';
+import type Peer from 'peerjs';
+import type { DataConnection } from 'peerjs';
 import {
     encodePacket, decodePacket,
     type ClientPacket, type ServerPacket, type PlayerInfo,
-    PROTOCOL_VERSION, POSITION_SYNC_INTERVAL, MAX_CHAT_LENGTH,
+    PROTOCOL_VERSION, POSITION_SYNC_INTERVAL, MAX_CHAT_LENGTH, MAX_PLAYERS,
 } from './protocol';
 import useGameStore, { Dimension } from '../store/gameStore';
+import { BLOCK_DATA, BlockType } from '../core/blockTypes';
+import { playSound } from '../audio/sounds';
+
+function isValidNetworkPosition(pos: unknown): pos is [number, number, number] {
+    return Array.isArray(pos) && pos.length === 3 && pos.every(Number.isFinite) &&
+        Math.abs(pos[0]) <= 30_000_000 && Math.abs(pos[2]) <= 30_000_000 && pos[1] >= -64 && pos[1] <= 512;
+}
+
+function isValidNetworkRotation(rot: unknown): rot is [number, number] {
+    return Array.isArray(rot) && rot.length === 2 && rot.every((value) => Number.isFinite(value) && Math.abs(value) <= Math.PI * 4);
+}
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type PeerRole = 'host' | 'client' | 'none';
@@ -67,6 +79,11 @@ export class ConnectionManager {
     private lastActionReset: number = Date.now();
     private clockOffset: number = 0;
     private ping: number = 0;
+    private blockJournal = new Map<string, { x: number; y: number; z: number; type: number; dimension: Dimension }>();
+
+    private recordBlockChange(x: number, y: number, z: number, type: number, dimension: Dimension): void {
+        this.blockJournal.set(`${dimension}:${x},${y},${z}`, { x, y, z, type, dimension });
+    }
 
     constructor() {
         this.fetchConfig();
@@ -111,7 +128,9 @@ export class ConnectionManager {
     private serverPassword: string | null = null;
 
     /** Start as Host */
-    async hostGame(playerName: string, isPublic: boolean = true, password: string = '', isOnline: boolean = false, isLegacy: boolean = false): Promise<string> {
+    async hostGame(playerName: string, isPublic: boolean = true, password: string = '', isOnline: boolean = false, isLegacy: boolean = false, preserveBlockJournal: boolean = false): Promise<string> {
+        const { default: PeerConstructor } = await import('peerjs');
+        if (!preserveBlockJournal) this.blockJournal.clear();
         this.disconnect();
         this.role = 'host';
         this.status = 'connecting';
@@ -121,7 +140,7 @@ export class ConnectionManager {
         return new Promise((resolve, reject) => {
             // Generate random readable ID
             const id = 'muzo-' + Math.random().toString(36).substring(2, 8);
-            this.peer = new Peer(id, {
+            this.peer = new PeerConstructor(id, {
                 debug: 1,
                 config: this.config
             });
@@ -227,6 +246,7 @@ export class ConnectionManager {
 
     /** Connect to a Host */
     async joinGame(hostId: string, playerName: string, password: string = ''): Promise<void> {
+        this.blockJournal.clear();
         this.disconnect();
 
         // WSS Enforcement & Security check
@@ -246,10 +266,11 @@ export class ConnectionManager {
         this.role = 'client';
         this.status = 'connecting';
         console.log(`[MP] Connecting to Host: ${hostId}...`);
+        const { default: PeerConstructor } = await import('peerjs');
 
         return new Promise(async (resolve, reject) => {
             const myId = 'muzo-cli-' + Math.random().toString(36).substring(2, 6);
-            this.peer = new Peer(myId, { debug: 1, config: this.config });
+            this.peer = new PeerConstructor(myId, { debug: 1, config: this.config });
 
             // Connect to Relay for fallback signaling/tunneling (non-blocking)
             this.connectToRelay(myId);
@@ -501,7 +522,7 @@ export class ConnectionManager {
         this.role = 'host';
 
         // Start hosting
-        await this.hostGame(state.playerName, true, '', false, false);
+        await this.hostGame(state.playerName, true, '', false, false, true);
 
         // Inform peers via Relay room
         if (this.relayWs?.readyState === 1 && oldLobbyId) {
@@ -582,6 +603,10 @@ export class ConnectionManager {
     // Called by the local game (Player.tsx, BlockActions.tsx)
 
     private sendToHost(packet: ClientPacket): void {
+        if (packet.type === 'block_place' || packet.type === 'block_break') {
+            const payload = packet.payload;
+            this.recordBlockChange(payload.x, payload.y, payload.z, packet.type === 'block_place' ? payload.blockType : 0, useGameStore.getState().dimension);
+        }
         packet.seq = this.outSeq++;
         packet.ts = Date.now();
         const encoded = encodePacket(packet);
@@ -644,7 +669,7 @@ export class ConnectionManager {
     }
 
     sendChat(text: string): void {
-        this.sendToHost({ type: 'chat', payload: { text } });
+        this.sendToHost({ type: 'chat', payload: { text: text.slice(0, MAX_CHAT_LENGTH) } });
     }
 
     sendWorldEvent(event: string, x: number, y: number, z: number, data?: any): void {
@@ -704,7 +729,7 @@ export class ConnectionManager {
 
         switch (packet.type) {
             case 'welcome': {
-                const { playerId, nid, players, worldSeed, time, weather, weatherIntensity } = packet.payload;
+                const { playerId, nid, players, worldSeed, time, weather, weatherIntensity, dimension } = packet.payload;
                 this.ownId = playerId;
                 this.ownNid = nid || 0;
                 console.log(`[MP] Welcome! My ID: ${playerId} (Nid: ${nid})`);
@@ -714,6 +739,7 @@ export class ConnectionManager {
                     store.resetWorld(); // CRITICAL: Clear local chunks before setting new seed
                     store.setWorldSeed(worldSeed);
                 }
+                if (dimension === 'nether' || dimension === 'end' || dimension === 'overworld') store.setDimension(dimension);
                 if (time !== undefined) store.setDayTime(time);
                 if (weather !== undefined) store.setWeather(weather as any, weatherIntensity);
 
@@ -746,8 +772,13 @@ export class ConnectionManager {
 
             case 'join': {
                 if (this.role === 'host' && senderId) {
+                    if (!store.connectedPlayers[senderId] && Object.keys(store.connectedPlayers).length >= MAX_PLAYERS) {
+                        this.sendToPlayer(senderId, { type: 'error', payload: { message: 'Serwer jest pełny.' } });
+                        break;
+                    }
                     const { name, pos, rot, dimension, isUnderwater, nid } = (packet as any).payload;
-                    store.addConnectedPlayer(senderId, name, pos || [0, 64, 0], rot || [0, 0], (dimension as Dimension) || 'overworld', !!isUnderwater);
+                    const safeDimension: Dimension = dimension === 'nether' || dimension === 'end' ? dimension : 'overworld';
+                    store.addConnectedPlayer(senderId, String(name || 'Player').slice(0, 24), isValidNetworkPosition(pos) ? pos : [0, 64, 0], isValidNetworkRotation(rot) ? rot : [0, 0], safeDimension, isUnderwater === true);
                     if (nid !== undefined) {
                         this.nidToUuid.set(nid, senderId);
                     }
@@ -758,6 +789,7 @@ export class ConnectionManager {
                             playerId: senderId,
                             nid: nid,
                             worldSeed: store.worldSeed,
+                            dimension: store.dimension,
                             players: [
                                 { id: 'host', name: store.playerName, pos: store.playerPos, rot: store.playerRot, dimension: store.dimension, isUnderwater: store.isUnderwater, health: store.health, nid: 0 },
                                 ...Object.entries(store.connectedPlayers).map(([id, p]) => ({ id, ...p } as any))
@@ -768,6 +800,17 @@ export class ConnectionManager {
                     } as any;
 
                     this.sendToPlayer(senderId, welcomePacket);
+
+                    const dimensionBlocks = [...this.blockJournal.values()].filter((block) => block.dimension === store.dimension);
+                    for (let i = 0; i < dimensionBlocks.length; i += 256) {
+                        this.sendToPlayer(senderId, {
+                            type: 'world_data',
+                            payload: {
+                                dimension: store.dimension,
+                                blocks: dimensionBlocks.slice(i, i + 256).map(({ x, y, z, type }) => ({ x, y, z, type }))
+                            }
+                        });
+                    }
 
                     this.broadcastPacket({
                         type: 'player_join',
@@ -781,13 +824,14 @@ export class ConnectionManager {
                 if (this.role === 'host' && senderId) {
                     const { pos, rot, dimension, isUnderwater } = packet.payload;
                     const p = store.connectedPlayers[senderId];
-                    if (!p) return;
+                    if (!p || !isValidNetworkPosition(pos) || !isValidNetworkRotation(rot)) return;
+                    const safeDimension: Dimension = dimension === 'nether' || dimension === 'end' ? dimension : 'overworld';
 
-                    store.addConnectedPlayer(senderId, p.name, pos, rot, dimension as Dimension, isUnderwater, p.health, this.lastLatency.get(senderId) || 0);
+                    store.addConnectedPlayer(senderId, p.name, pos, rot, safeDimension, isUnderwater === true, p.health, this.lastLatency.get(senderId) || 0);
 
                     this.broadcastPacket({
                         type: 'player_move',
-                        payload: { id: senderId, nid: p.nid, pos, rot, dimension, isUnderwater, health: p.health, latency: this.lastLatency.get(senderId) || 0 }
+                        payload: { id: senderId, nid: p.nid, pos, rot, dimension: safeDimension, isUnderwater: isUnderwater === true, health: p.health, latency: this.lastLatency.get(senderId) || 0 }
                     }, senderId);
                 }
                 break;
@@ -799,10 +843,14 @@ export class ConnectionManager {
                     const { x, y, z } = packet.payload;
                     const blockType = packet.type === 'block_place' ? (packet.payload as any).blockType : 0;
 
-                    console.log(`[MP] Client ${senderId} ${packet.type}: ${x}, ${y}, ${z} (${blockType})`);
+                    if (![x, y, z].every(Number.isInteger) || Math.abs(x) > 30_000_000 || Math.abs(z) > 30_000_000 || y < 0 || y > 255) return;
+                    if (blockType !== 0 && (!Number.isInteger(blockType) || !BLOCK_DATA[blockType] || BLOCK_DATA[blockType].isItem || blockType === BlockType.BEDROCK || blockType === BlockType.FURNACE_ON || blockType === BlockType.BED_HEAD)) return;
+                    const actor = store.connectedPlayers[senderId];
+                    if (!actor || (x + 0.5 - actor.pos[0]) ** 2 + (y + 0.5 - actor.pos[1]) ** 2 + (z + 0.5 - actor.pos[2]) ** 2 > 64) return;
 
                     if (blockType === 0) store.removeBlock(x, y, z, true);
                     else store.addBlock(x, y, z, blockType, true);
+                    this.recordBlockChange(x, y, z, blockType, store.dimension);
 
                     const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
                     store.bumpVersion(cx, cz);
@@ -818,7 +866,10 @@ export class ConnectionManager {
 
             case 'chat': {
                 if (this.role === 'host' && senderId) {
-                    const { text } = packet.payload;
+                    const rawText = packet.payload?.text;
+                    if (typeof rawText !== 'string') return;
+                    const text = rawText.slice(0, MAX_CHAT_LENGTH);
+                    if (!text.trim()) return;
                     const p = store.connectedPlayers[senderId];
                     const senderName = p ? p.name : 'Unknown';
 
@@ -953,10 +1004,10 @@ export class ConnectionManager {
                 }
 
                 if (event === 'block_break') {
-                    import('../audio/sounds').then(({ playSound }) => playSound('break', [x, y, z]));
+                    playSound('break', [x, y, z]);
                     import('../core/particles').then(({ emitBlockBreak }) => emitBlockBreak(x, y, z, data || 0));
                 } else if (event === 'explosion') {
-                    import('../audio/sounds').then(({ playSound }) => playSound('explode', [x, y, z]));
+                    playSound('explode', [x, y, z]);
                     import('../core/particles').then(({ emitExplosion }) => emitExplosion(x, y, z));
                 } else if (event === 'skip_night') {
                     store.skipNight(true);
@@ -968,9 +1019,10 @@ export class ConnectionManager {
                 const { id, nid, pos, rot, dimension, isUnderwater, latency, ts, health } = packet.payload;
                 const resolvedId = id || (nid !== undefined ? this.nidToUuid.get(nid) : null);
 
-                if (resolvedId) {
+                if (resolvedId && isValidNetworkPosition(pos) && (rot === undefined || isValidNetworkRotation(rot))) {
                     const prev = store.connectedPlayers[resolvedId] || { name: 'Player', pos: [0, 64, 0], rot: [0, 0], dimension: 'overworld' };
-                    store.addConnectedPlayer(resolvedId, prev.name, pos, rot || prev.rot, (dimension as Dimension) || prev.dimension, isUnderwater, health, latency, ts, nid);
+                    const safeDimension: Dimension = dimension === 'nether' || dimension === 'end' ? dimension : 'overworld';
+                    store.addConnectedPlayer(resolvedId, prev.name, pos, rot || prev.rot, safeDimension, isUnderwater === true, health, latency, ts, nid);
                     if (nid !== undefined) this.nidToUuid.set(nid, resolvedId);
                 }
                 break;
@@ -978,15 +1030,20 @@ export class ConnectionManager {
 
             case 'block_update': {
                 const { x, y, z, blockType } = packet.payload;
+                if (![x, y, z].every(Number.isInteger) || Math.abs(x) > 30_000_000 || Math.abs(z) > 30_000_000 || y < 0 || y > 255) break;
+                if (blockType !== 0 && (!Number.isInteger(blockType) || !BLOCK_DATA[blockType] || BLOCK_DATA[blockType].isItem || blockType === BlockType.BEDROCK || blockType === BlockType.FURNACE_ON || blockType === BlockType.BED_HEAD)) break;
                 if (blockType === 0) store.removeBlock(x, y, z, true);
                 else store.addBlock(x, y, z, blockType, true);
+                this.recordBlockChange(x, y, z, blockType, store.dimension);
                 const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
                 store.bumpVersion(cx, cz);
                 break;
             }
 
             case 'chat_broadcast': {
-                store.addChatMessage(packet.payload.sender, packet.payload.text, 'player');
+                const sender = typeof packet.payload?.sender === 'string' ? packet.payload.sender.slice(0, 24) : 'Player';
+                const text = typeof packet.payload?.text === 'string' ? packet.payload.text.slice(0, MAX_CHAT_LENGTH) : '';
+                if (text.trim()) store.addChatMessage(sender, text, 'player');
                 break;
             }
 
@@ -1052,14 +1109,22 @@ export class ConnectionManager {
             }
 
             case 'world_data': {
-                const { blocks } = packet.payload;
+                const { blocks, dimension } = packet.payload;
+                if (dimension && dimension !== store.dimension) break;
                 if (blocks && Array.isArray(blocks)) {
-                    blocks.forEach(b => {
-                        if (b.type === 0) store.removeBlock(b.x, b.y, b.z, true);
-                        else store.addBlock(b.x, b.y, b.z, b.type, true);
-                        const cx = Math.floor(b.x / 16), cz = Math.floor(b.z / 16);
-                        store.bumpVersion(cx, cz);
-                    });
+                    const placements: { x: number; y: number; z: number; typeId: number }[] = [];
+                    const removals: [number, number, number][] = [];
+                    for (const b of blocks) {
+                        if (!b || !Number.isInteger(b.x) || !Number.isInteger(b.y) || !Number.isInteger(b.z) || !Number.isInteger(b.type)) continue;
+                        if (Math.abs(b.x) > 30_000_000 || Math.abs(b.z) > 30_000_000 || b.y < 0 || b.y > 255 || b.type < 0 || b.type > 4095) continue;
+                        this.recordBlockChange(b.x, b.y, b.z, b.type, dimension || store.dimension);
+                        if (b.type === 0) removals.push([b.x, b.y, b.z]);
+                        else if (b.type > 0 && b.type <= 4095) placements.push({ x: b.x, y: b.y, z: b.z, typeId: b.type });
+                    }
+                    // Server snapshots arrive in bounded batches. Apply each batch with
+                    // one store update per operation instead of one update per block.
+                    if (placements.length) store.addBlocks(placements, true, true);
+                    if (removals.length) store.removeBlocks(removals, true, true);
                 }
                 break;
             }

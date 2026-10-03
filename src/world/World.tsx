@@ -39,7 +39,8 @@ interface ChunkEntry {
     cx: number;
     cz: number;
     key: string;
-    dist: number;
+    dist: number; // Camera-weighted priority used only for streaming order.
+    distanceSq: number; // True horizontal distance, used for physics and LOD.
     lod: 0 | 1 | 2;
 }
 
@@ -94,10 +95,12 @@ const World: React.FC = () => {
     useEffect(() => {
         initSeed(worldSeed);
 
-        const poolSize = Math.min(navigator.hardwareConcurrency || 6, 8);
+        // Leave one logical core available for the browser, input, and rendering.
+        const availableCores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
+        const poolSize = Math.min(availableCores, 6);
         const pool = new WorkerPool(
             TerrainWorker,
-            poolSize, poolSize * 2
+            poolSize, poolSize
         );
 
         const ok = pool.init(worldSeed);
@@ -151,12 +154,12 @@ const World: React.FC = () => {
         const { cx, cz, dimension: chunkDim } = result;
         const key = chunkKey(cx, cz);
 
-        // always clear pending flag immediately so we don't leak when
-        // the result belongs to a stale dimension or an errored task
-        pendingKeysRef.current.delete(key);
-
         // Discard stale chunks from previous dimension
         if (chunkDim !== useGameStore.getState().dimension) return;
+
+        // Pending keys are scoped to the active dimension, so an old worker
+        // result must not clear a newer request at the same coordinates.
+        pendingKeysRef.current.delete(key);
 
         const s = useGameStore.getState();
 
@@ -193,6 +196,7 @@ const World: React.FC = () => {
         // Try to load from IndexedDB first
         import('../core/storage').then(({ loadChunk }) => {
             loadChunk(storageKey).then((savedData) => {
+                if (dim !== useGameStore.getState().dimension) return;
                 // If chunk was already loaded/generated while we were reading from DB, skip
                 if (!pendingKeysRef.current.has(key)) return;
 
@@ -210,11 +214,13 @@ const World: React.FC = () => {
                     generateFreshChunk(cx, cz, dim, key);
                 }
             }).catch(e => {
+                if (dim !== useGameStore.getState().dimension) return;
                 console.error(`IDB load error for ${storageKey}:`, e);
                 // Fallback to generation on IDB crash
                 generateFreshChunk(cx, cz, dim, key);
             });
         }).catch(e => {
+            if (dim !== useGameStore.getState().dimension) return;
             console.error("Storage import error:", e);
             generateFreshChunk(cx, cz, dim, key);
         });
@@ -224,7 +230,12 @@ const World: React.FC = () => {
         const pool = getWorkerPool();
         if (pool?.isReady()) {
             pool.submit(cx, cz, dim, (result) => {
+                if (result?.cancelled) {
+                    if (dim === useGameStore.getState().dimension) pendingKeysRef.current.delete(key);
+                    return;
+                }
                 if (!result) {
+                    if (dim !== useGameStore.getState().dimension) return;
                     pendingKeysRef.current.delete(key);
 
                     const failCount = (failedKeysRef.current.get(key) || 0) + 1;
@@ -291,7 +302,7 @@ const World: React.FC = () => {
                 const key = chunkKey(cx, cz);
                 const lod: 0 | 1 | 2 = distSq <= LOD_FULL ? 0 : distSq <= LOD_MEDIUM ? 1 : 2;
 
-                const entry: ChunkEntry = { cx, cz, key, dist: priorityDist, lod };
+                const entry: ChunkEntry = { cx, cz, key, dist: priorityDist, distanceSq: distSq, lod };
                 active.push(entry);
 
                 if (!loadedKeysRef.current.has(key) && !pendingKeysRef.current.has(key)) {
@@ -461,7 +472,7 @@ const World: React.FC = () => {
     return (
         <>
             {visibleChunks.map((c: ChunkEntry) => (
-                <Chunk key={c.key} cx={c.cx} cz={c.cz} lod={c.lod} hasPhysics={c.dist <= 2} />
+                <Chunk key={c.key} cx={c.cx} cz={c.cz} lod={c.lod} hasPhysics={c.distanceSq <= 2} />
             ))}
             {dimension === 'end' && !useGameStore.getState().dragonDefeated && <EnderDragon />}
             <fog attach="fog" args={[

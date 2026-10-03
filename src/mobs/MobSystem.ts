@@ -25,6 +25,7 @@ export interface Mob {
     type: MobType;
     pos: [number, number, number];
     vel: [number, number, number];
+    knockback: [number, number, number];
     health: number;
     maxHealth: number;
     rotation: number; // Y rotation in radians
@@ -51,7 +52,7 @@ export const MOB_STATS: Record<MobType, { health: number; speed: number; damage:
 };
 
 // ─── Constants ──────────────────────────────────────────
-const MAX_MOBS = 50;
+const MAX_MOBS = 30;
 const SPAWN_RADIUS_MIN = 24;
 const SPAWN_RADIUS_MAX = 80;
 const DESPAWN_DISTANCE = 128;
@@ -76,6 +77,7 @@ export function spawnMob(type: MobType, x: number, y: number, z: number): Mob {
         type,
         pos: [x, y, z],
         vel: [0, 0, 0],
+        knockback: [0, 0, 0],
         health: stats.health,
         maxHealth: stats.health,
         rotation: Math.random() * Math.PI * 2,
@@ -145,7 +147,17 @@ export function updateMobs(delta: number): void {
             continue;
         }
 
-        const mobCopy = { ...mob }; // Spread only when we decide to update
+        const mobCopy = {
+            ...mob,
+            pos: [...mob.pos] as [number, number, number],
+            vel: [...mob.vel] as [number, number, number],
+            knockback: [...(mob.knockback || [0, 0, 0])] as [number, number, number],
+        }; // Copy mutable vectors only on AI update ticks.
+        // Horizontal movement is integrated directly below. Keep velocity in
+        // sync with that movement so the renderer can animate legs and face mobs
+        // toward their real travel direction instead of seeing a permanent zero.
+        mobCopy.vel[0] = 0;
+        mobCopy.vel[2] = 0;
 
         // Update hurt timer
         if (mobCopy.hurtTimer > 0) {
@@ -286,24 +298,43 @@ export function updateMobs(delta: number): void {
             const tDist = Math.sqrt(tdx * tdx + tdz * tdz);
 
             if (tDist > 0.5) {
-                const speed = stats.speed * delta * updateInterval;
+                const movementSpeed = stats.speed * (inLava ? 0.35 : 1);
+                const stepDistance = movementSpeed * delta * updateInterval;
                 const next = getNextStep(mobCopy.pos[0], mobCopy.pos[1], mobCopy.pos[2], mobCopy.target[0], mobCopy.target[1], mobCopy.target[2]);
 
+                // A null path means the route is blocked (unless the target is
+                // in this same voxel). Never fall back to moving in a straight
+                // line through the obstacle.
                 let nx = mobCopy.target[0], nz = mobCopy.target[2], shouldJump = false;
-                if (next) { nx = next.x; nz = next.z; shouldJump = next.jump; }
+                if (next) {
+                    nx = next.x;
+                    nz = next.z;
+                    shouldJump = next.jump;
+                } else if (Math.floor(mobCopy.target[0]) !== Math.floor(mobCopy.pos[0]) ||
+                    Math.floor(mobCopy.target[2]) !== Math.floor(mobCopy.pos[2])) {
+                    nx = mobCopy.pos[0];
+                    nz = mobCopy.pos[2];
+                }
 
                 const ndx = nx - mobCopy.pos[0], ndz = nz - mobCopy.pos[2];
                 const nDist = Math.sqrt(ndx * ndx + ndz * ndz);
 
-                if (nDist > 0.1) {
-                    mobCopy.pos[0] += (ndx / nDist) * speed;
-                    mobCopy.pos[2] += (ndz / nDist) * speed;
+                if (next && nDist > 0.1 || !next &&
+                    Math.floor(mobCopy.target[0]) === Math.floor(mobCopy.pos[0]) &&
+                    Math.floor(mobCopy.target[2]) === Math.floor(mobCopy.pos[2]) && nDist > 0.1) {
+                    const moveX = ndx / nDist;
+                    const moveZ = ndz / nDist;
+                    mobCopy.pos[0] += moveX * stepDistance;
+                    mobCopy.pos[2] += moveZ * stepDistance;
+                    mobCopy.vel[0] = moveX * movementSpeed;
+                    mobCopy.vel[2] = moveZ * movementSpeed;
                     mobCopy.rotation = Math.atan2(ndx, ndz);
                 }
 
                 if (shouldJump && mobCopy.vel[1] === 0) {
                     mobCopy.vel[1] = 6.5;
-                } else if (!next) {
+                } else if (!next && (Math.floor(mobCopy.target[0]) !== Math.floor(mobCopy.pos[0]) ||
+                    Math.floor(mobCopy.target[2]) !== Math.floor(mobCopy.pos[2]))) {
                     const forwardBlock = getGroundLevel(mobCopy.pos[0] + (tdx / tDist) * 0.5, mobCopy.pos[2] + (tdz / tDist) * 0.5, s);
                     if (forwardBlock > mobCopy.pos[1] && forwardBlock < mobCopy.pos[1] + 1.2 && mobCopy.vel[1] === 0) {
                         mobCopy.vel[1] = 5.5;
@@ -313,6 +344,29 @@ export function updateMobs(delta: number): void {
                 mobCopy.state = 'idle';
                 mobCopy.target = null;
             }
+        }
+
+        // Integrate attack impulses separately from path steering, then damp them
+        // over time. This keeps AI movement from overwriting combat knockback.
+        const impulseTime = delta * updateInterval;
+        if (Math.abs(mobCopy.knockback[0]) > 0.001 || Math.abs(mobCopy.knockback[2]) > 0.001) {
+            const nextX = mobCopy.pos[0] + mobCopy.knockback[0] * impulseTime;
+            const nextZ = mobCopy.pos[2] + mobCopy.knockback[2] * impulseTime;
+            const feetY = Math.floor(mobCopy.pos[1]);
+            const blockedX = isSolid(Math.floor(nextX), feetY, Math.floor(mobCopy.pos[2])) ||
+                isSolid(Math.floor(nextX), feetY + 1, Math.floor(mobCopy.pos[2]));
+            const blockedZ = isSolid(Math.floor(mobCopy.pos[0]), feetY, Math.floor(nextZ)) ||
+                isSolid(Math.floor(mobCopy.pos[0]), feetY + 1, Math.floor(nextZ));
+            if (!blockedX) mobCopy.pos[0] = nextX;
+            else mobCopy.knockback[0] = 0;
+            if (!blockedZ) mobCopy.pos[2] = nextZ;
+            else mobCopy.knockback[2] = 0;
+
+            const damping = Math.exp(-9 * impulseTime);
+            mobCopy.knockback[0] *= damping;
+            mobCopy.knockback[2] *= damping;
+            if (Math.abs(mobCopy.knockback[0]) < 0.05) mobCopy.knockback[0] = 0;
+            if (Math.abs(mobCopy.knockback[2]) < 0.05) mobCopy.knockback[2] = 0;
         }
 
         // Spider wall climbing
@@ -446,11 +500,13 @@ export function attackMob(px: number, py: number, pz: number, direction: [number
                 updated.state = 'flee';
                 // Knockback
                 const kbStr = 5;
-                updated.vel = [
-                    (dx / dist) * kbStr,
-                    3,
-                    (dz / dist) * kbStr,
-                ];
+                updated.vel = [0, 3, 0];
+                // An exact overlap has no geometric direction to normalize;
+                // use the mob's facing as a stable fallback instead of NaNs.
+                const knockbackDirection = dist > 1e-6
+                    ? [dx / dist, dz / dist] as const
+                    : [Math.sin(mob.rotation), Math.cos(mob.rotation)] as const;
+                updated.knockback = [knockbackDirection[0] * kbStr, 0, knockbackDirection[1] * kbStr];
                 mobs[i] = updated;
                 s.setMobs(mobs);
                 playSound('hurt');

@@ -1,7 +1,9 @@
 /**
  * Animated Water & Lava Surfaces
  *
- * Renders water and lava with animated wave shaders.
+ * Renders water and lava with animated waves.
+ * Uses MeshStandardMaterial (WebGPU-compatible) instead of raw GLSL ShaderMaterial.
+ * Wave animation is driven per-frame via vertex position attribute updates.
  */
 
 import React, { useRef, useMemo } from 'react';
@@ -11,77 +13,78 @@ import useGameStore, { chunkKey } from '../store/gameStore';
 import { BlockType } from '../core/blockTypes';
 import { CHUNK_SIZE, SEA_LEVEL, blockIndex, MAX_HEIGHT } from '../core/terrainGen';
 
-const waterVertexShader = `
-  uniform float uTime;
-  varying vec2 vUv;
-  varying float vWave;
-  void main() {
-    vUv = uv;
-    vec3 pos = position;
-    vWave = sin(pos.x * 2.0 + uTime * 1.5) * 0.04 +
-            cos(pos.z * 2.0 + uTime * 1.2) * 0.03;
-    pos.y += vWave;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-  }
-`;
+/** Shared, reusable water material — transparent blue */
+const waterMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0.15, 0.3, 0.6),
+    transparent: true,
+    opacity: 0.6,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    roughness: 0.2,
+    metalness: 0.1,
+});
 
-const waterFragmentShader = `
-  uniform float uTime;
-  varying vec2 vUv;
-  varying float vWave;
-  void main() {
-    float alpha = 0.55 + vWave * 2.0;
-    vec3 deepBlue = vec3(0.1, 0.2, 0.5);
-    vec3 lightBlue = vec3(0.2, 0.4, 0.7);
-    vec3 color = mix(deepBlue, lightBlue, vWave * 5.0 + 0.5);
-    float sparkle = sin(vUv.x * 40.0 + uTime * 3.0) * cos(vUv.y * 40.0 + uTime * 2.5);
-    color += vec3(max(0.0, sparkle) * 0.15);
-    gl_FragColor = vec4(color, alpha);
-  }
-`;
-
-// Lava shaders — slower, more viscous, glowing
-const lavaVertexShader = `
-  uniform float uTime;
-  varying vec2 vUv;
-  varying float vWave;
-  void main() {
-    vUv = uv;
-    vec3 pos = position;
-    vWave = sin(pos.x * 1.2 + uTime * 0.5) * 0.02 +
-            cos(pos.z * 1.0 + uTime * 0.4) * 0.015;
-    pos.y += vWave;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-  }
-`;
-
-const lavaFragmentShader = `
-  uniform float uTime;
-  varying vec2 vUv;
-  varying float vWave;
-  void main() {
-    vec3 darkLava = vec3(0.6, 0.15, 0.02);
-    vec3 brightLava = vec3(1.0, 0.5, 0.05);
-    float pulse = sin(uTime * 0.8 + vUv.x * 5.0) * 0.5 + 0.5;
-    vec3 color = mix(darkLava, brightLava, pulse * 0.6 + vWave * 3.0);
-    // Hot spots
-    float hot = sin(vUv.x * 20.0 + uTime * 1.5) * cos(vUv.y * 20.0 + uTime * 1.2);
-    color += vec3(max(0.0, hot) * 0.25, max(0.0, hot) * 0.1, 0.0);
-    gl_FragColor = vec4(color, 0.95);
-  }
-`;
+/** Shared, reusable lava material — emissive orange */
+const lavaMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0.8, 0.33, 0.04),
+    emissive: new THREE.Color(0.6, 0.15, 0.02),
+    emissiveIntensity: 0.8,
+    transparent: true,
+    opacity: 0.95,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    roughness: 0.9,
+    metalness: 0,
+});
 
 const WaterSurface: React.FC = () => {
-    const waterMatRef = useRef<THREE.ShaderMaterial>(null);
-    const lavaMatRef = useRef<THREE.ShaderMaterial>(null);
+    const waterMeshRef = useRef<THREE.Mesh>(null);
+    const lavaMeshRef = useRef<THREE.Mesh>(null);
     const renderDistance = useGameStore((s) => s.renderDistance);
-
-    const waterUniforms = useMemo(() => ({ uTime: { value: 0 } }), []);
-    const lavaUniforms = useMemo(() => ({ uTime: { value: 0 } }), []);
+    const timeRef = useRef(0);
 
     useFrame((_, delta) => {
-        if (waterMatRef.current) waterMatRef.current.uniforms.uTime.value += delta;
-        if (lavaMatRef.current) lavaMatRef.current.uniforms.uTime.value += delta;
+        timeRef.current += delta;
+        const t = timeRef.current;
+
+        // Animate water vertex positions (wave effect)
+        if (waterMeshRef.current) {
+            const geo = waterMeshRef.current.geometry;
+            const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
+            const baseY = geo.userData.baseY as Float32Array | undefined;
+            if (posAttr && baseY) {
+                const arr = posAttr.array as Float32Array;
+                for (let i = 0; i < posAttr.count; i++) {
+                    const x = arr[i * 3];
+                    const z = arr[i * 3 + 2];
+                    const wave = Math.sin(x * 2.0 + t * 1.5) * 0.04 +
+                                 Math.cos(z * 2.0 + t * 1.2) * 0.03;
+                    arr[i * 3 + 1] = baseY[i] + wave;
+                }
+                posAttr.needsUpdate = true;
+            }
+        }
+
+        // Animate lava vertex positions (slower, viscous waves)
+        if (lavaMeshRef.current) {
+            const geo = lavaMeshRef.current.geometry;
+            const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
+            const baseY = geo.userData.baseY as Float32Array | undefined;
+            if (posAttr && baseY) {
+                const arr = posAttr.array as Float32Array;
+                for (let i = 0; i < posAttr.count; i++) {
+                    const x = arr[i * 3];
+                    const z = arr[i * 3 + 2];
+                    const wave = Math.sin(x * 1.2 + t * 0.5) * 0.02 +
+                                 Math.cos(z * 1.0 + t * 0.4) * 0.015;
+                    arr[i * 3 + 1] = baseY[i] + wave;
+                }
+                posAttr.needsUpdate = true;
+            }
+            // Animate lava emissive pulsing
+            const pulse = Math.sin(t * 0.8) * 0.15 + 0.65;
+            lavaMaterial.emissiveIntensity = pulse;
+        }
     });
 
     // Track global chunk version to trigger updates
@@ -135,6 +138,11 @@ const WaterSurface: React.FC = () => {
             geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
             geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
             geo.setIndex(idx);
+            // Store original Y values for wave animation baseline
+            const posArr = geo.getAttribute('position').array as Float32Array;
+            const baseY = new Float32Array(posArr.length / 3);
+            for (let i = 0; i < baseY.length; i++) baseY[i] = posArr[i * 3 + 1];
+            geo.userData.baseY = baseY;
         }
         return geo;
     }, [renderDistance, chunkVersionSum]);
@@ -178,25 +186,21 @@ const WaterSurface: React.FC = () => {
             geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
             geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
             geo.setIndex(idx);
+            // Store original Y values for wave animation baseline
+            const posArr = geo.getAttribute('position').array as Float32Array;
+            const baseY = new Float32Array(posArr.length / 3);
+            for (let i = 0; i < baseY.length; i++) baseY[i] = posArr[i * 3 + 1];
+            geo.userData.baseY = baseY;
         }
         return geo;
     }, [renderDistance]);
 
     return (
         <>
-            <mesh geometry={waterGeo}>
-                <shaderMaterial ref={waterMatRef} vertexShader={waterVertexShader}
-                    fragmentShader={waterFragmentShader} uniforms={waterUniforms}
-                    transparent side={THREE.DoubleSide} depthWrite={false} />
-            </mesh>
-            <mesh geometry={lavaGeo}>
-                <shaderMaterial ref={lavaMatRef} vertexShader={lavaVertexShader}
-                    fragmentShader={lavaFragmentShader} uniforms={lavaUniforms}
-                    transparent side={THREE.DoubleSide} depthWrite={false} />
-            </mesh>
+            <mesh ref={waterMeshRef} geometry={waterGeo} material={waterMaterial} />
+            <mesh ref={lavaMeshRef} geometry={lavaGeo} material={lavaMaterial} />
         </>
     );
 };
 
 export default WaterSurface;
-

@@ -51,7 +51,6 @@ const PLAYER_HEAD_CLEARANCE = PLAYER_COLLIDER_HEIGHT - PLAYER_HEIGHT;
 const PLAYER_RB_OFFSET_Y = PLAYER_HEIGHT - PLAYER_COLLIDER_HEIGHT * 0.5;
 const PLAYER_WIDTH = 0.28;
 const REACH = 5;
-const STEP_SIZE = 0.05;
 const STEP_HEIGHT = 0.6;
 const CROUCH_SPEED_MULT = 0.3;
 const CROUCH_CAMERA_DROP = 0.12;
@@ -63,7 +62,7 @@ const AIR_FRICTION = 1.8;
 const WATER_FRICTION = 4;
 const COYOTE_TIME = 0.12;
 const JUMP_BUFFER_TIME = 0.12;
-const JUMP_RELEASE_MULT = 1.0;
+const JUMP_RELEASE_MULT = 0.5;
 const PLACE_REPEAT_INTERVAL = 0.15;
 const FALL_DAMAGE_THRESHOLD = 3;
 const SPRINT_HUNGER_RATE = 0.15;
@@ -138,6 +137,7 @@ const Player: React.FC = () => {
     const lastJumpTime = useRef(0);
     const stepTimer = useRef(0);
     const bobPhase = useRef(0);
+    const bobAmplitude = useRef(0);
     const fallStart = useRef(80);
     const sprintDrainTimer = useRef(0);
     const regenTimer = useRef(0);
@@ -181,6 +181,9 @@ const Player: React.FC = () => {
     useEffect(() => {
         const defaultPos = storeRef.current.playerPos;
         const isDefault = defaultPos[0] === 8 && defaultPos[1] === 80 && defaultPos[2] === 8;
+        // PointerLockControls reads and writes orientation in YXZ order.
+        // Keep saved yaw/pitch restoration in the same convention.
+        camera.rotation.order = 'YXZ';
 
         if (isDefault || defaultPos[1] < 0) {
             // Safe spawn logic for new game or fell in void while offline
@@ -199,7 +202,7 @@ const Player: React.FC = () => {
             fallStart.current = defaultPos[1];
             // Respect loaded rotation (camera)
             const rot = storeRef.current.playerRot;
-            camera.rotation.set(rot[1], rot[0], 0);
+            camera.rotation.set(rot[1], rot[0], 0, 'YXZ');
         }
 
         velocity.current.set(0, 0, 0);
@@ -270,16 +273,33 @@ const Player: React.FC = () => {
         const dir = rayDirRef.current;
         camera.getWorldDirection(dir);
         const origin = camera.position;
-        let px = Math.floor(origin.x), py = Math.floor(origin.y), pz = Math.floor(origin.z);
-        for (let t = 0; t < REACH; t += STEP_SIZE) {
-            const bx = Math.floor(origin.x + dir.x * t);
-            const by = Math.floor(origin.y + dir.y * t);
-            const bz = Math.floor(origin.z + dir.z * t);
+        let bx = Math.floor(origin.x), by = Math.floor(origin.y), bz = Math.floor(origin.z);
+        let placeX = bx, placeY = by, placeZ = bz;
+        const stepX = Math.sign(dir.x), stepY = Math.sign(dir.y), stepZ = Math.sign(dir.z);
+        const deltaX = dir.x === 0 ? Infinity : Math.abs(1 / dir.x);
+        const deltaY = dir.y === 0 ? Infinity : Math.abs(1 / dir.y);
+        const deltaZ = dir.z === 0 ? Infinity : Math.abs(1 / dir.z);
+        let maxX = dir.x === 0 ? Infinity : ((stepX > 0 ? bx + 1 : bx) - origin.x) / dir.x;
+        let maxY = dir.y === 0 ? Infinity : ((stepY > 0 ? by + 1 : by) - origin.y) / dir.y;
+        let maxZ = dir.z === 0 ? Infinity : ((stepZ > 0 ? bz + 1 : bz) - origin.z) / dir.z;
+        let distance = 0;
+
+        // Traverse each voxel crossed by the ray exactly once. Fixed-distance
+        // sampling repeated the same block lookup many times per frame.
+        while (distance <= REACH) {
             const type = getCachedBlock(bx, by, bz);
             if (type && BLOCK_DATA[type]?.solid) {
-                return { block: [bx, by, bz], place: [px, py, pz] };
+                return { block: [bx, by, bz], place: [placeX, placeY, placeZ] };
             }
-            px = bx; py = by; pz = bz;
+
+            const nextDistance = Math.min(maxX, maxY, maxZ);
+            if (nextDistance > REACH) break;
+            placeX = bx; placeY = by; placeZ = bz;
+            const tieEpsilon = 1e-10;
+            if (maxX <= nextDistance + tieEpsilon) { bx += stepX; maxX += deltaX; }
+            if (maxY <= nextDistance + tieEpsilon) { by += stepY; maxY += deltaY; }
+            if (maxZ <= nextDistance + tieEpsilon) { bz += stepZ; maxZ += deltaZ; }
+            distance = nextDistance;
         }
         return null;
     }, [camera, getCachedBlock]);
@@ -769,11 +789,10 @@ const Player: React.FC = () => {
                 if (k.Space) move.y += 1;
                 if (k.ControlLeft) move.y -= 1;
                 if (move.lengthSq() > 0) move.normalize().multiplyScalar(spd);
-                p.add(move.multiplyScalar(dt));
-                camera.position.copy(p);
-                s.setPlayerPos([p.x, p.y, p.z]);
-                s.setPlayerVel([move.x, move.y, move.z]); // Spectator use move vector as vel
-                s.setPlayerRot([camera.rotation.y, camera.rotation.x]);
+                // Keep telemetry, remote player state, and movement consumers in
+                // sync with spectator flight as well as survival movement.
+                vel.copy(move);
+                p.addScaledVector(move, dt);
                 if (highlightRef.current) highlightRef.current.visible = false;
                 continue;
             }
@@ -804,7 +823,11 @@ const Player: React.FC = () => {
             // Minecraft-like inertia: acceleration + friction instead of instant velocity snap.
             const blockBelow = getCachedBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
             const isIce = blockBelow === BlockType.ICE;
+            const isSoulSand = blockBelow === BlockType.SOUL_SAND;
 
+            const surfaceSpeed = isSoulSand ? 0.4 : 1;
+            move.x *= surfaceSpeed;
+            move.z *= surfaceSpeed;
             const accel = inWater ? WATER_ACCEL : (onGround.current ? (isIce ? 2.5 : GROUND_ACCEL) : AIR_ACCEL);
             const friction = inWater ? WATER_FRICTION : (onGround.current ? (isIce ? 1.5 : GROUND_FRICTION) : AIR_FRICTION);
             const accelLerp = Math.min(1, accel * dt);
@@ -935,6 +958,20 @@ const Player: React.FC = () => {
             };
             const canStepTo = (x: number, z: number) =>
                 onGround.current && !flying && !inWater && !collidesAt(x, p.y + STEP_HEIGHT, z);
+            const solidCornerAtHeight = (sampleY: number): number => {
+                const by = Math.floor(sampleY);
+                const x0 = Math.floor(p.x - w), x1 = Math.floor(p.x + w);
+                const z0 = Math.floor(p.z - w), z1 = Math.floor(p.z + w);
+                let block = getCachedBlock(x0, by, z0);
+                if (block && BLOCK_DATA[block]?.solid) return block;
+                block = getCachedBlock(x1, by, z0);
+                if (block && BLOCK_DATA[block]?.solid) return block;
+                block = getCachedBlock(x0, by, z1);
+                if (block && BLOCK_DATA[block]?.solid) return block;
+                block = getCachedBlock(x1, by, z1);
+                if (block && BLOCK_DATA[block]?.solid) return block;
+                return 0;
+            };
 
             if (isSneaking && onGround.current && !flying && !inWater) {
                 const testX = p.x + vel.x * dt;
@@ -944,30 +981,40 @@ const Player: React.FC = () => {
             }
 
             const wasY = p.y;
-            const nx = p.x + vel.x * dt;
-            if (collidesAt(nx, p.y, p.z)) {
-                if (canStepTo(nx, p.z)) {
-                    p.y += STEP_HEIGHT;
-                    p.x = nx;
-                    onGround.current = false;
+            const deltaX = vel.x * dt;
+            const xSteps = Math.max(1, Math.ceil(Math.abs(deltaX) / 0.25));
+            for (let step = 0; step < xSteps; step++) {
+                const nx = p.x + deltaX / xSteps;
+                if (collidesAt(nx, p.y, p.z)) {
+                    if (canStepTo(nx, p.z)) {
+                        p.y += STEP_HEIGHT;
+                        p.x = nx;
+                        onGround.current = false;
+                    } else {
+                        vel.x = 0;
+                        break;
+                    }
                 } else {
-                    vel.x = 0;
+                    p.x = nx;
                 }
-            } else {
-                p.x = nx;
             }
 
-            const nz = p.z + vel.z * dt;
-            if (collidesAt(p.x, p.y, nz)) {
-                if (canStepTo(p.x, nz)) {
-                    p.y += STEP_HEIGHT;
-                    p.z = nz;
-                    onGround.current = false;
+            const deltaZ = vel.z * dt;
+            const zSteps = Math.max(1, Math.ceil(Math.abs(deltaZ) / 0.25));
+            for (let step = 0; step < zSteps; step++) {
+                const nz = p.z + deltaZ / zSteps;
+                if (collidesAt(p.x, p.y, nz)) {
+                    if (canStepTo(p.x, nz)) {
+                        p.y += STEP_HEIGHT;
+                        p.z = nz;
+                        onGround.current = false;
+                    } else {
+                        vel.z = 0;
+                        break;
+                    }
                 } else {
-                    vel.z = 0;
+                    p.z = nz;
                 }
-            } else {
-                p.z = nz;
             }
 
             if (p.y > wasY && p.y - wasY <= STEP_HEIGHT) {
@@ -979,17 +1026,26 @@ const Player: React.FC = () => {
             onGround.current = false;
 
             if (vel.y < 0 && !flying) {
-                if (
-                    isSolid(p.x - w, ny - PLAYER_HEIGHT, p.z - w) || isSolid(p.x + w, ny - PLAYER_HEIGHT, p.z - w) ||
-                    isSolid(p.x - w, ny - PLAYER_HEIGHT, p.z + w) || isSolid(p.x + w, ny - PLAYER_HEIGHT, p.z + w)
-                ) {
-                    p.y = Math.floor(ny - PLAYER_HEIGHT) + 1 + PLAYER_HEIGHT;
+                const verticalSteps = Math.max(1, Math.ceil((p.y - ny) / 0.5));
+                let impactBlockY = Number.NaN;
+                let impactBlock = 0;
+                for (let step = 1; step <= verticalSteps; step++) {
+                    const testY = p.y + (ny - p.y) * (step / verticalSteps);
+                    impactBlock = solidCornerAtHeight(testY - PLAYER_HEIGHT);
+                    if (impactBlock) {
+                        impactBlockY = Math.floor(testY - PLAYER_HEIGHT);
+                        break;
+                    }
+                }
+
+                if (impactBlock) {
+                    p.y = impactBlockY + 1 + PLAYER_HEIGHT;
 
                     // ─── Fall Damage & Bouncing ────────────────
                     // MINECRAFT RULE: Armor NEVER reduces fall damage.
                     // Only Feather Falling enchantment (boots) reduces it.
                     const fallDist = fallStart.current - p.y;
-                    const blockBelowImpact = getCachedBlock(Math.floor(p.x), Math.floor(p.y - PLAYER_HEIGHT - 0.1), Math.floor(p.z));
+                    const blockBelowImpact = impactBlock;
 
                     if (blockBelowImpact === BlockType.SLIME_BLOCK && !isSneaking) {
                         // Slime Block Bounce
@@ -1044,13 +1100,24 @@ const Player: React.FC = () => {
                         isFlying.current = false;
                         fallStart.current = p.y;
                     }
-                } else { p.y = ny; }
+                } else {
+                    p.y = ny;
+                }
             } else {
-                if (!flying && (
-                    isSolid(p.x - w, ny + PLAYER_HEAD_CLEARANCE, p.z - w) || isSolid(p.x + w, ny + PLAYER_HEAD_CLEARANCE, p.z - w) ||
-                    isSolid(p.x - w, ny + PLAYER_HEAD_CLEARANCE, p.z + w) || isSolid(p.x + w, ny + PLAYER_HEAD_CLEARANCE, p.z + w)
-                )) { vel.y = 0; }
-                else { p.y = ny; }
+                let hitCeiling = false;
+                if (!flying && vel.y > 0) {
+                    const verticalSteps = Math.max(1, Math.ceil((ny - p.y) / 0.5));
+                    for (let step = 1; step <= verticalSteps; step++) {
+                        const testY = p.y + (ny - p.y) * (step / verticalSteps);
+                        if (solidCornerAtHeight(testY + PLAYER_HEAD_CLEARANCE)) {
+                            p.y = Math.floor(testY + PLAYER_HEAD_CLEARANCE) - PLAYER_HEAD_CLEARANCE;
+                            vel.y = 0;
+                            hitCeiling = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hitCeiling) p.y = ny;
             }
 
             // Track fall distance going up
@@ -1361,35 +1428,47 @@ const Player: React.FC = () => {
                 }
             } else { stepTimer.current = 0.3; }
 
-            // ─── View Bobbing ────────────────────────────────
-            if (s.settings.viewBobbing && onGround.current && move.lengthSq() > 0) {
-                bobPhase.current += dt * speed * (isSneaking ? 1.7 : 2.5);
-                bobY = Math.sin(bobPhase.current) * (isSneaking ? 0.015 : 0.04);
-            }
         } // End physics loop
+
+        // Publish simulation state at the physics cadence rather than mutating
+        // Zustand's arrays in place. Subscribers get consistent updates at 20 Hz.
+        if (ticksThisFrame > 0) {
+            s.setPlayerPos([pos.current.x, pos.current.y, pos.current.z]);
+            s.setPlayerVel([velocity.current.x, velocity.current.y, velocity.current.z]);
+            s.setPlayerRot([camera.rotation.y, camera.rotation.x]);
+        }
+
+        // Animate camera bob every rendered frame, not only on 20 Hz physics ticks.
+        const frameDelta = Math.min(rawDelta, 0.1);
+        const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+        const bobKeys = keys.current;
+        const sneaking = !!bobKeys.ControlLeft && !isFlying.current;
+        const targetBobAmount = s.settings.viewBobbing && onGround.current && horizontalSpeed > 0.05
+            ? (sneaking ? 0.015 : 0.04)
+            : 0;
+        const bobBlend = 1 - Math.exp(-14 * frameDelta);
+        bobAmplitude.current += (targetBobAmount - bobAmplitude.current) * bobBlend;
+        if (targetBobAmount > 0) {
+            bobPhase.current += frameDelta * horizontalSpeed * (sneaking ? 1.7 : 2.5);
+        }
+        bobY = Math.sin(bobPhase.current) * bobAmplitude.current;
 
         // ── Camera sync (runs every frame for smooth visuals) ──
         camera.position.copy(pos.current);
         camera.position.y += bobY + crouchVisualOffset.current + stepVisualOffset.current;
 
-        // ── Bow FOV Zoom ──
-        const baseFov = 75;
-        if (isChargingBow.current) {
-            const chargePower = Math.min(1.0, bowCharge.current);
-            const targetFov = baseFov - chargePower * 20; // Zoom from 75 → 55
-            (camera as THREE.PerspectiveCamera).fov += (targetFov - (camera as THREE.PerspectiveCamera).fov) * 0.15;
-            (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
-        } else if ((camera as THREE.PerspectiveCamera).fov < baseFov - 0.5) {
-            (camera as THREE.PerspectiveCamera).fov += (baseFov - (camera as THREE.PerspectiveCamera).fov) * 0.2;
-            (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
+        // Preserve the player's FOV setting while smoothly zooming with the bow.
+        if (camera instanceof THREE.PerspectiveCamera) {
+            const baseFov = s.settings.fov;
+            const chargePower = isChargingBow.current ? Math.min(1, bowCharge.current) : 0;
+            const targetFov = baseFov - chargePower * 20;
+            const fovBlend = 1 - Math.exp(-12 * frameDelta);
+            const nextFov = THREE.MathUtils.lerp(camera.fov, targetFov, fovBlend);
+            if (Math.abs(nextFov - camera.fov) > 0.01) {
+                camera.fov = nextFov;
+                camera.updateProjectionMatrix();
+            }
         }
-
-        const pp = s.playerPos;
-        pp[0] = pos.current.x; pp[1] = pos.current.y; pp[2] = pos.current.z;
-        const pv = s.playerVel;
-        pv[0] = velocity.current.x; pv[1] = velocity.current.y; pv[2] = velocity.current.z;
-        const pr = s.playerRot;
-        pr[0] = camera.rotation.y; pr[1] = camera.rotation.x;
 
         if (rbRef.current) {
             rbRef.current.setNextKinematicTranslation({
@@ -1437,7 +1516,7 @@ const Player: React.FC = () => {
         // ─── Audio Listener ──────────────────────────────────
         {
             const cam = camera;
-            const dir = new THREE.Vector3();
+            const dir = rayDirRef.current;
             cam.getWorldDirection(dir);
             updateListener(cam.position.x, cam.position.y, cam.position.z, dir.x, dir.y, dir.z);
         }
@@ -1447,6 +1526,7 @@ const Player: React.FC = () => {
         <>
             <PointerLockControls
                 ref={controlsRef}
+                selector="canvas"
                 onLock={() => setLocked(true)}
                 onUnlock={() => setLocked(false)}
                 pointerSpeed={1.0}

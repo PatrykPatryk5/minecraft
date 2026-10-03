@@ -7,15 +7,6 @@
  * Exposes detected capabilities for the debug screen and settings.
  */
 
-// WebGPU type declarations (not in standard lib yet)
-declare global {
-    interface Navigator {
-        gpu?: {
-            requestAdapter(): Promise<any | null>;
-        };
-    }
-}
-
 export type RendererType = 'webgpu' | 'webgl2' | 'webgl';
 
 export interface RendererCapabilities {
@@ -26,17 +17,6 @@ export interface RendererCapabilities {
     floatTextures: boolean;
     instancedArrays: boolean;
     gpuName: string;
-}
-
-/** Detect WebGPU support */
-async function hasWebGPU(): Promise<boolean> {
-    if (!navigator.gpu) return false;
-    try {
-        const adapter = await navigator.gpu.requestAdapter();
-        return adapter !== null;
-    } catch {
-        return false;
-    }
 }
 
 /** Detect WebGL2 support */
@@ -93,6 +73,29 @@ function getGPUInfo(gl: WebGLRenderingContext | WebGL2RenderingContext): { gpuNa
 
 /** Detect best renderer and capabilities */
 export async function detectRenderer(): Promise<RendererCapabilities> {
+    // Ask for WebGPU before touching a WebGL context. The game now constructs
+    // Three.js WebGPURenderer first, which itself falls back to WebGL2 if needed.
+    try {
+        const gpu = (navigator as Navigator & { gpu?: any }).gpu;
+        // Note: powerPreference is currently ignored on Windows (crbug.com/369219127),
+        // so we omit it to avoid a console warning.
+        const adapter = await gpu?.requestAdapter();
+        if (adapter) {
+            const info = adapter.info ?? await adapter.requestAdapterInfo?.();
+            return {
+                type: 'webgpu',
+                label: 'WebGPU preferred (WebGL2 fallback available)',
+                gpuName: info?.description || info?.device || 'WebGPU adapter',
+                maxTextureSize: adapter.limits?.maxTextureDimension2D ?? 8192,
+                maxDrawBuffers: 8,
+                floatTextures: true,
+                instancedArrays: true,
+            };
+        }
+    } catch (error) {
+        console.warn('[Renderer] WebGPU adapter unavailable; using WebGL2 fallback.', error);
+    }
+
     // Try WebGL2 first for capability detection (used even with WebGPU)
     const canvas = document.createElement('canvas');
     const gl2 = canvas.getContext('webgl2');
@@ -102,16 +105,6 @@ export async function detectRenderer(): Promise<RendererCapabilities> {
     const gpuInfo = gl
         ? getGPUInfo(gl)
         : { gpuName: 'Unknown', maxTextureSize: 4096, maxDrawBuffers: 1, floatTextures: false, instancedArrays: false };
-
-    // Check WebGPU
-    const webgpu = await hasWebGPU();
-    if (webgpu) {
-        return {
-            type: 'webgpu',
-            label: 'WebGPU',
-            ...gpuInfo,
-        };
-    }
 
     // WebGL2
     if (gl2) {

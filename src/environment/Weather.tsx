@@ -12,9 +12,8 @@ import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import useGameStore from '../store/gameStore';
+import { getBiome } from '../core/terrainGen';
 
-const RAIN_COUNT = 12000;
-const SNOW_COUNT = 4000;
 const RADIUS = 96;
 const HEIGHT = 64;
 
@@ -22,6 +21,15 @@ const HEIGHT = 64;
 const ThunderFlash: React.FC = () => {
     const [flash, setFlash] = useState(false);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pulseTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+
+    const schedulePulse = (delay: number, callback: () => void) => {
+        const timer = setTimeout(() => {
+            pulseTimers.current.delete(timer);
+            callback();
+        }, delay);
+        pulseTimers.current.add(timer);
+    };
 
     useEffect(() => {
         const scheduleNext = () => {
@@ -30,18 +38,22 @@ const ThunderFlash: React.FC = () => {
             timerRef.current = setTimeout(() => {
                 setFlash(true);
                 // Multiple flash pulses (like real lightning)
-                setTimeout(() => setFlash(false), 80);
-                setTimeout(() => setFlash(true), 150);
-                setTimeout(() => setFlash(false), 230);
-                setTimeout(() => {
+                schedulePulse(80, () => setFlash(false));
+                schedulePulse(150, () => setFlash(true));
+                schedulePulse(230, () => setFlash(false));
+                schedulePulse(380, () => {
                     setFlash(true);
-                    setTimeout(() => setFlash(false), 120);
-                }, 380);
+                    schedulePulse(120, () => setFlash(false));
+                });
                 scheduleNext();
             }, delay);
         };
         scheduleNext();
-        return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+            for (const timer of pulseTimers.current) clearTimeout(timer);
+            pulseTimers.current.clear();
+        };
     }, []);
 
     if (!flash) return null;
@@ -62,9 +74,11 @@ const WeatherParticles: React.FC = () => {
     const meshRef = useRef<THREE.InstancedMesh>(null);
     const weather = useGameStore((s) => s.weather);
     const intensity = useGameStore((s) => s.weatherIntensity);
-    const playerPos = useGameStore((s) => s.playerPos);
-    const isSnow = false; // Could be biome-based; reserved for future
-    const count = isSnow ? SNOW_COUNT : RAIN_COUNT;
+    const playerChunkX = useGameStore((s) => Math.floor(s.playerPos[0] / 16));
+    const playerChunkZ = useGameStore((s) => Math.floor(s.playerPos[2] / 16));
+    const graphics = useGameStore((s) => s.settings.graphics);
+    const isSnow = useMemo(() => getBiome(playerChunkX * 16, playerChunkZ * 16) === 'snowy', [playerChunkX, playerChunkZ]);
+    const count = graphics === 'potato' ? 900 : graphics === 'fast' ? 1800 : graphics === 'fabulous' ? 6500 : 3800;
 
     const particles = useMemo(() => {
         const positions = new Float32Array(count * 3);
@@ -85,15 +99,23 @@ const WeatherParticles: React.FC = () => {
     }, [count, isSnow]);
 
     const dummy = useMemo(() => new THREE.Object3D(), []);
+    const updateAccumulator = useRef(0);
 
     useFrame((_, delta) => {
         if (!meshRef.current || weather === 'clear') return;
 
-        const mesh = meshRef.current;
-        const [px, py, pz] = playerPos;
-        const dt = Math.min(delta, 0.05);
+        updateAccumulator.current += delta;
+        if (updateAccumulator.current < 1 / 30) return;
 
-        for (let i = 0; i < count; i++) {
+        const mesh = meshRef.current;
+        // Read the live position without subscribing this large particle renderer
+        // to Zustand updates on every player movement frame.
+        const [px, py, pz] = useGameStore.getState().playerPos;
+        const dt = Math.min(updateAccumulator.current, 0.1);
+        updateAccumulator.current = 0;
+        const activeCount = Math.floor(count * Math.min(1, intensity));
+
+        for (let i = 0; i < activeCount; i++) {
             // Vertical fall
             particles.positions[i * 3 + 1] -= particles.velocities[i] * dt;
             // Wind drift
@@ -114,7 +136,7 @@ const WeatherParticles: React.FC = () => {
 
             if (isSnow) {
                 dummy.scale.set(0.12, 0.12, 0.12);
-                dummy.rotation.y += delta;
+                dummy.rotation.set(0, particles.positions[i * 3] * 0.01, 0);
             } else {
                 // Rain: tall thin streak, slight wind tilt
                 dummy.scale.set(0.015, 0.55, 0.015);
@@ -126,7 +148,7 @@ const WeatherParticles: React.FC = () => {
         }
 
         mesh.instanceMatrix.needsUpdate = true;
-        mesh.count = Math.floor(count * Math.min(1, intensity));
+        mesh.count = activeCount;
     });
 
     if (weather === 'clear') return null;

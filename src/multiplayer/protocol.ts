@@ -17,6 +17,16 @@ export const DEFAULT_PORT = 3001;
 // Global encoders to prevent GC spikes
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
+const UINT32_RANGE = 0x100000000;
+
+function expandTimestamp(timestamp: number): number {
+    const now = Date.now();
+    const epoch = Math.floor(now / UINT32_RANGE) * UINT32_RANGE;
+    let expanded = epoch + timestamp;
+    if (expanded - now > UINT32_RANGE / 2) expanded -= UINT32_RANGE;
+    else if (now - expanded > UINT32_RANGE / 2) expanded += UINT32_RANGE;
+    return expanded;
+}
 
 // CRC-32 Table
 const CRC_TABLE = new Int32Array(256);
@@ -60,7 +70,7 @@ export type ClientPacket = (
 ) & { seq?: number; checksum?: number; ts?: number }; // ts is added automatically by sending methods
 
 export type ServerPacket = (
-    | { type: 'welcome'; payload: { playerId: string; nid?: number; worldSeed?: number; players: PlayerInfo[]; time?: number; weather?: string; weatherIntensity?: number } }
+    | { type: 'welcome'; payload: { playerId: string; nid?: number; worldSeed?: number; dimension?: string; players: PlayerInfo[]; time?: number; weather?: string; weatherIntensity?: number } }
     | { type: 'player_join'; payload: PlayerInfo }
     | { type: 'player_leave'; payload: { id: string } }
     | {
@@ -75,7 +85,7 @@ export type ServerPacket = (
     }
     | { type: 'player_action'; payload: { id: string; actionType: string } }
     | { type: 'block_update'; payload: { x: number; y: number; z: number; blockType: number } }
-    | { type: 'world_data'; payload: { blocks: { x: number; y: number; z: number; type: number }[] } }
+    | { type: 'world_data'; payload: { dimension?: string; blocks: { x: number; y: number; z: number; type: number }[] } }
     | { type: 'chat_broadcast'; payload: { sender: string; text: string } }
     | { type: 'chunk_data'; payload: { cx: number; cz: number; data: Record<string, number> } }
     | { type: 'world_sync'; payload: { time?: number; weather?: string; weatherIntensity?: number } }
@@ -120,7 +130,7 @@ export function encodeMoveBinary(pos: [number, number, number], rot: [number, nu
     const buffer = new ArrayBuffer(23);
     const view = new DataView(buffer);
     view.setUint8(0, 0x01); // Client -> Host: Move
-    view.setUint32(1, Date.now() % 0xFFFFFFFF);
+    view.setUint32(1, Date.now() >>> 0);
     view.setFloat32(5, pos[0]);
     view.setFloat32(9, pos[1]);
     view.setFloat32(13, pos[2]);
@@ -141,7 +151,7 @@ export function encodePlayerMoveBinary(nid: number, pos: [number, number, number
     const buffer = new ArrayBuffer(26);
     const view = new DataView(buffer);
     view.setUint8(0, 0x02); // Host -> Client: PlayerMove
-    view.setUint32(1, Date.now() % 0xFFFFFFFF);
+    view.setUint32(1, Date.now() >>> 0);
     view.setUint16(5, nid || 0);
     view.setFloat32(7, pos[0]);
     view.setFloat32(11, pos[1]);
@@ -170,14 +180,19 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer | numb
         return decodePacket(uint8.buffer);
     } else {
         const buffer = data instanceof ArrayBuffer ? data : (data as Uint8Array).buffer;
-        const view = new DataView(buffer, (data as any).byteOffset || 0, (data as any).byteLength || buffer.byteLength);
+        const byteOffset = data instanceof ArrayBuffer ? 0 : (data as Uint8Array).byteOffset;
+        const byteLength = data instanceof ArrayBuffer ? buffer.byteLength : (data as Uint8Array).byteLength;
+        if (byteLength < 1) return null;
+        const view = new DataView(buffer, byteOffset, byteLength);
         const type = view.getUint8(0);
+
+        if ((type === 0x00 && byteLength < 5) || (type === 0x01 && byteLength < 23) || (type === 0x02 && byteLength < 26)) return null;
 
         // JSON Wrapper Verification (Type: 0)
         if (type === 0x00) {
             const receivedCRC = view.getUint32(1, false);
-            const offset = ((data as any).byteOffset || 0) + 5;
-            const length = ((data as any).byteLength || buffer.byteLength) - 5;
+            const offset = byteOffset + 5;
+            const length = byteLength - 5;
             const payload = new Uint8Array(buffer, offset, length);
             if (calculateCRC32(payload) !== receivedCRC) {
                 console.warn('[MP] CRC-32 mismatch! Dropping corrupted packet.');
@@ -194,7 +209,7 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer | numb
             const dimension = dimIdx === 1 ? 'nether' : (dimIdx === 2 ? 'end' : 'overworld');
             return {
                 type: 'move',
-                ts: view.getUint32(1),
+                ts: expandTimestamp(view.getUint32(1)),
                 payload: {
                     pos: [view.getFloat32(5), view.getFloat32(9), view.getFloat32(13)],
                     rot: [view.getInt16(17) * Math.PI / 32767, view.getInt16(19) * Math.PI / 32767],
@@ -212,7 +227,7 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer | numb
             const dimension = dimIdx === 1 ? 'nether' : (dimIdx === 2 ? 'end' : 'overworld');
             return {
                 type: 'player_move',
-                ts: view.getUint32(1),
+                ts: expandTimestamp(view.getUint32(1)),
                 payload: {
                     nid,
                     pos: [view.getFloat32(7), view.getFloat32(11), view.getFloat32(15)],
@@ -231,11 +246,11 @@ export function decodePacket<T = ServerPacket>(data: string | ArrayBuffer | numb
 export function encodePacket(packet: ClientPacket | ServerPacket): string | ArrayBuffer {
     if (packet.type === 'move') {
         const { pos, rot, health, dimension, isUnderwater } = packet.payload;
-        return encodeMoveBinary(pos, rot || [0, 0], health || 20, dimension, isUnderwater);
+        return encodeMoveBinary(pos, rot || [0, 0], health ?? 20, dimension, isUnderwater);
     }
     if (packet.type === 'player_move' && packet.payload.nid !== undefined) {
         const { nid, pos, rot, health, latency, dimension, isUnderwater } = packet.payload;
-        return encodePlayerMoveBinary(nid, pos, rot || [0, 0], health || 20, latency, dimension, isUnderwater);
+        return encodePlayerMoveBinary(nid, pos, rot || [0, 0], health ?? 20, latency, dimension, isUnderwater);
     }
 
     // Wrapped JSON

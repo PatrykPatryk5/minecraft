@@ -173,8 +173,9 @@ minecraft/
 ├── vite.config.ts          # Konfiguracja Vite + React plugin
 ├── tsconfig.json           # Konfiguracja TypeScript (strict mode)
 ├── server/                 # Serwer relay multiplayer
-│   ├── server.ts           # Fastify + WebSocket
-│   └── protocol.js         # Binarny protokół sieciowy
+│   ├── server.js           # Dedykowany serwer WebSocket
+│   ├── server.ts           # Starszy serwer testowy
+│   └── protocol.js         # Binarny protokół zgodny z klientem
 └── src/
     ├── main.tsx            # Punkt wejścia React
     ├── App.tsx             # Główny komponent z R3F Canvas

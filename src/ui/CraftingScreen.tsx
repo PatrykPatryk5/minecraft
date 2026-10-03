@@ -8,6 +8,7 @@ import useGameStore from '../store/gameStore';
 import { BLOCK_DATA, PLACEABLE_BLOCKS, ITEM_BLOCKS } from '../core/blockTypes';
 import { getBlockIcon } from '../core/textures';
 import { matchRecipe } from '../core/crafting';
+import { safeRequestPointerLock } from '../core/pointerLock';
 import type { InventorySlot } from '../store/gameStore';
 import { playSound } from '../audio/sounds';
 
@@ -78,7 +79,7 @@ const CraftingScreen: React.FC = () => {
         setCraftingGrid(Array(9).fill({ id: 0, count: 0 }));
         setOverlay('none');
         playSound('close');
-        document.querySelector('canvas')?.requestPointerLock();
+        safeRequestPointerLock();
     };
 
     const craftResult = useMemo(() => matchRecipe(craftingGrid.map(s => s.id), 3), [craftingGrid]);

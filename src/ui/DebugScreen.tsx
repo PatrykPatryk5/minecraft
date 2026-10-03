@@ -18,6 +18,7 @@ const DebugScreen: React.FC = () => {
     const itemsCount = useGameStore((s) => s.droppedItems.length);
 
     const fpsRef = useRef<HTMLSpanElement>(null);
+    const rendererRef = useRef<HTMLSpanElement>(null);
     const xyzRef = useRef<HTMLSpanElement>(null);
     const blockRef = useRef<HTMLSpanElement>(null);
     const facingRef = useRef<HTMLSpanElement>(null);
@@ -69,6 +70,10 @@ const DebugScreen: React.FC = () => {
             const totalEntities = state.mobs.length + state.droppedItems.length + state.primedTNT.length + state.fallingBlocks.length;
 
             if (fpsRef.current) fpsRef.current.textContent = String(lastFpsVal);
+            if (rendererRef.current) {
+                const activeRenderer = (globalThis as any).__minecraftRendererBackend;
+                rendererRef.current.textContent = activeRenderer || getCachedRendererCaps()?.label || 'Detecting...';
+            }
             if (xyzRef.current) xyzRef.current.textContent = `${x.toFixed(2)} / ${y.toFixed(2)} / ${z.toFixed(2)}`;
             if (blockRef.current) blockRef.current.textContent = `${Math.floor(x)} ${Math.floor(y)} ${Math.floor(z)}`;
             if (chunkRef.current) chunkRef.current.textContent = `${cx} / ${cz}`;
@@ -135,7 +140,7 @@ const DebugScreen: React.FC = () => {
         <div className="debug-screen">
             <div className="debug-left">
                 <p><strong>Minecraft R3F</strong> v4.0 (React 19 + Three.js)</p>
-                <p><strong ref={fpsRef}>0</strong> FPS | {rendererLabel}</p>
+                <p><strong ref={fpsRef}>0</strong> FPS | <span ref={rendererRef}>{rendererLabel}</span></p>
                 <p>GPU: {gpuName}</p>
                 <p>Max Texture: {maxTex}px</p>
                 {(performance as any).memory && <p>Memory: <span ref={memRef}>0 / 0</span></p>}

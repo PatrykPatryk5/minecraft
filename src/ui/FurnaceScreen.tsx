@@ -8,6 +8,7 @@ import React, { useEffect, useState } from 'react';
 import useGameStore from '../store/gameStore';
 import { BLOCK_DATA } from '../core/blockTypes';
 import { getBlockIcon } from '../core/textures';
+import { safeRequestPointerLock } from '../core/pointerLock';
 import type { InventorySlot } from '../store/gameStore';
 import { playSound } from '../audio/sounds';
 
@@ -60,7 +61,7 @@ const FurnaceScreen: React.FC = () => {
             }
             s.setCursorItem(null);
         }
-        document.querySelector('canvas')?.requestPointerLock();
+        safeRequestPointerLock();
     };
 
     const handleFurnaceSlotClick = (slotType: 'input' | 'fuel' | 'output') => {

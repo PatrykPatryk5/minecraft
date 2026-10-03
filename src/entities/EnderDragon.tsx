@@ -18,7 +18,6 @@ export const EnderDragon: React.FC = () => {
     const ref = useRef<any>(null);
     const [health, setHealth] = useState<number>(200);
     const maxHealth = 200;
-    const playerPos = useGameStore(s => s.playerPos);
 
     // Crystals
     const [activeCrystals, setActiveCrystals] = useState<number[]>(CRYSTAL_POSITIONS.map((_, i) => i));
@@ -58,6 +57,7 @@ export const EnderDragon: React.FC = () => {
             }
         } else if (state.current === 'swoop') {
             // Swoop at player
+            const playerPos = useGameStore.getState().playerPos;
             target.current.set(playerPos[0], playerPos[1] + 5, playerPos[2]);
             if (dragonPos.distanceTo(target.current) < 10) {
                 state.current = 'circle';

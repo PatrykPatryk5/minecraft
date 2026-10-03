@@ -3,7 +3,6 @@ import { useFrame } from '@react-three/fiber';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
 import useGameStore from '../store/gameStore';
-import { getConnection } from '../multiplayer/ConnectionManager';
 
 interface PlayerModelProps {
     id: string;
@@ -19,11 +18,12 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
 
     const prevPos = useRef(new THREE.Vector3());
     const currentPos = useRef(new THREE.Vector3());
-    const velocity = useRef(new THREE.Vector3());
     const walkTime = useRef(0);
+    const hasPreviousPos = useRef(false);
     const lastUpdate = useRef(0);
+    const targetPos = useRef(new THREE.Vector3());
     const posBuffer = useRef<{ pos: [number, number, number], rot: [number, number], ts: number }[]>([]);
-    const BUFFER_TIME = 60; // Reduced from 100ms for lower perceived latency
+    const BUFFER_TIME = 80;
 
     // Initial positioning
     useFrame((_, delta) => {
@@ -31,96 +31,113 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
         const playerState = state.connectedPlayers[id];
 
         // Hide if they are not in the same dimension
-        const isMatch = !playerState.dimension || playerState.dimension === state.dimension;
-        if (!playerState || !isMatch) {
+        if (!playerState) {
             if (group.current) group.current.visible = false;
+            hasPreviousPos.current = false;
+            return;
+        }
+
+        const isMatch = !playerState.dimension || playerState.dimension === state.dimension;
+        if (!isMatch) {
+            if (group.current) group.current.visible = false;
+            hasPreviousPos.current = false;
             return;
         } else if (group.current) {
             group.current.visible = true;
         }
 
         // Buffer incoming state
-        const now = Date.now();
-        const hasNewPos = playerState.ts !== undefined && playerState.ts > lastUpdate.current;
+        const now = performance.now();
+        const receivedAt = playerState.receivedAt;
+        const hasNewPos = receivedAt !== undefined && receivedAt > lastUpdate.current;
 
         if (hasNewPos) {
             posBuffer.current.push({
                 pos: playerState.pos,
                 rot: playerState.rot || [0, 0],
-                ts: playerState.ts || now
+                ts: receivedAt
             });
-            lastUpdate.current = playerState.ts || now;
+            lastUpdate.current = receivedAt;
             // Keep buffer small (max 20 entries)
             if (posBuffer.current.length > 20) posBuffer.current.shift();
         }
 
-        // --- Render Logic (Estimated Server Time) ---
-        const conn = getConnection();
-        const serverTime = now + conn.getClockOffset();
-        const renderTime = serverTime - BUFFER_TIME;
+        // Use this machine's monotonic receive clock. Peer machines may have
+        // unrelated wall clocks, so sender timestamps cannot safely drive P2P
+        // interpolation without a per-peer clock synchronization exchange.
+        const renderTime = now - BUFFER_TIME;
 
-        let targetPos = new THREE.Vector3(...playerState.pos);
+        targetPos.current.set(...playerState.pos);
         let targetRot = playerState.rot || [0, 0];
 
-        if (posBuffer.current.length >= 2) {
-            // Find two points to interpolate between
-            let i = 0;
-            for (; i < posBuffer.current.length - 1; i++) {
-                if (posBuffer.current[i + 1].ts > renderTime) break;
-            }
+        const samples = posBuffer.current;
+        if (samples.length >= 2) {
+            const oldest = samples[0];
+            const newest = samples[samples.length - 1];
+            if (renderTime <= oldest.ts) {
+                targetPos.current.set(...oldest.pos);
+                targetRot = oldest.rot;
+            } else {
+                let upperIndex = 1;
+                while (upperIndex < samples.length - 1 && samples[upperIndex].ts < renderTime) upperIndex++;
 
-            const p1 = posBuffer.current[i];
-            const p2 = posBuffer.current[i + 1];
+                const extrapolating = renderTime > newest.ts;
+                const p1 = extrapolating ? samples[samples.length - 2] : samples[upperIndex - 1];
+                const p2 = extrapolating ? newest : samples[upperIndex];
+                const sampleSpan = p2.ts - p1.ts;
+                if (sampleSpan > 0) {
+                    const dx = p1.pos[0] - p2.pos[0];
+                    const dy = p1.pos[1] - p2.pos[1];
+                    const dz = p1.pos[2] - p2.pos[2];
+                    const teleported = dx * dx + dy * dy + dz * dz > 100;
+                    const extra = extrapolating ? Math.min(75, renderTime - newest.ts) / sampleSpan : 0;
+                    const alpha = teleported ? 1 : extrapolating ? 1 + extra : (renderTime - p1.ts) / sampleSpan;
+                    targetPos.current.set(
+                        p1.pos[0] + (p2.pos[0] - p1.pos[0]) * alpha,
+                        p1.pos[1] + (p2.pos[1] - p1.pos[1]) * alpha,
+                        p1.pos[2] + (p2.pos[2] - p1.pos[2]) * alpha
+                    );
 
-            if (p1.ts <= renderTime && p2.ts >= renderTime) {
-                const alpha = (renderTime - p1.ts) / (p2.ts - p1.ts);
-                targetPos.set(
-                    p1.pos[0] + (p2.pos[0] - p1.pos[0]) * alpha,
-                    p1.pos[1] + (p2.pos[1] - p1.pos[1]) * alpha,
-                    p1.pos[2] + (p2.pos[2] - p1.pos[2]) * alpha
-                );
-
-                // Rotation lerp with proper angle wrapping
-                const wrapAngle = (a: number, b: number, t: number) => {
-                    let diff = b - a;
-                    while (diff > Math.PI) diff -= Math.PI * 2;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    return a + diff * t;
-                };
-
-                targetRot = [
-                    wrapAngle(p1.rot[0], p2.rot[0], alpha),
-                    wrapAngle(p1.rot[1], p2.rot[1], alpha)
-                ];
+                    const wrapAngle = (a: number, b: number, t: number) => {
+                        let diff = b - a;
+                        while (diff > Math.PI) diff -= Math.PI * 2;
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        return a + diff * t;
+                    };
+                    targetRot = teleported ? p2.rot : [
+                        wrapAngle(p1.rot[0], p2.rot[0], alpha),
+                        wrapAngle(p1.rot[1], p2.rot[1], alpha)
+                    ];
+                }
             }
         }
 
         // Final position adjustment (Steve's pivot is at 1.5 height)
-        targetPos.y -= 1.5;
+        targetPos.current.y -= 1.5;
 
         const [ryw, rxp] = targetRot;
 
-        // Snapping and Smoothness
-        // If we are extremely far (teleport), snap instantly
-        if (currentPos.current.distanceTo(targetPos) > 10) {
-            currentPos.current.copy(targetPos);
-        } else {
-            // No redundant smoothing here, we want accurate interpolation
-            currentPos.current.copy(targetPos);
-        }
+        // The buffered samples already interpolate movement and snap large
+        // teleports, so applying another transform step here would add latency.
+        currentPos.current.copy(targetPos.current);
 
         // Handle walk animation based on distance moved THIS frame
         // Use a small epsilon to avoid jittering
-        const moveDist = prevPos.current.distanceTo(currentPos.current); // This prevPos now refers to the last target pos
+        const moveDist = hasPreviousPos.current ? prevPos.current.distanceTo(currentPos.current) : 0;
         const isUnderwater = playerState.isUnderwater;
 
-        if (moveDist > 0.005) {
+        if (moveDist > 0.005 && moveDist < 10) {
             const animSpeed = isUnderwater ? 4 : 10;
             walkTime.current += moveDist * animSpeed;
+        } else if (moveDist >= 10) {
+            // A teleport or dimension return should not create a huge first
+            // step that sends the limb phase into imprecise large values.
+            walkTime.current = 0;
         } else {
             walkTime.current *= 0.85; // Faster decay for smoother stop
         }
         prevPos.current.copy(currentPos.current);
+        hasPreviousPos.current = true;
 
         if (group.current) {
             group.current.position.copy(currentPos.current);
