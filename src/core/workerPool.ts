@@ -3,6 +3,7 @@ import type { TerrainWorker } from './generation.worker';
 
 type WorkerCallback = (data: any) => void;
 const TASK_CANCELLED = { cancelled: true } as const;
+const MAX_CONSECUTIVE_GENERATIONS = 2;
 
 export let globalPool: WorkerPool | null = null;
 export const getWorkerPool = () => globalPool;
@@ -13,11 +14,13 @@ export class WorkerPool {
     private pending: Set<string> = new Set();
     private nextWorkerIdx = 0;
     private ready = false;
-    private taskQueue: { id: string; type: 'gen' | 'mesh'; args: any[]; resolve: WorkerCallback }[] = [];
+    private taskQueue: { id: string; key: string; type: 'gen' | 'mesh'; args: any[]; resolve: WorkerCallback }[] = [];
     private meshWaiters: Map<string, WorkerCallback[]> = new Map();
     private activeTasks = 0;
     private maxConcurrent: number;
     private poolSize: number;
+    private nextMeshTaskId = 0;
+    private consecutiveGenerations = 0;
 
     constructor(
         private workerConstructor: new () => Worker,
@@ -70,29 +73,33 @@ export class WorkerPool {
         const id = `gen:${cx},${cz}:${dimension}`;
         if (this.pending.has(id) || this.taskQueue.some((t) => t.id === id)) return;
 
-        this.taskQueue.push({ id, type: 'gen', args: [cx, cz, dimension], resolve: callback });
+        this.taskQueue.push({ id, key: id, type: 'gen', args: [cx, cz, dimension], resolve: callback });
         this.processQueue();
     }
 
     /** Submit a meshing task */
     async submitMesh(cx: number, cz: number, chunkData: Uint16Array, neighbors: (Uint16Array | null)[], lod: number): Promise<any> {
         if (!this.ready) return null;
-        const id = `mesh:${cx},${cz}:${lod}`;
+        const key = `mesh:${cx},${cz}:${lod}`;
+        const id = `${key}:${this.nextMeshTaskId++}`;
 
         return new Promise((resolve) => {
-            const waiters = this.meshWaiters.get(id) ?? [];
-            waiters.push((data: any) => resolve(data));
-            this.meshWaiters.set(id, waiters);
+            this.meshWaiters.set(id, [(data: any) => resolve(data)]);
 
-            // One active/queued mesh task per chunk+lod; newer callers wait for the same result.
-            if (!this.pending.has(id) && !this.taskQueue.some((t) => t.id === id)) {
-                this.taskQueue.push({
-                    id,
-                    type: 'mesh',
-                    args: [cx, cz, chunkData, neighbors, lod],
-                    resolve: (data: any) => this.resolveMeshWaiters(id, data),
-                });
+            // Replace stale queued meshes; an already-running mesh is allowed to finish.
+            const staleIndex = this.taskQueue.findIndex((task) => task.type === 'mesh' && task.key === key);
+            if (staleIndex >= 0) {
+                const [staleTask] = this.taskQueue.splice(staleIndex, 1);
+                staleTask.resolve(null);
             }
+
+            this.taskQueue.push({
+                id,
+                key,
+                type: 'mesh',
+                args: [cx, cz, chunkData, neighbors, lod],
+                resolve: (data: any) => this.resolveMeshWaiters(id, data),
+            });
 
             this.processQueue();
         });
@@ -107,9 +114,19 @@ export class WorkerPool {
 
     private takeNextTask() {
         if (this.taskQueue.length === 0) return null;
-        // Keep generation responsive even under heavy meshing load.
         const genIndex = this.taskQueue.findIndex((task) => task.type === 'gen');
-        if (genIndex >= 0) return this.taskQueue.splice(genIndex, 1)[0];
+        const meshIndex = this.taskQueue.findIndex((task) => task.type === 'mesh');
+
+        if (meshIndex >= 0 && (genIndex < 0 || this.consecutiveGenerations >= MAX_CONSECUTIVE_GENERATIONS)) {
+            this.consecutiveGenerations = 0;
+            return this.taskQueue.splice(meshIndex, 1)[0];
+        }
+        if (genIndex >= 0) {
+            this.consecutiveGenerations++;
+            return this.taskQueue.splice(genIndex, 1)[0];
+        }
+
+        this.consecutiveGenerations = 0;
         return this.taskQueue.shift()!;
     }
 
@@ -146,7 +163,7 @@ export class WorkerPool {
             let timeoutId: ReturnType<typeof setTimeout> | undefined;
             try {
                 const timeoutPromise = new Promise<never>((_, reject) => {
-                    timeoutId = setTimeout(() => reject(new Error(`Worker timeout [${task.id}]`)), 15000);
+                    timeoutId = setTimeout(() => reject(new Error(`Worker timeout [${task.id}]`)), 60000);
                 });
                 const result = await Promise.race([workerPromise, timeoutPromise]);
 

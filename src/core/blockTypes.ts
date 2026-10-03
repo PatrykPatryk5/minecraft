@@ -328,6 +328,10 @@ export enum BlockType {
     MUSIC_DISC_6 = 516,
     MUSIC_DISC_7 = 517,
     MUSIC_DISC_8 = 518,
+    MUSIC_DISC_9 = 540,
+    MUSIC_DISC_10 = 541,
+    MUSIC_DISC_11 = 542,
+    MUSIC_DISC_12 = 543,
 
     // ─── Deep Dark & Lush ──────────────────────────────
     SCULK = 700,
@@ -734,6 +738,10 @@ export const BLOCK_DATA: Record<number, BlockInfo> = {
     [BlockType.MUSIC_DISC_6]: { name: 'Płyta Muzyczna (Ambient)', color: '#a0e0ff', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
     [BlockType.MUSIC_DISC_7]: { name: 'Płyta Muzyczna (Techno)', color: '#b820b8', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
     [BlockType.MUSIC_DISC_8]: { name: 'Płyta Muzyczna (Synth)', color: '#ff69b4', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_9]: { name: 'Płyta Muzyczna (Orbit)', color: '#62d7f0', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_10]: { name: 'Płyta Muzyczna (Ember)', color: '#f17a45', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_11]: { name: 'Płyta Muzyczna (Rainroom)', color: '#7ecde2', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
+    [BlockType.MUSIC_DISC_12]: { name: 'Płyta Muzyczna (Glitch)', color: '#a37dff', transparent: false, solid: false, breakTime: 0, isItem: true, isMusicDisc: true },
     [BlockType.JUKEBOX_PLAYING]: { name: 'Szafa grająca (gra)', color: '#4d3b3b', transparent: false, solid: true, breakTime: 0.8, tool: 'axe' },
 
     // ─── Deep Dark ──────────────────────────────────────

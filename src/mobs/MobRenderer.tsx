@@ -198,11 +198,38 @@ function getSkinTexture(type: string, part: string, baseColor: string): THREE.Ca
         return seed / 0x100000000;
     };
 
-    // Small shaded pixels give each species a material surface while keeping
-    // the game's block-art style and its crisp nearest-neighbor look.
+    // Much stronger and more realistic shading and texturing to satisfy "realistic graphics" request.
+    // Adds organic procedural noise simulating fur, scales, and flesh depending on mob type.
     for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
-        const shade = 0.84 + (1 - y / 96) * 0.18 + (random() - 0.5) * 0.12;
-        ctx.fillStyle = `rgb(${Math.min(255, Math.round(base.r * 255 * shade))},${Math.min(255, Math.round(base.g * 255 * shade))},${Math.min(255, Math.round(base.b * 255 * shade))})`;
+        let shade = 0.75 + (1 - y / 80) * 0.35 + (random() - 0.5) * 0.25;
+        
+        // Add species-specific realistic texturing
+        if (type === 'zombie') {
+            // Fleshy rot / stains
+            if (random() > 0.85) shade -= 0.3;
+            else if (random() > 0.95) shade += 0.2; // bone protruding
+        } else if (type === 'skeleton') {
+            // Bone cracks and pores
+            if (random() > 0.9) shade -= 0.4;
+            shade += (Math.sin(x * 0.5) * 0.1) * (Math.cos(y * 0.5) * 0.1);
+        } else if (type === 'creeper') {
+            // Scaly / leafy texture
+            const scale = Math.sin(x * 1.5) * Math.cos(y * 1.5);
+            shade += scale * 0.3;
+        } else if (type === 'wolf' || type === 'sheep') {
+            // Fur / wool strands
+            shade += Math.sin(x * 3.14 + y * 2) * 0.2;
+            if (random() > 0.7) shade += 0.2;
+        } else if (type === 'enderman') {
+            // Alien static / void aura
+            shade += (random() - 0.5) * 0.5;
+            if (random() > 0.95) shade += 1.0; // purple static sparks
+        } else if (type === 'blaze') {
+            // Fire/magma glow
+            shade += Math.abs(Math.sin(x * 0.2 + y * 0.5)) * 0.4;
+        }
+
+        ctx.fillStyle = `rgb(${Math.min(255, Math.max(0, Math.round(base.r * 255 * shade)))},${Math.min(255, Math.max(0, Math.round(base.g * 255 * shade)))},${Math.min(255, Math.max(0, Math.round(base.b * 255 * shade)))})`;
         ctx.fillRect(x, y, 1, 1);
     }
 
@@ -318,30 +345,36 @@ function getMat(color: string, emissive?: boolean): THREE.MeshStandardMaterial {
 
 const MobRenderer: React.FC = () => {
     const groupRef = useRef<THREE.Group>(null);
-    const mobs = useGameStore((s) => s.mobs);
-    const playerPos = useGameStore((s) => s.playerPos);
+    const visualSignature = useGameStore((s) => s.mobs.map((mob: any) => {
+        const maxHealth = Math.max(1, mob.maxHealth ?? 20);
+        const healthStep = Math.ceil(Math.max(0, mob.health ?? maxHealth) / maxHealth * 20);
+        const dx = s.playerPos[0] - mob.pos[0];
+        const dy = s.playerPos[1] - mob.pos[1];
+        const dz = s.playerPos[2] - mob.pos[2];
+        const detailLod = dx * dx + dy * dy + dz * dz <= 24 * 24 ? 0 : 1;
+        return `${mob.id}:${mob.type}:${healthStep}:${detailLod}`;
+    }).join('|'));
+    const visualSnapshot = useMemo(() => {
+        const state = useGameStore.getState();
+        return { mobs: state.mobs, playerPos: state.playerPos };
+    }, [visualSignature]);
+    const { mobs, playerPos } = visualSnapshot;
     const simulationAccumulator = useRef(0);
     const mobTick = 1 / 20;
 
     // Per-mob limb rotation for walk animation
     const limbPhases = useRef<Map<string, number>>(new Map());
-    // Movement updates arrive frequently; model/material trees only need to be
-    // rebuilt when mobs spawn, despawn, change type, or lose visible health.
-    const visualSignature = mobs.map((mob: any) => {
-        const maxHealth = Math.max(1, mob.maxHealth ?? 20);
-        const healthStep = Math.ceil(Math.max(0, mob.health ?? maxHealth) / maxHealth * 20);
-        const dx = playerPos[0] - mob.pos[0];
-        const dy = playerPos[1] - mob.pos[1];
-        const dz = playerPos[2] - mob.pos[2];
-        const detailLod = dx * dx + dy * dy + dz * dz <= 24 * 24 ? 0 : 1;
-        return `${mob.id}:${mob.type}:${healthStep}:${detailLod}`;
-    }).join('|');
+    const hurtStates = useRef<Map<string, boolean>>(new Map());
 
     useEffect(() => {
+        hurtStates.current.clear();
         const activeIds = new Set(mobs.map((mob: any) => String(mob.id)));
         const activeMaterialPrefixes = new Set(mobs.map((mob: any) => `${mob.id}:${mob.type}:`));
         for (const id of limbPhases.current.keys()) {
             if (!activeIds.has(id)) limbPhases.current.delete(id);
+        }
+        for (const id of hurtStates.current.keys()) {
+            if (!activeIds.has(id)) hurtStates.current.delete(id);
         }
         for (const [key, material] of mobMaterialCache) {
             const mobId = key.slice(0, key.indexOf(':'));
@@ -380,9 +413,12 @@ const MobRenderer: React.FC = () => {
 
         if (!groupRef.current) return;
         const children = groupRef.current.children;
+        const frameState = useGameStore.getState();
+        const frameMobs = frameState.mobs;
+        const framePlayerPos = frameState.playerPos;
 
-        for (let i = 0; i < mobs.length && i < children.length; i++) {
-            const mob = mobs[i];
+        for (let i = 0; i < frameMobs.length && i < children.length; i++) {
+            const mob = frameMobs[i];
             const group = children[i] as THREE.Group;
             if (!mob || !group) continue;
 
@@ -406,14 +442,15 @@ const MobRenderer: React.FC = () => {
                 phase += delta * speed * 4;
                 limbPhases.current.set(id, phase);
             } else {
-                phase *= 0.9; // settle
+                const target = Math.round(phase / (Math.PI * 2)) * Math.PI * 2;
+                phase += (target - phase) * Math.min(1, delta * 8); // settle
                 limbPhases.current.set(id, phase);
             }
 
             const model = MOB_MODELS[mob.type] || MOB_MODELS.zombie;
-            const dx = s.playerPos[0] - mob.pos[0];
-            const dy = s.playerPos[1] - mob.pos[1];
-            const dz = s.playerPos[2] - mob.pos[2];
+            const dx = framePlayerPos[0] - mob.pos[0];
+            const dy = framePlayerPos[1] - mob.pos[1];
+            const dz = framePlayerPos[2] - mob.pos[2];
             const hasFaceOverlay = dx * dx + dy * dy + dz * dz <= 24 * 24;
             const legSwing = Math.sin(phase) * 0.6;
 
@@ -448,21 +485,13 @@ const MobRenderer: React.FC = () => {
             const hurtIntensity = isHurt ? 0.8 : 0;
             const hurtColor = isHurt ? HURT_COLOR : NO_HURT_COLOR;
 
-            for (let c = 0; c < group.children.length; c++) {
-                const child = group.children[c];
-                if ((child as any).isMesh) {
-                    const m = child as THREE.Mesh;
-                    // We check if it's already set to avoid expensive material updates
-                    if (m.userData.lastHurt !== isHurt) {
-                        m.userData.lastHurt = isHurt;
-                        // To avoid sharing materials between mobs when flashing, we need unique materials
-                        // But wait, the current implementation uses shared materials. We'll fix this in the memo.
-                        const mat = m.material as THREE.MeshStandardMaterial;
-                        mat.emissiveIntensity = hurtIntensity;
-                        mat.emissive = hurtColor;
-                    }
-                } else if (child.type === 'Group') { // Handle nested groups (e.g. health bars)
-                    // skip health bar for performance
+            if (hurtStates.current.get(id) !== isHurt) {
+                hurtStates.current.set(id, isHurt);
+                for (const child of group.children) {
+                    if (!(child as THREE.Mesh).isMesh) continue;
+                    const material = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
+                    material.emissiveIntensity = hurtIntensity;
+                    material.emissive = hurtColor;
                 }
             }
         }

@@ -30,17 +30,12 @@ const PauseMenu: React.FC = () => {
         if (activeOverlay !== 'none' && activeOverlay !== 'pause') return;
 
         e.preventDefault();
-        const next = !isPaused;
-        setPaused(next);
-
-        if (next) {
+        if (!isPaused) {
+            setPaused(true);
             setLocked(false);
             document.exitPointerLock?.();
         } else {
-            // PointerLockControls is bound to the game canvas. Locking `body`
-            // can leave the store claiming the player is locked while the
-            // controls never receive mouse movement.
-            safeRequestPointerLock();
+            safeRequestPointerLock(0);
         }
     }, [isPaused, setPaused, setLocked, activeOverlay, screen]);
 
@@ -63,10 +58,8 @@ const PauseMenu: React.FC = () => {
     };
 
     const resume = () => {
-        setPaused(false);
-        // The controls' onLock handler is the source of truth for isLocked;
-        // don't resume player simulation until the browser grants the lock.
-        safeRequestPointerLock();
+        // Keep the pause menu open until PointerLockControls confirms the lock.
+        safeRequestPointerLock(0);
     };
 
     const toggleLAN = async () => {

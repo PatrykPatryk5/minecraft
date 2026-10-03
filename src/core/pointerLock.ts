@@ -7,15 +7,12 @@
  * surfaces as an uncaught promise rejection.
  */
 
-const POINTER_LOCK_DELAY_MS = 120;
-
 /**
  * Request pointer lock on the first `<canvas>` element.
- * Silently catches the SecurityError that occurs when the browser hasn't
- * finished processing a previous exitPointerLock().
+ * Call synchronously from a user gesture so browsers preserve activation.
  */
-export function safeRequestPointerLock(delayMs = POINTER_LOCK_DELAY_MS): void {
-    setTimeout(() => {
+export function safeRequestPointerLock(delayMs = 0): void {
+    const request = () => {
         const canvas = document.querySelector('canvas');
         if (!canvas) return;
         try {
@@ -27,7 +24,10 @@ export function safeRequestPointerLock(delayMs = POINTER_LOCK_DELAY_MS): void {
                 });
             }
         } catch {
-            // Synchronous SecurityError in older browsers; ignore.
+            // Ignore lock requests rejected during browser focus transitions.
         }
-    }, delayMs);
+    };
+
+    if (delayMs > 0) setTimeout(request, delayMs);
+    else request();
 }

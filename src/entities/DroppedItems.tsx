@@ -10,6 +10,7 @@ const DroppedItem: React.FC<{ id: string; type: number; initialPos: [number, num
     const rbRef = useRef<RapierRigidBody>(null);
     const meshRef = useRef<THREE.Mesh>(null);
     const pickedUp = useRef(false);
+    const pickupCheckTimer = useRef(0);
     const atlas = getAtlasTexture();
 
     // Generate accurate texture mapping for the small box based on the atlas
@@ -33,13 +34,17 @@ const DroppedItem: React.FC<{ id: string; type: number; initialPos: [number, num
         return geo;
     }, [type]);
 
-    useFrame(() => {
+    useFrame((_, delta) => {
         // Spin the mesh for classic Minecraft visual feel
         if (meshRef.current) {
-            meshRef.current.rotation.y += 0.02;
+            meshRef.current.rotation.y += delta * 1.2;
         }
 
-        // Check pickup distance continuously
+        pickupCheckTimer.current += delta;
+        if (pickupCheckTimer.current < 0.1) return;
+        pickupCheckTimer.current %= 0.1;
+
+        // Pickup checks do not need to run at render frequency.
         if (rbRef.current && !pickedUp.current) {
             const pos = rbRef.current.translation();
             const playerPos = useGameStore.getState().playerPos;

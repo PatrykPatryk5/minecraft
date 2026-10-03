@@ -35,8 +35,13 @@ export function createTerrainMaterial(atlas: THREE.Texture, water = false): Mesh
         .mul(0.08).mul(flora);
     const swayZ = cos(worldZ.mul(2).add(local.y.mul(3)).add(globalTerrainUniforms.uTime.mul(2.4)))
         .mul(0.08).mul(flora);
-    const wave = sin(worldX.mul(2).add(worldZ.mul(2)).add(globalTerrainUniforms.uTime.mul(1.5)))
-        .mul(water ? 0.06 : 0).mul(liquid);
+
+    // Multi-octave water wave for more realistic appearance
+    const wave1 = sin(worldX.mul(2).add(worldZ.mul(2)).add(globalTerrainUniforms.uTime.mul(1.5)))
+        .mul(water ? 0.05 : 0);
+    const wave2 = sin(worldX.mul(4.7).add(worldZ.mul(3.1)).add(globalTerrainUniforms.uTime.mul(2.3)))
+        .mul(water ? 0.02 : 0);
+    const wave = wave1.add(wave2).mul(liquid);
 
     // TSL node displacement replaces the former GLSL onBeforeCompile hook.
     material.positionNode = local.add(vec3(swayX, wave, swayZ));

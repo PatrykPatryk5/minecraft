@@ -119,7 +119,7 @@ const Clouds: React.FC = () => {
                 ref={meshRef}
                 args={[geometry, material, instanceCount]}
                 frustumCulled={false} // Important since we translate the parent group
-                castShadow={useShadows}
+                castShadow={false}
                 receiveShadow={useShadows}
             />
         </group>

@@ -605,7 +605,8 @@ export class ConnectionManager {
     private sendToHost(packet: ClientPacket): void {
         if (packet.type === 'block_place' || packet.type === 'block_break') {
             const payload = packet.payload;
-            this.recordBlockChange(payload.x, payload.y, payload.z, packet.type === 'block_place' ? payload.blockType : 0, useGameStore.getState().dimension);
+            const blockType = packet.type === 'block_place' ? packet.payload.blockType : 0;
+            this.recordBlockChange(payload.x, payload.y, payload.z, blockType, useGameStore.getState().dimension);
         }
         packet.seq = this.outSeq++;
         packet.ts = Date.now();
@@ -852,9 +853,6 @@ export class ConnectionManager {
                     else store.addBlock(x, y, z, blockType, true);
                     this.recordBlockChange(x, y, z, blockType, store.dimension);
 
-                    const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
-                    store.bumpVersion(cx, cz);
-
                     // Broadcast to all other clients
                     this.broadcastPacket({
                         type: 'block_update',
@@ -1035,8 +1033,6 @@ export class ConnectionManager {
                 if (blockType === 0) store.removeBlock(x, y, z, true);
                 else store.addBlock(x, y, z, blockType, true);
                 this.recordBlockChange(x, y, z, blockType, store.dimension);
-                const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
-                store.bumpVersion(cx, cz);
                 break;
             }
 
@@ -1112,12 +1108,13 @@ export class ConnectionManager {
                 const { blocks, dimension } = packet.payload;
                 if (dimension && dimension !== store.dimension) break;
                 if (blocks && Array.isArray(blocks)) {
+                    const snapshotDimension: Dimension = dimension === 'nether' || dimension === 'end' ? dimension : store.dimension;
                     const placements: { x: number; y: number; z: number; typeId: number }[] = [];
                     const removals: [number, number, number][] = [];
                     for (const b of blocks) {
                         if (!b || !Number.isInteger(b.x) || !Number.isInteger(b.y) || !Number.isInteger(b.z) || !Number.isInteger(b.type)) continue;
                         if (Math.abs(b.x) > 30_000_000 || Math.abs(b.z) > 30_000_000 || b.y < 0 || b.y > 255 || b.type < 0 || b.type > 4095) continue;
-                        this.recordBlockChange(b.x, b.y, b.z, b.type, dimension || store.dimension);
+                        this.recordBlockChange(b.x, b.y, b.z, b.type, snapshotDimension);
                         if (b.type === 0) removals.push([b.x, b.y, b.z]);
                         else if (b.type > 0 && b.type <= 4095) placements.push({ x: b.x, y: b.y, z: b.z, typeId: b.type });
                     }

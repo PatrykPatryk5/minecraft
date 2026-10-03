@@ -25,7 +25,9 @@ import { checkChunkBorders } from '../core/waterSystem';
 import { tickWorld } from '../core/worldTick';
 
 const UNLOAD_BUFFER = 3;
-const BATCH_PER_FRAME = 3; // Increased for faster throughput
+const BATCH_PER_FRAME = 4;
+const MAX_PENDING = 8;
+const RETRY_CHECKS_PER_FRAME = 32;
 const RECALCULATE_COOLDOWN = 300;
 const WORLD_TICK_INTERVAL_MS = 50;
 const FURNACE_TICK_INTERVAL_MS = 50;
@@ -54,6 +56,7 @@ const World: React.FC = () => {
     const loadedKeysRef = useRef(new Set<string>());
     const pendingKeysRef = useRef(new Set<string>());
     const failedKeysRef = useRef(new Map<string, number>()); // Tracks retry counts for broken chunks
+    const retryCursorRef = useRef(0);
     const lastPlayerChunkRef = useRef<string>('');
     const lastRecalcTime = useRef(0);
     const needsRerenderRef = useRef(false);
@@ -96,8 +99,8 @@ const World: React.FC = () => {
         initSeed(worldSeed);
 
         // Leave one logical core available for the browser, input, and rendering.
-        const availableCores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
-        const poolSize = Math.min(availableCores, 6);
+        const logicalCores = navigator.hardwareConcurrency || 4;
+        const poolSize = Math.max(1, Math.min(4, logicalCores - 2));
         const pool = new WorkerPool(
             TerrainWorker,
             poolSize, poolSize
@@ -316,6 +319,7 @@ const World: React.FC = () => {
 
         loadQueueRef.current = toLoad;
         activeChunksRef.current = active;
+        retryCursorRef.current = 0;
 
         // Drop stale generation tasks from the worker queue
         const pool = getWorkerPool();
@@ -393,7 +397,7 @@ const World: React.FC = () => {
         let sent = 0;
         while (
             loadQueueRef.current.length > 0 &&
-            pendingKeysRef.current.size < 16 &&
+            pendingKeysRef.current.size < MAX_PENDING &&
             sent < BATCH_PER_FRAME
         ) {
             const entry = loadQueueRef.current.shift()!;
@@ -401,9 +405,13 @@ const World: React.FC = () => {
             sent++;
         }
 
-        // Retry safety: if a visible chunk is neither loaded nor pending, queue it again.
-        for (let i = 0; i < activeChunksRef.current.length && sent < BATCH_PER_FRAME; i++) {
-            const c = activeChunksRef.current[i];
+        // Scan a bounded slice; a full scan every frame gets expensive at long render distances.
+        const activeChunks = activeChunksRef.current;
+        const retryChecks = Math.min(RETRY_CHECKS_PER_FRAME, activeChunks.length);
+        for (let checked = 0; checked < retryChecks && sent < BATCH_PER_FRAME; checked++) {
+            const index = retryCursorRef.current % activeChunks.length;
+            const c = activeChunks[index];
+            retryCursorRef.current = (index + 1) % activeChunks.length;
             const failCount = failedKeysRef.current.get(c.key) || 0;
             if (!loadedKeysRef.current.has(c.key) && !pendingKeysRef.current.has(c.key) && failCount < 3) {
                 requestChunk(c.cx, c.cz);
@@ -459,7 +467,7 @@ const World: React.FC = () => {
 
         const shouldUpdate =
             needsRerenderRef.current ||
-            (arrivedCount !== lastRerenderCount.current && now - lastRerenderTimeRef.current > 200);
+            (arrivedCount !== lastRerenderCount.current && now - lastRerenderTimeRef.current > 150);
 
         if (shouldUpdate) {
             needsRerenderRef.current = false;

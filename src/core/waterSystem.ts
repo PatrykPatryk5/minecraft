@@ -13,6 +13,7 @@ import { playSound } from '../audio/sounds';
 
 const MAX_SPREAD = 7;
 const SPREAD_DELAY = 100; // ms between spread ticks
+const MAX_WATER_BATCH = 64;
 
 interface SpreadEntry {
     x: number;
@@ -21,12 +22,65 @@ interface SpreadEntry {
     distance: number;
 }
 
+interface ScheduledWater {
+    x: number;
+    y: number;
+    z: number;
+    dimension: string;
+    worldSeed: number;
+    dueAt: number;
+}
+
+const scheduledWater = new Map<string, ScheduledWater>();
+const pendingFillChecks = new Set<string>();
+let waterFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let waterFlushDueAt = Infinity;
+
+function scheduleWaterFlush(dueAt: number): void {
+    if (waterFlushTimer && dueAt >= waterFlushDueAt) return;
+    if (waterFlushTimer) clearTimeout(waterFlushTimer);
+    waterFlushDueAt = dueAt;
+    waterFlushTimer = setTimeout(flushScheduledWater, Math.max(0, dueAt - performance.now()));
+}
+
+function flushScheduledWater(): void {
+    waterFlushTimer = null;
+    waterFlushDueAt = Infinity;
+    const now = performance.now();
+    const ready: ScheduledWater[] = [];
+    let nextDueAt = Infinity;
+
+    for (const [key, placement] of scheduledWater) {
+        if (placement.dueAt <= now && ready.length < MAX_WATER_BATCH) {
+            ready.push(placement);
+            scheduledWater.delete(key);
+        } else {
+            nextDueAt = Math.min(nextDueAt, placement.dueAt);
+        }
+    }
+
+    if (ready.length > 0) {
+        const state = useGameStore.getState();
+        const blocks = ready
+            .filter(({ x, y, z, dimension, worldSeed }) =>
+                dimension === state.dimension && worldSeed === state.worldSeed && canWaterReplace(state.getBlock(x, y, z)))
+            .map(({ x, y, z }) => ({ x, y, z, typeId: BlockType.WATER }));
+        if (blocks.length > 0) state.addBlocks(blocks, false, true);
+    }
+
+    if (scheduledWater.size > 0) {
+        scheduleWaterFlush(nextDueAt === Infinity ? performance.now() : nextDueAt);
+    }
+}
+
 /**
  * Trigger water spread from a position.
  * Call this when a water block is placed or a block adjacent to water is removed.
  */
 export function spreadWater(sx: number, sy: number, sz: number): void {
     const s = useGameStore.getState();
+    const dimension = s.dimension;
+    const worldSeed = s.worldSeed;
 
     // Only spread from water source blocks
     if (s.getBlock(sx, sy, sz) !== BlockType.WATER) return;
@@ -35,10 +89,9 @@ export function spreadWater(sx: number, sy: number, sz: number): void {
     const visited = new Set<string>();
     visited.add(`${sx},${sy},${sz}`);
 
-    let tickDelay = 0;
-
-    while (queue.length > 0) {
-        const current = queue.shift()!;
+    let queueIndex = 0;
+    while (queueIndex < queue.length) {
+        const current = queue[queueIndex++];
         const { x, y, z, distance } = current;
 
         if (distance > MAX_SPREAD) continue;
@@ -49,8 +102,7 @@ export function spreadWater(sx: number, sy: number, sz: number): void {
             const key = `${x},${y - 1},${z}`;
             if (!visited.has(key)) {
                 visited.add(key);
-                schedulePlace(x, y - 1, z, tickDelay);
-                tickDelay += SPREAD_DELAY;
+                schedulePlace(x, y - 1, z, 0, dimension, worldSeed);
                 queue.push({ x, y: y - 1, z, distance: 0 }); // Reset distance when flowing down
             }
         }
@@ -71,8 +123,7 @@ export function spreadWater(sx: number, sy: number, sz: number): void {
                 const type = s.getBlock(nx, ny, nz);
                 if (canWaterReplace(type)) {
                     visited.add(key);
-                    schedulePlace(nx, ny, nz, tickDelay);
-                    tickDelay += SPREAD_DELAY;
+                    schedulePlace(nx, ny, nz, (distance + 1) * SPREAD_DELAY, dimension, worldSeed);
                     queue.push({ x: nx, y: ny, z: nz, distance: distance + 1 });
                 }
             }
@@ -85,6 +136,10 @@ export function spreadWater(sx: number, sy: number, sz: number): void {
  */
 export function checkWaterFill(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
+    const dimension = s.dimension;
+    const worldSeed = s.worldSeed;
+    const key = `${dimension}|${worldSeed}|${x},${y},${z}`;
+    if (pendingFillChecks.has(key)) return;
 
     // Check neighbors that can flow into this empty block (sides and above)
     const neighbors = [
@@ -96,10 +151,14 @@ export function checkWaterFill(x: number, y: number, z: number): void {
     for (const [nx, ny, nz] of neighbors) {
         if (s.getBlock(nx, ny, nz) === BlockType.WATER) {
             // Water found adjacent — schedule fill
+            pendingFillChecks.add(key);
             setTimeout(() => {
-                const current = useGameStore.getState().getBlock(x, y, z);
+                pendingFillChecks.delete(key);
+                const state = useGameStore.getState();
+                if (state.dimension !== dimension || state.worldSeed !== worldSeed) return;
+                const current = state.getBlock(x, y, z);
                 if (canWaterReplace(current)) {
-                    useGameStore.getState().addBlock(x, y, z, BlockType.WATER);
+                    state.addBlock(x, y, z, BlockType.WATER);
                     // Continue spreading from this new water block
                     spreadWater(x, y, z);
                 }
@@ -115,16 +174,19 @@ export function checkWaterFill(x: number, y: number, z: number): void {
  */
 export function checkChunkBorders(cx: number, cz: number): void {
     const s = useGameStore.getState();
+    const dimension = s.dimension;
+    const worldSeed = s.worldSeed;
     const currentChunk = s.chunks[chunkKey(cx, cz)];
     if (!currentChunk) return;
 
     const worldX = cx * 16;
     const worldZ = cz * 16;
     const spreadSeeds: Array<[number, number, number]> = [];
-    let changed = false;
+    const changedChunks = new Set<string>();
 
     const trySetWater = (
         chunk: Uint16Array,
+        key: string,
         lx: number,
         y: number,
         lz: number,
@@ -137,7 +199,7 @@ export function checkChunkBorders(cx: number, cz: number): void {
         if (!canWaterReplace(id)) return;
         chunk[idx] = (raw & 0xF000) | BlockType.WATER;
         spreadSeeds.push([wx, y, wz]);
-        changed = true;
+        changedChunks.add(key);
     };
 
     const syncFace = (
@@ -146,6 +208,7 @@ export function checkChunkBorders(cx: number, cz: number): void {
         localZ: number | null,
         nbX: number | null,
         nbZ: number | null,
+        nbKey: string,
         dirX: number,
         dirZ: number
     ) => {
@@ -161,9 +224,9 @@ export function checkChunkBorders(cx: number, cz: number): void {
                     const nbId = nbChunk[nbIdx] & 0x0FFF;
 
                     if (nbId === BlockType.WATER && canWaterReplace(localId)) {
-                        trySetWater(currentChunk, localX, y, z, worldX + localX, worldZ + z);
+                        trySetWater(currentChunk, chunkKey(cx, cz), localX, y, z, worldX + localX, worldZ + z);
                     } else if (localId === BlockType.WATER && canWaterReplace(nbId)) {
-                        trySetWater(nbChunk, nbX, y, z, worldX + localX + dirX, worldZ + z + dirZ);
+                        trySetWater(nbChunk, nbKey, nbX, y, z, worldX + localX + dirX, worldZ + z + dirZ);
                     }
                 }
             }
@@ -177,34 +240,35 @@ export function checkChunkBorders(cx: number, cz: number): void {
                     const nbId = nbChunk[nbIdx] & 0x0FFF;
 
                     if (nbId === BlockType.WATER && canWaterReplace(localId)) {
-                        trySetWater(currentChunk, x, y, localZ, worldX + x, worldZ + localZ);
+                        trySetWater(currentChunk, chunkKey(cx, cz), x, y, localZ, worldX + x, worldZ + localZ);
                     } else if (localId === BlockType.WATER && canWaterReplace(nbId)) {
-                        trySetWater(nbChunk, x, y, nbZ, worldX + x + dirX, worldZ + localZ + dirZ);
+                        trySetWater(nbChunk, nbKey, x, y, nbZ, worldX + x + dirX, worldZ + localZ + dirZ);
                     }
                 }
             }
         }
     };
 
-    syncFace(s.chunks[chunkKey(cx - 1, cz)], 0, null, 15, null, -1, 0);
-    syncFace(s.chunks[chunkKey(cx + 1, cz)], 15, null, 0, null, 1, 0);
-    syncFace(s.chunks[chunkKey(cx, cz - 1)], null, 0, null, 15, 0, -1);
-    syncFace(s.chunks[chunkKey(cx, cz + 1)], null, 15, null, 0, 0, 1);
+    syncFace(s.chunks[chunkKey(cx - 1, cz)], 0, null, 15, null, chunkKey(cx - 1, cz), -1, 0);
+    syncFace(s.chunks[chunkKey(cx + 1, cz)], 15, null, 0, null, chunkKey(cx + 1, cz), 1, 0);
+    syncFace(s.chunks[chunkKey(cx, cz - 1)], null, 0, null, 15, chunkKey(cx, cz - 1), 0, -1);
+    syncFace(s.chunks[chunkKey(cx, cz + 1)], null, 15, null, 0, chunkKey(cx, cz + 1), 0, 1);
 
-    if (!changed) return;
+    if (changedChunks.size === 0) return;
 
-    // Refresh local and adjacent chunk meshes once after a bulk sync.
-    s.bumpVersion(cx, cz);
-    if (s.chunks[chunkKey(cx - 1, cz)]) s.bumpVersion(cx - 1, cz);
-    if (s.chunks[chunkKey(cx + 1, cz)]) s.bumpVersion(cx + 1, cz);
-    if (s.chunks[chunkKey(cx, cz - 1)]) s.bumpVersion(cx, cz - 1);
-    if (s.chunks[chunkKey(cx, cz + 1)]) s.bumpVersion(cx, cz + 1);
+    for (const key of changedChunks) {
+        const [changedCx, changedCz] = key.split(',').map(Number);
+        s.bumpVersion(changedCx, changedCz);
+    }
 
     // Continue local flow from a capped seed list to avoid spikes.
     const maxSeeds = Math.min(12, spreadSeeds.length);
     for (let i = 0; i < maxSeeds; i++) {
         const [x, y, z] = spreadSeeds[i];
-        setTimeout(() => spreadWater(x, y, z), SPREAD_DELAY);
+        setTimeout(() => {
+            const state = useGameStore.getState();
+            if (state.dimension === dimension && state.worldSeed === worldSeed) spreadWater(x, y, z);
+        }, SPREAD_DELAY);
     }
 }
 
@@ -222,6 +286,8 @@ function canWaterReplace(blockType: number): boolean {
  */
 export function placeSponge(x: number, y: number, z: number): void {
     const s = useGameStore.getState();
+    const dimension = s.dimension;
+    const worldSeed = s.worldSeed;
     const radius = 6;
     let absorbed = false;
     const toRemove: [number, number, number][] = [];
@@ -251,7 +317,10 @@ export function placeSponge(x: number, y: number, z: number): void {
         if (toRemove.length > 50) {
             // Batch remove for performance if huge
             for (let i = 0; i < toRemove.length; i += 50) {
-                setTimeout(() => s.removeBlocks(toRemove.slice(i, i + 50)), Math.floor(i / 50) * 50);
+                setTimeout(() => {
+                    const state = useGameStore.getState();
+                    if (state.dimension === dimension && state.worldSeed === worldSeed) s.removeBlocks(toRemove.slice(i, i + 50));
+                }, Math.floor(i / 50) * 50);
             }
         } else {
             s.removeBlocks(toRemove);
@@ -269,13 +338,13 @@ export function placeSponge(x: number, y: number, z: number): void {
     }
 }
 
-function schedulePlace(x: number, y: number, z: number, delay: number): void {
-    setTimeout(() => {
-        const s = useGameStore.getState();
-        const current = s.getBlock(x, y, z);
-        if (canWaterReplace(current)) {
-            s.addBlock(x, y, z, BlockType.WATER);
-        }
-    }, delay);
+function schedulePlace(x: number, y: number, z: number, delay: number, dimension: string, worldSeed: number): void {
+    const key = `${dimension}|${worldSeed}|${x},${y},${z}`;
+    const dueAt = performance.now() + Math.max(0, delay);
+    const existing = scheduledWater.get(key);
+    if (existing && existing.dueAt <= dueAt) return;
+
+    scheduledWater.set(key, { x, y, z, dimension, worldSeed, dueAt });
+    scheduleWaterFlush(dueAt);
 }
 

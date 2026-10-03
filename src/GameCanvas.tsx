@@ -26,13 +26,14 @@ type GraphicsQuality = ReturnType<typeof useGameStore.getState>['settings']['gra
 function SceneContent() {
     const dimension = useGameStore((s) => s.dimension);
     const graphics = useGameStore((s) => s.settings.graphics);
+    const isPaused = useGameStore((s) => s.isPaused);
 
     return (
         <>
             <DayNightCycle />
             {/* Fixed-step simulation keeps collisions and rigid-body motion stable
                 when the render frame rate changes; interpolation hides the steps. */}
-            <Physics timeStep={1 / 60} interpolate numSolverIterations={10}>
+            <Physics paused={isPaused} timeStep={1 / 60} interpolate numSolverIterations={6}>
                 <World />
                 <Player />
                 <SafeModule name="MobRenderer"><MobRenderer /></SafeModule>
@@ -55,14 +56,18 @@ function SceneContent() {
 
 export default function GameCanvas({ fov, graphics }: { fov: number; graphics: GraphicsQuality }) {
     const useShadows = graphics === 'fancy' || graphics === 'fabulous';
+    const maxDpr = graphics === 'fabulous' ? 2 : graphics === 'fancy' ? 1.5 : graphics === 'potato' ? 0.75 : 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
 
     return (
         <Canvas
             camera={{ fov, near: 0.1, far: 1000, position: [0, 80, 0] }}
             gl={async (props) => {
                 const { WebGPURenderer } = await import('three/webgpu');
+                const rendererOptions = { ...props } as Record<string, unknown>;
+                delete rendererOptions.powerPreference;
                 const renderer = new WebGPURenderer({
-                    ...props,
+                    ...rendererOptions,
                     antialias: graphics === 'fancy' || graphics === 'fabulous',
                     // powerPreference is ignored on Windows WebGPU (crbug.com/369219127)
                     stencil: false,
@@ -77,7 +82,7 @@ export default function GameCanvas({ fov, graphics }: { fov: number; graphics: G
                 return renderer as unknown as THREE.WebGLRenderer;
             }}
             shadows={useShadows ? { type: graphics === 'fabulous' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap } : false}
-            dpr={graphics === 'potato' ? [0.75, 0.75] : graphics === 'fabulous' ? [1, Math.min(window.devicePixelRatio, 2)] : [1, 1]}
+            dpr={dpr}
             style={{ width: '100%', height: '100%' }}
             onContextMenu={(e) => e.preventDefault()}
             frameloop="always"

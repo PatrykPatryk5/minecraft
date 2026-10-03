@@ -21,8 +21,9 @@ let masterGain: GainNode | null = null;
 let musicGain: GainNode | null = null;
 let ambienceGain: GainNode | null = null;
 let discGain: GainNode | null = null;
-let currentDiscSource: AudioBufferSourceNode | null = null;
-let currentDiscOscillators: OscillatorNode[] = [];
+let outputCompressor: DynamicsCompressorNode | null = null;
+const currentDiscSources = new Set<AudioBufferSourceNode>();
+const currentDiscOscillators = new Set<OscillatorNode>();
 
 // Environmental filters
 let environmentalFilter: BiquadFilterNode | null = null;
@@ -33,6 +34,7 @@ let dryGain: GainNode | null = null;
 function getCtx(): AudioContext {
     if (!audioCtx) {
         audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const settings = useGameStore.getState().settings;
 
         // Filter chain: ... -> environmentalFilter -> masterGain -> destination
         environmentalFilter = audioCtx.createBiquadFilter();
@@ -40,7 +42,14 @@ function getCtx(): AudioContext {
         environmentalFilter.frequency.value = 20000; // Open by default
 
         masterGain = audioCtx.createGain();
-        masterGain.gain.value = 0.5;
+        masterGain.gain.value = settings.soundVolume * 0.625;
+
+        outputCompressor = audioCtx.createDynamicsCompressor();
+        outputCompressor.threshold.value = -8;
+        outputCompressor.knee.value = 8;
+        outputCompressor.ratio.value = 4;
+        outputCompressor.attack.value = 0.003;
+        outputCompressor.release.value = 0.16;
 
         // Reverb setup (wet/dry)
         dryGain = audioCtx.createGain();
@@ -64,19 +73,20 @@ function getCtx(): AudioContext {
         environmentalFilter.connect(dryGain).connect(masterGain);
         environmentalFilter.connect(reverbNode).connect(reverbGain).connect(masterGain);
 
-        masterGain.connect(audioCtx.destination);
+        masterGain.connect(outputCompressor);
 
         musicGain = audioCtx.createGain();
-        musicGain.gain.value = 0.15;
-        musicGain.connect(audioCtx.destination);
+        musicGain.gain.value = settings.musicVolume * 0.5;
+        musicGain.connect(outputCompressor);
 
         ambienceGain = audioCtx.createGain();
-        ambienceGain.gain.value = 0.2;
-        ambienceGain.connect(audioCtx.destination);
+        ambienceGain.gain.value = settings.musicVolume * (2 / 3);
+        ambienceGain.connect(outputCompressor);
 
         discGain = audioCtx.createGain();
-        discGain.gain.value = 0.4;
-        discGain.connect(audioCtx.destination);
+        discGain.gain.value = Math.min(1, settings.musicVolume * (4 / 3));
+        discGain.connect(outputCompressor);
+        outputCompressor.connect(audioCtx.destination);
     }
     if (audioCtx.state === 'suspended') audioCtx.resume();
     return audioCtx;
@@ -101,10 +111,17 @@ export function updateEnvironment(underwater: boolean, inCave: boolean): void {
 
 // ─── Volume Control ──────────────────────────────────────
 export function setSoundVolume(v: number): void {
-    if (masterGain) masterGain.gain.value = v;
+    if (audioCtx && masterGain) {
+        masterGain.gain.setTargetAtTime(Math.max(0, Math.min(1, v)) * 0.625, audioCtx.currentTime, 0.02);
+    }
 }
 export function setMusicVolume(v: number): void {
-    if (musicGain) musicGain.gain.value = v * 0.3;
+    if (!audioCtx) return;
+    const volume = Math.max(0, Math.min(1, v));
+    const now = audioCtx.currentTime;
+    musicGain?.gain.setTargetAtTime(volume * 0.5, now, 0.02);
+    ambienceGain?.gain.setTargetAtTime(volume * (2 / 3), now, 0.02);
+    discGain?.gain.setTargetAtTime(Math.min(1, volume * (4 / 3)), now, 0.02);
 }
 
 // ─── Noise Helpers ───────────────────────────────────────
@@ -825,18 +842,51 @@ export function stopMusic(): void {
 }
 
 // ─── Music Discs (Procedural Tracks) ─────────────────────
-export function stopMusicDisc(): void {
-    if (currentDiscSource) {
-        currentDiscSource.stop();
-        currentDiscSource = null;
-    }
-    currentDiscOscillators.forEach(osc => {
-        try { osc.stop(); } catch { /* ignore */ }
-    });
-    currentDiscOscillators = [];
+type MusicDiscTrack = 'muzo' | 'retro' | 'creepy' | 'chill' | 'disco' | 'ambient' | 'techno' | 'synth' | 'orbit' | 'ember' | 'rainroom' | 'glitch';
+
+function trackDiscOscillator(osc: OscillatorNode): void {
+    currentDiscOscillators.add(osc);
+    osc.addEventListener('ended', () => currentDiscOscillators.delete(osc), { once: true });
 }
 
-export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'disco' | 'ambient' | 'techno' | 'synth'): void {
+function trackDiscSource(source: AudioBufferSourceNode): void {
+    currentDiscSources.add(source);
+    source.addEventListener('ended', () => currentDiscSources.delete(source), { once: true });
+}
+
+function scheduleDiscNote(
+    ctx: AudioContext,
+    output: AudioNode,
+    frequency: number,
+    time: number,
+    duration: number,
+    waveform: OscillatorType,
+    volume: number,
+): void {
+    const osc = createTone(ctx, frequency, duration, waveform);
+    const envelope = ctx.createGain();
+    const attack = Math.min(0.08, duration * 0.25);
+    envelope.gain.setValueAtTime(0, time);
+    envelope.gain.linearRampToValueAtTime(volume, time + attack);
+    envelope.gain.exponentialRampToValueAtTime(0.001, time + duration);
+    osc.connect(envelope).connect(output);
+    osc.start(time);
+    osc.stop(time + duration);
+    trackDiscOscillator(osc);
+}
+
+export function stopMusicDisc(): void {
+    currentDiscSources.forEach((source) => {
+        try { source.stop(); } catch { /* already ended */ }
+    });
+    currentDiscOscillators.forEach(osc => {
+        try { osc.stop(); } catch { /* already ended */ }
+    });
+    currentDiscSources.clear();
+    currentDiscOscillators.clear();
+}
+
+export function playMusicDisc(track: MusicDiscTrack): void {
     stopMusicDisc();
     const ctx = getCtx();
     if (!discGain) return;
@@ -857,7 +907,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
             env.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
             osc.connect(env).connect(gain);
             osc.start(time); osc.stop(time + 0.4);
-            currentDiscOscillators.push(osc);
+            trackDiscOscillator(osc);
 
             // Bass support
             if (i % 4 === 0) {
@@ -868,7 +918,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 bassEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.7);
                 bassOsc.connect(bassEnv).connect(gain);
                 bassOsc.start(time); bassOsc.stop(time + 0.8);
-                currentDiscOscillators.push(bassOsc);
+                trackDiscOscillator(bassOsc);
             }
         }
     } else if (track === 'retro') {
@@ -885,7 +935,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
             env.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
             osc.connect(env).connect(gain);
             osc.start(time); osc.stop(time + 0.6);
-            currentDiscOscillators.push(osc);
+            trackDiscOscillator(osc);
 
             // Arpeggio lead
             const arpNotes = [freq * 2, freq * 3, freq * 4, freq * 2.5];
@@ -897,7 +947,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
             leadEnv.gain.exponentialRampToValueAtTime(0.001, time + tOffset + 0.15);
             leadOsc.connect(leadEnv).connect(gain);
             leadOsc.start(time + tOffset); leadOsc.stop(time + tOffset + 0.2);
-            currentDiscOscillators.push(leadOsc);
+            trackDiscOscillator(leadOsc);
         }
     } else if (track === 'creepy') {
         // "Creepy" track: Dark ambient / discordant (New)
@@ -914,7 +964,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 env.gain.exponentialRampToValueAtTime(0.001, time + 2.5);
                 osc.connect(env).connect(gain);
                 osc.start(time); osc.stop(time + 3.0);
-                currentDiscOscillators.push(osc);
+                trackDiscOscillator(osc);
             });
             // High pitch whistles
             if (i % 3 === 0) {
@@ -925,7 +975,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 highEnv.gain.exponentialRampToValueAtTime(0.001, time + 1.5);
                 highOsc.connect(highEnv).connect(gain);
                 highOsc.start(time + 0.5); highOsc.stop(time + 2.0);
-                currentDiscOscillators.push(highOsc);
+                trackDiscOscillator(highOsc);
             }
         }
     } else if (track === 'disco') {
@@ -942,7 +992,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 env.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
                 osc.connect(env).connect(gain);
                 osc.start(time); osc.stop(time + 0.2);
-                currentDiscOscillators.push(osc);
+                trackDiscOscillator(osc);
             }
             // Percussive "snare" noise
             if (i % 4 === 2) {
@@ -954,7 +1004,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 env.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
                 noise.connect(filter).connect(env).connect(gain);
                 noise.start(time); noise.stop(time + 0.1);
-                currentDiscSource = noise;
+                trackDiscSource(noise);
             }
         }
     } else if (track === 'ambient') {
@@ -971,7 +1021,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
             env.gain.linearRampToValueAtTime(0, time + tempo * 1.2);
             osc.connect(env).connect(gain);
             osc.start(time); osc.stop(time + tempo * 1.5);
-            currentDiscOscillators.push(osc);
+            trackDiscOscillator(osc);
 
             // Random high twinkles
             if (i % 2 === 0) {
@@ -983,7 +1033,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 hEnv.gain.exponentialRampToValueAtTime(0.001, time + 2.0);
                 hOsc.connect(hEnv).connect(gain);
                 hOsc.start(time + 1.0); hOsc.stop(time + 2.5);
-                currentDiscOscillators.push(hOsc);
+                trackDiscOscillator(hOsc);
             }
         }
     } else if (track === 'techno') {
@@ -1000,7 +1050,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 kEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
                 kick.connect(kEnv).connect(gain);
                 kick.start(time); kick.stop(time + 0.15);
-                currentDiscOscillators.push(kick);
+                trackDiscOscillator(kick);
             }
             // Driving lead
             const notes = [220, 261, 293, 220];
@@ -1012,7 +1062,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
             filter.type = 'lowpass'; filter.frequency.value = 800 + Math.sin(i * 0.1) * 400;
             osc.connect(filter).connect(env).connect(gain);
             osc.start(time); osc.stop(time + 0.12);
-            currentDiscOscillators.push(osc);
+            trackDiscOscillator(osc);
         }
     } else if (track === 'synth') {
         // "Synth" track: 80s chords and resonant sweeps (New)
@@ -1036,7 +1086,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 filter.type = 'lowpass'; filter.frequency.value = 1500;
                 osc.connect(filter).connect(env).connect(gain);
                 osc.start(time); osc.stop(time + 1.2);
-                currentDiscOscillators.push(osc);
+                trackDiscOscillator(osc);
             });
             // Gliding lead on top
             if (i % 2 === 0) {
@@ -1047,7 +1097,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 lEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.7);
                 lOsc.connect(lEnv).connect(gain);
                 lOsc.start(time + 0.2); lOsc.stop(time + 0.8);
-                currentDiscOscillators.push(lOsc);
+                trackDiscOscillator(lOsc);
             }
         }
     } else if (track === 'chill') {
@@ -1070,7 +1120,7 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 env.gain.exponentialRampToValueAtTime(0.001, time + 2.0);
                 osc.connect(env).connect(gain);
                 osc.start(time); osc.stop(time + 3.0);
-                currentDiscOscillators.push(osc);
+                trackDiscOscillator(osc);
             });
             // Soft melody on top
             if (i % 2 === 0) {
@@ -1082,7 +1132,63 @@ export function playMusicDisc(track: 'muzo' | 'retro' | 'creepy' | 'chill' | 'di
                 melEnv.gain.exponentialRampToValueAtTime(0.001, time + 2.0);
                 melOsc.connect(melEnv).connect(gain);
                 melOsc.start(time + 0.5); melOsc.stop(time + 2.5);
-                currentDiscOscillators.push(melOsc);
+                trackDiscOscillator(melOsc);
+            }
+        }
+    } else if (track === 'orbit') {
+        const scale = [392, 440, 523.25, 587.33, 659.25, 783.99, 880];
+        const motif = [0, 2, 4, 5, 3, 6, 4, 2, 1, 3, 5, 4, 6, 3, 2, 4];
+        const tempo = 0.3;
+        for (let i = 0; i < 96; i++) {
+            const time = ctx.currentTime + i * tempo;
+            const note = scale[motif[i % motif.length]];
+            scheduleDiscNote(ctx, gain, note, time, 0.26, 'triangle', 0.035);
+            if (i % 8 === 0) {
+                const bass = [98, 110, 130.81, 146.83][Math.floor(i / 8) % 4];
+                scheduleDiscNote(ctx, gain, bass, time, 1.8, 'sine', 0.035);
+            }
+            if (i % 12 === 6) scheduleDiscNote(ctx, gain, note * 2, time + 0.08, 0.18, 'sine', 0.012);
+        }
+    } else if (track === 'ember') {
+        const chords = [
+            [110, 164.81, 220, 261.63],
+            [98, 146.83, 196, 246.94],
+            [130.81, 164.81, 196, 261.63],
+            [87.31, 130.81, 174.61, 220],
+        ];
+        for (let bar = 0; bar < 10; bar++) {
+            const time = ctx.currentTime + bar * 2.8;
+            const chord = chords[bar % chords.length];
+            chord.forEach((frequency, i) => {
+                scheduleDiscNote(ctx, gain, frequency, time, 2.6, i === 0 ? 'sine' : 'triangle', 0.025);
+            });
+            const melody = chord[(bar * 3 + 1) % chord.length] * 2;
+            scheduleDiscNote(ctx, gain, melody, time + 0.65, 0.55, 'sine', 0.026);
+            scheduleDiscNote(ctx, gain, melody * 1.25, time + 1.65, 0.4, 'triangle', 0.018);
+        }
+    } else if (track === 'rainroom') {
+        const scale = [174.61, 207.65, 261.63, 311.13, 349.23, 415.3];
+        const pattern = [2, 5, 3, 1, 4, 2, 0, 3, 5, 4, 1, 2];
+        for (let i = 0; i < 72; i++) {
+            const time = ctx.currentTime + i * 0.4;
+            const note = scale[pattern[i % pattern.length]];
+            scheduleDiscNote(ctx, gain, note, time, 0.36, 'sine', 0.028);
+            if (i % 6 === 0) scheduleDiscNote(ctx, gain, note * 2.01, time + 0.12, 0.7, 'sine', 0.012);
+            if (i % 12 === 0) scheduleDiscNote(ctx, gain, scale[(i / 12) % scale.length] / 2, time, 1.4, 'triangle', 0.022);
+        }
+    } else if (track === 'glitch') {
+        const scale = [130.81, 155.56, 196, 233.08, 261.63, 311.13, 392, 466.16];
+        const pattern = [0, 4, 2, 6, 3, 7, 2, 5, 1, 6, 4, 3, 7, 2, 5, 0];
+        const rhythm = [true, false, true, true, false, true, false, false];
+        for (let i = 0; i < 128; i++) {
+            const time = ctx.currentTime + i * 0.18;
+            if (rhythm[i % rhythm.length]) {
+                const note = scale[pattern[i % pattern.length]];
+                scheduleDiscNote(ctx, gain, note, time, 0.14, i % 4 === 0 ? 'square' : 'sawtooth', 0.025);
+            }
+            if (i % 8 === 0) {
+                const bass = scale[(i / 8 * 3) % scale.length] / 2;
+                scheduleDiscNote(ctx, gain, bass, time, 0.3, 'square', 0.035);
             }
         }
     }

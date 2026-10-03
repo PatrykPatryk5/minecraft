@@ -126,11 +126,11 @@ const TOOL_SPEED: Record<number, number> = {
 const Player: React.FC = () => {
     const { camera } = useThree();
     const keys = useKeyboard();
-    const controlsRef = useRef<any>(null);
     const rbRef = useRef<RapierRigidBody>(null);
     const velocity = useRef(new THREE.Vector3());
     const onGround = useRef(false);
     const pos = useRef(new THREE.Vector3(8, 80, 8));
+    const previousPos = useRef(new THREE.Vector3(8, 80, 8));
     const highlightRef = useRef<THREE.Mesh>(null);
     const miningCrackRef = useRef<THREE.Mesh>(null);
     const isFlying = useRef(false);
@@ -207,6 +207,7 @@ const Player: React.FC = () => {
 
         velocity.current.set(0, 0, 0);
         onGround.current = false;
+        previousPos.current.copy(pos.current);
 
         // Force camera to spawn
         camera.position.copy(pos.current);
@@ -621,18 +622,14 @@ const Player: React.FC = () => {
         return () => window.removeEventListener('mousedown', onMid);
     }, [raycastBlock]);
 
-    // ─── Pointer Lock ──────────────────────────────────────
-    useEffect(() => {
-        const ctrl = controlsRef.current;
-        if (!ctrl) return;
-        const onLock = () => storeRef.current.setLocked(true);
-        const onUnlock = () => storeRef.current.setLocked(false);
-        ctrl.addEventListener('lock', onLock);
-        ctrl.addEventListener('unlock', onUnlock);
-        return () => {
-            ctrl.removeEventListener('lock', onLock);
-            ctrl.removeEventListener('unlock', onUnlock);
-        };
+    const handlePointerLock = useCallback(() => {
+        const state = useGameStore.getState();
+        state.setLocked(true);
+        if (state.isPaused && state.activeOverlay === 'pause') state.setPaused(false);
+    }, []);
+
+    const handlePointerUnlock = useCallback(() => {
+        useGameStore.getState().setLocked(false);
     }, []);
 
     // ─── Fixed 20 TPS Game Loop ──────────────────────────────
@@ -655,6 +652,7 @@ const Player: React.FC = () => {
 
         let ticksThisFrame = 0;
         let bobY = 0; // Visual offset for this frame
+        let snapCameraToPlayer = false;
 
         while (accumulator.current >= TICK_RATE && ticksThisFrame < MAX_TICKS_PER_FRAME) {
             accumulator.current -= TICK_RATE;
@@ -664,6 +662,7 @@ const Player: React.FC = () => {
             const dt = TICK_RATE;
             const vel = velocity.current;
             const p = pos.current;
+            previousPos.current.copy(p);
             const mode = s.gameMode;
             const forward = forwardVec.current;
             const right = rightVec.current;
@@ -687,6 +686,7 @@ const Player: React.FC = () => {
                             p.set(pend.x + 0.5, sy + 1.5, pend.z + 0.5);
                             buildNetherPortalSafe(pend.x, sy, pend.z);
                         }
+                        snapCameraToPlayer = true;
                         vel.set(0, 0, 0);
                         fallStart.current = sy + 1.5;
                         playSound('portal');
@@ -694,6 +694,7 @@ const Player: React.FC = () => {
                     } else {
                         vel.set(0, 0, 0);
                         p.y = 200; // Suspend high up to avoid suffocation
+                        snapCameraToPlayer = true;
                     }
                 }
                 continue; // Skip the rest of the physical tick
@@ -1372,12 +1373,14 @@ const Player: React.FC = () => {
                 }
                 const spawnY = getSpawnHeight(8, 8);
                 p.set(8, spawnY + 2, 8);
+                snapCameraToPlayer = true;
                 vel.set(0, 0, 0);
                 isFlying.current = false;
                 fallStart.current = p.y;
             }
             if (p.y > MAX_HEIGHT + 50) {
                 p.y = MAX_HEIGHT + 10;
+                snapCameraToPlayer = true;
                 vel.y = 0;
             }
 
@@ -1450,11 +1453,18 @@ const Player: React.FC = () => {
         bobAmplitude.current += (targetBobAmount - bobAmplitude.current) * bobBlend;
         if (targetBobAmount > 0) {
             bobPhase.current += frameDelta * horizontalSpeed * (sneaking ? 1.7 : 2.5);
+        } else {
+            // Smoothly settle phase to nearest full cycle (sin=0) to avoid
+            // freezing the camera at a non-zero bob offset when the player stops.
+            const nearestZero = Math.round(bobPhase.current / Math.PI) * Math.PI;
+            bobPhase.current += (nearestZero - bobPhase.current) * Math.min(1, frameDelta * 10);
         }
         bobY = Math.sin(bobPhase.current) * bobAmplitude.current;
 
-        // ── Camera sync (runs every frame for smooth visuals) ──
-        camera.position.copy(pos.current);
+        // Interpolate the fixed 20 TPS simulation between rendered frames.
+        if (snapCameraToPlayer) previousPos.current.copy(pos.current);
+        const renderAlpha = Math.min(1, accumulator.current / TICK_RATE);
+        camera.position.copy(previousPos.current).lerp(pos.current, renderAlpha);
         camera.position.y += bobY + crouchVisualOffset.current + stepVisualOffset.current;
 
         // Preserve the player's FOV setting while smoothly zooming with the bow.
@@ -1525,10 +1535,9 @@ const Player: React.FC = () => {
     return (
         <>
             <PointerLockControls
-                ref={controlsRef}
                 selector="canvas"
-                onLock={() => setLocked(true)}
-                onUnlock={() => setLocked(false)}
+                onLock={handlePointerLock}
+                onUnlock={handlePointerUnlock}
                 pointerSpeed={1.0}
             />
             <RigidBody ref={rbRef} type="kinematicPosition" colliders="cuboid" args={[PLAYER_WIDTH, PLAYER_COLLIDER_HEIGHT / 2, PLAYER_WIDTH]}>

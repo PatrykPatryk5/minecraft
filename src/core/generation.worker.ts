@@ -30,50 +30,56 @@ export class TerrainWorker {
 
     mesh(cx: number, cz: number, chunkData: Uint16Array, neighbors: (Uint16Array | null)[], lod: number) {
         const [nPx, nNx, nPz, nNz] = neighbors;
-        const step = 1 << lod;
+        const stepXZ = 1 << lod;
+        const stepY = 1;
 
         // Padded buffer for AO (18x258x18)
         const PH = MAX_HEIGHT + 2;
         const PD = CHUNK_SIZE + 2;
         const padded = this.padded;
-        padded.fill(0);
-
-        for (let lx = -1; lx <= CHUNK_SIZE; lx++) {
-            for (let lz = -1; lz <= CHUNK_SIZE; lz++) {
-                const targetChunk = (lx < 0) ? nNx : (lx >= CHUNK_SIZE) ? nPx : (lz < 0) ? nNz : (lz >= CHUNK_SIZE) ? nPz : chunkData;
-                if (!targetChunk) continue;
-                const nlx = (lx + 16) % 16;
-                const nlz = (lz + 16) % 16;
-                for (let y = 0; y < MAX_HEIGHT; y++) {
-                    const idx = blockIndex(nlx, y, nlz);
-                    padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)] = targetChunk[idx];
+        if (lod === 0) {
+            padded.fill(0);
+            for (let lx = -1; lx <= CHUNK_SIZE; lx++) {
+                for (let lz = -1; lz <= CHUNK_SIZE; lz++) {
+                    const targetChunk = (lx < 0) ? nNx : (lx >= CHUNK_SIZE) ? nPx : (lz < 0) ? nNz : (lz >= CHUNK_SIZE) ? nPz : chunkData;
+                    if (!targetChunk) continue;
+                    const nlx = (lx + CHUNK_SIZE) % CHUNK_SIZE;
+                    const nlz = (lz + CHUNK_SIZE) % CHUNK_SIZE;
+                    for (let y = 0; y < MAX_HEIGHT; y++) {
+                        const idx = blockIndex(nlx, y, nlz);
+                        padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)] = targetChunk[idx];
+                    }
                 }
             }
         }
 
-        const isSolidAt = (lx: number, y: number, lz: number): boolean => {
-            const id = padded[(lx + 1) * PH * PD + (y + 1) * PD + (lz + 1)] & 0x0FFF;
-            return id > 0 && (BLOCK_DATA[id]?.solid ?? false);
-        };
-
         const getBlockAt = (x: number, y: number, z: number): number => {
             if (y < 0 || y >= MAX_HEIGHT) return 0x7FFF;
-            if (x >= -1 && x <= CHUNK_SIZE && z >= -1 && z <= CHUNK_SIZE) {
-                return padded[(x + 1) * PH * PD + (y + 1) * PD + (z + 1)] & 0x0FFF;
+            let targetChunk: Uint16Array | null = chunkData;
+            let lx = x;
+            let lz = z;
+            if (lx < 0) {
+                targetChunk = nNx;
+                lx = CHUNK_SIZE - 1;
+            } else if (lx >= CHUNK_SIZE) {
+                targetChunk = nPx;
+                lx = 0;
+            } else if (lz < 0) {
+                targetChunk = nNz;
+                lz = CHUNK_SIZE - 1;
+            } else if (lz >= CHUNK_SIZE) {
+                targetChunk = nPz;
+                lz = 0;
             }
-            const cx_off = Math.floor(x / CHUNK_SIZE);
-            const cz_off = Math.floor(z / CHUNK_SIZE);
-            let neighbor: Uint16Array | null = null;
-            if (cx_off === 1 && cz_off === 0) neighbor = nPx;
-            else if (cx_off === -1 && cz_off === 0) neighbor = nNx;
-            else if (cx_off === 0 && cz_off === 1) neighbor = nPz;
-            else if (cx_off === 0 && cz_off === -1) neighbor = nNz;
-            if (neighbor) {
-                const nlx = (x % 16 + 16) % 16;
-                const nlz = (z % 16 + 16) % 16;
-                return neighbor[blockIndex(nlx, y, nlz)] & 0x0FFF;
-            }
-            return 0;
+            return targetChunk ? targetChunk[blockIndex(lx, y, lz)] : 0;
+        };
+
+        const isOccludingAt = (x: number, y: number, z: number): boolean => {
+            const raw = lod === 0
+                ? padded[(x + 1) * PH * PD + (y + 1) * PD + (z + 1)]
+                : getBlockAt(x, y, z);
+            const id = raw & 0x0FFF;
+            return id > 0 && !isTransparent(id);
         };
 
         const solid = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], colors: [] as number[], indices: [] as number[], isFlora: [] as number[], isLiquid: [] as number[] };
@@ -83,17 +89,30 @@ export class TerrainWorker {
         let waterIdx = 0;
 
         let maxChunkHeight = 0;
-        for (let i = 0; i < chunkData.length; i++) {
-            if (chunkData[i] > 0) {
-                const y = i >> 8;
-                if (y > maxChunkHeight) maxChunkHeight = y;
+        if (lod === 0) {
+            for (let i = 0; i < chunkData.length; i++) {
+                if (chunkData[i] > 0) {
+                    const y = i >> 8;
+                    if (y > maxChunkHeight) maxChunkHeight = y;
+                }
+            }
+        } else {
+            for (let lx = 0; lx < CHUNK_SIZE; lx += stepXZ) {
+                for (let lz = 0; lz < CHUNK_SIZE; lz += stepXZ) {
+                    for (let y = MAX_HEIGHT - 1; y > maxChunkHeight; y--) {
+                        if (chunkData[blockIndex(lx, y, lz)] > 0) {
+                            maxChunkHeight = y;
+                            break;
+                        }
+                    }
+                }
             }
         }
         maxChunkHeight = Math.min(MAX_HEIGHT - 1, maxChunkHeight + 1);
 
-        for (let lx = 0; lx < CHUNK_SIZE; lx += step) {
-            for (let lz = 0; lz < CHUNK_SIZE; lz += step) {
-                for (let y = 0; y <= maxChunkHeight; y += step) {
+        for (let lx = 0; lx < CHUNK_SIZE; lx += stepXZ) {
+            for (let lz = 0; lz < CHUNK_SIZE; lz += stepXZ) {
+                for (let y = 0; y <= maxChunkHeight; y += stepY) {
                     const raw = chunkData[blockIndex(lx, y, lz)];
                     const bt = raw & 0x0FFF;
                     if (!bt) continue;
@@ -111,10 +130,12 @@ export class TerrainWorker {
                         const face = FACES[f];
 
                         // Visibility check accounting for LOD step
-                        const nx = lx + face.dir[0] * step;
-                        const ny = y + face.dir[1] * step;
-                        const nz = lz + face.dir[2] * step;
-                        const nbt = padded[(nx + 1) * PH * PD + (ny + 1) * PD + (nz + 1)];
+                        const nx = lx + face.dir[0] * stepXZ;
+                        const ny = y + face.dir[1] * stepY;
+                        const nz = lz + face.dir[2] * stepXZ;
+                        const nbt = lod === 0
+                            ? padded[(nx + 1) * PH * PD + (ny + 1) * PD + (nz + 1)]
+                            : getBlockAt(nx, ny, nz);
 
                         let visible = false;
                         if (nbt === 0x7FFF) visible = true;
@@ -136,27 +157,26 @@ export class TerrainWorker {
                         const baseIdx = isLiquidBlock ? waterIdx : solidIdx;
                         const cornerAO: number[] = [0, 0, 0, 0];
 
-                        if (lod === 0 && !isLiquidBlock) {
+                        if (lod <= 1 && !isLiquidBlock) {
                             const dx = face.dir[0], dy = face.dir[1], dz = face.dir[2];
                             for (let i = 0; i < 4; i++) {
                                 const corner = face.corners[i];
                                 const ox = corner[0] * 2 - 1, oy = corner[1] * 2 - 1, oz = corner[2] * 2 - 1;
                                 let aoLevel = 0;
-                                // Optimized padding access
                                 if (Math.abs(dx) === 1) {
-                                    const s1 = padded[(lx + dx + 1) * PH * PD + (y + corner[1] + 1) * PD + (lz + oz + 1)] > 0 && !isTransparent(padded[(lx + dx + 1) * PH * PD + (y + corner[1] + 1) * PD + (lz + oz + 1)]);
-                                    const s2 = padded[(lx + dx + 1) * PH * PD + (y + oy + 1) * PD + (lz + corner[2] + 1)] > 0 && !isTransparent(padded[(lx + dx + 1) * PH * PD + (y + oy + 1) * PD + (lz + corner[2] + 1)]);
-                                    const c = padded[(lx + dx + 1) * PH * PD + (y + oy + 1) * PD + (lz + oz + 1)] > 0 && !isTransparent(padded[(lx + dx + 1) * PH * PD + (y + oy + 1) * PD + (lz + oz + 1)]);
+                                    const s1 = isOccludingAt(lx + dx, y + corner[1], lz + oz);
+                                    const s2 = isOccludingAt(lx + dx, y + oy, lz + corner[2]);
+                                    const c = isOccludingAt(lx + dx, y + oy, lz + oz);
                                     aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
                                 } else if (Math.abs(dy) === 1) {
-                                    const s1 = padded[(lx + ox + 1) * PH * PD + (y + dy + 1) * PD + (lz + corner[2] + 1)] > 0 && !isTransparent(padded[(lx + ox + 1) * PH * PD + (y + dy + 1) * PD + (lz + corner[2] + 1)]);
-                                    const s2 = padded[(lx + corner[0] + 1) * PH * PD + (y + dy + 1) * PD + (lz + oz + 1)] > 0 && !isTransparent(padded[(lx + corner[0] + 1) * PH * PD + (y + dy + 1) * PD + (lz + oz + 1)]);
-                                    const c = padded[(lx + ox + 1) * PH * PD + (y + dy + 1) * PD + (lz + oz + 1)] > 0 && !isTransparent(padded[(lx + ox + 1) * PH * PD + (y + dy + 1) * PD + (lz + oz + 1)]);
+                                    const s1 = isOccludingAt(lx + ox, y + dy, lz + corner[2]);
+                                    const s2 = isOccludingAt(lx + corner[0], y + dy, lz + oz);
+                                    const c = isOccludingAt(lx + ox, y + dy, lz + oz);
                                     aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
                                 } else {
-                                    const s1 = padded[(lx + ox + 1) * PH * PD + (y + corner[1] + 1) * PD + (lz + dz + 1)] > 0 && !isTransparent(padded[(lx + ox + 1) * PH * PD + (y + corner[1] + 1) * PD + (lz + dz + 1)]);
-                                    const s2 = padded[(lx + corner[0] + 1) * PH * PD + (y + oy + 1) * PD + (lz + dz + 1)] > 0 && !isTransparent(padded[(lx + corner[0] + 1) * PH * PD + (y + oy + 1) * PD + (lz + dz + 1)]);
-                                    const c = padded[(lx + ox + 1) * PH * PD + (y + oy + 1) * PD + (lz + dz + 1)] > 0 && !isTransparent(padded[(lx + ox + 1) * PH * PD + (y + oy + 1) * PD + (lz + dz + 1)]);
+                                    const s1 = isOccludingAt(lx + ox, y + corner[1], lz + dz);
+                                    const s2 = isOccludingAt(lx + corner[0], y + oy, lz + dz);
+                                    const c = isOccludingAt(lx + ox, y + oy, lz + dz);
                                     aoLevel = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s1 && s2 ? 1 : c ? 1 : 0);
                                 }
                                 cornerAO[i] = aoLevel;
@@ -183,11 +203,11 @@ export class TerrainWorker {
                                 cvz = 0.4 + cvz * 0.2;
                             }
 
-                            target.positions.push((lx + cvx * step), (y + cvy * step), (lz + cvz * step));
+                            target.positions.push((lx + cvx * stepXZ), (y + cvy * stepY), (lz + cvz * stepXZ));
                             target.normals.push(face.dir[0], face.dir[1], face.dir[2]);
                             target.uvs.push(atlasUV.u + face.uv[i][0] * atlasUV.su, atlasUV.v + face.uv[i][1] * atlasUV.sv);
 
-                            const ao = (lod === 0 && !isLiquidBlock) ? (1.0 - cornerAO[i] * 0.2) : 1.0;
+                            const ao = (lod <= 1 && !isLiquidBlock) ? (1.0 - cornerAO[i] * 0.2) : 1.0;
                             const directionalShade = isLightSource ? 1 : isLiquidBlock
                                 ? (face.dir[1] > 0 ? 1 : face.dir[1] < 0 ? 0.6 : Math.abs(face.dir[2]) > 0.5 ? 0.85 : 0.75)
                                 : (face.dir[1] > 0 ? 1.05 : face.dir[1] < 0 ? 0.85 : Math.abs(face.dir[2]) > 0.5 ? 0.95 : 0.9);
@@ -198,7 +218,7 @@ export class TerrainWorker {
                         }
 
                         // Fix: Corrected AO flip condition (inverted previously)
-                        if (lod === 0 && !isLiquidBlock && (cornerAO[0] + cornerAO[2] > cornerAO[1] + cornerAO[3])) {
+                        if (lod <= 1 && !isLiquidBlock && (cornerAO[0] + cornerAO[2] > cornerAO[1] + cornerAO[3])) {
                             target.indices.push(baseIdx + 1, baseIdx + 2, baseIdx + 3, baseIdx + 1, baseIdx + 3, baseIdx + 0);
                         } else {
                             target.indices.push(baseIdx + 0, baseIdx + 1, baseIdx + 2, baseIdx + 0, baseIdx + 2, baseIdx + 3);

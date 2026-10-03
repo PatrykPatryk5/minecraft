@@ -12,11 +12,17 @@ import useGameStore from '../store/gameStore';
 import { attackMob } from '../mobs/MobSystem';
 import { playSound } from '../audio/sounds';
 
+const MOB_HIT_CHECK_INTERVAL = 1 / 30;
+
 const Arrow: React.FC<{ id: string; initialPos: [number, number, number]; initialVel: [number, number, number] }> = ({ id, initialPos, initialVel }) => {
     const rbRef = useRef<RapierRigidBody>(null);
     const stuck = useRef(false);
     const age = useRef(0);
     const meshRef = useRef<THREE.Mesh>(null);
+    const hitCheckTimer = useRef(0);
+    const direction = useRef(new THREE.Vector3());
+    const up = useRef(new THREE.Vector3(0, 1, 0));
+    const rotation = useRef(new THREE.Quaternion());
 
     useFrame((_, delta) => {
         if (stuck.current) return;
@@ -34,20 +40,23 @@ const Arrow: React.FC<{ id: string; initialPos: [number, number, number]; initia
             // Speed must be significant to damage
             const speedSq = vel.x * vel.x + vel.y * vel.y + vel.z * vel.z;
             if (speedSq > 5) {
-                const dir: [number, number, number] = [vel.x, vel.y, vel.z];
-                // Check for mob hit
-                const hit = attackMob(pos.x, pos.y, pos.z, dir, 6);
-                if (hit) {
-                    useGameStore.getState().removeArrow(id);
-                    return;
+                hitCheckTimer.current += delta;
+                if (hitCheckTimer.current >= MOB_HIT_CHECK_INTERVAL) {
+                    hitCheckTimer.current %= MOB_HIT_CHECK_INTERVAL;
+                    const dir = direction.current.set(vel.x, vel.y, vel.z).normalize();
+                    const hit = attackMob(pos.x, pos.y, pos.z, [dir.x, dir.y, dir.z], 6);
+                    if (hit) {
+                        useGameStore.getState().removeArrow(id);
+                        return;
+                    }
                 }
             }
 
             // Update rotation to match velocity
             if (meshRef.current && speedSq > 0.1) {
-                const v = new THREE.Vector3(vel.x, vel.y, vel.z).normalize();
-                const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), v);
-                meshRef.current.quaternion.copy(quat);
+                direction.current.set(vel.x, vel.y, vel.z).normalize();
+                rotation.current.setFromUnitVectors(up.current, direction.current);
+                meshRef.current.quaternion.copy(rotation.current);
             }
         }
     });

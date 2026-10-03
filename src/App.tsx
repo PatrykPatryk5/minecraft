@@ -18,6 +18,7 @@ import CreditsScreen from './ui/CreditsScreen';
 import KeybindScreen from './ui/KeybindScreen';
 import NetworkHUD from './ui/NetworkHUD';
 import useGameStore from './store/gameStore';
+import { setMusicVolume, setSoundVolume } from './audio/sounds';
 import { getRendererCaps, type RendererCapabilities } from './core/renderer';
 import MobileControls from './ui/MobileControls';
 import PreJoinShield from './ui/PreJoinShield';
@@ -40,9 +41,16 @@ const App: React.FC = () => {
     const showHUD = useGameStore((s) => s.showHUD);
     const activeOverlay = useGameStore((s) => s.activeOverlay);
     const graphics = useGameStore((s) => s.settings.graphics);
+    const soundVolume = useGameStore((s) => s.settings.soundVolume);
+    const musicVolume = useGameStore((s) => s.settings.musicVolume);
     const [caps, setCaps] = useState<RendererCapabilities | null>(null);
     const [ready, setReady] = useState(false);
     const prevScreenRef = useRef(screen);
+
+    useEffect(() => {
+        setSoundVolume(soundVolume);
+        setMusicVolume(musicVolume);
+    }, [soundVolume, musicVolume]);
 
     useEffect(() => {
         const init = async () => {
@@ -86,15 +94,14 @@ const App: React.FC = () => {
         };
 
         const onFocus = () => {
-            console.log('[MC] Window focused');
-            // Resume sound or logic if needed
         };
 
         const onBlur = () => {
-            console.log('[MC] Window blurred - Pausing');
-            if (screen === 'playing' && !useGameStore.getState().isPaused) {
-                useGameStore.getState().setPaused(true);
-            }
+            if (screen !== 'playing') return;
+            const state = useGameStore.getState();
+            if (!state.isPaused) state.setPaused(true);
+            state.setLocked(false);
+            document.exitPointerLock?.();
         };
 
         const onClick = () => {

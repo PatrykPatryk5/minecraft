@@ -1,6 +1,6 @@
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Text } from '@react-three/drei';
+import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import useGameStore from '../store/gameStore';
 
@@ -214,17 +214,9 @@ export const PlayerModel: React.FC<PlayerModelProps> = ({ id }) => {
             </group>
 
             {/* Name Tag */}
-            <Text
-                position={[0, 2.2, 0]}
-                fontSize={0.25}
-                color="white"
-                outlineWidth={0.02}
-                outlineColor="black"
-                anchorX="center"
-                anchorY="middle"
-            >
+            <Html position={[0, 2.2, 0]} center style={{ color: 'white', fontSize: 14, fontFamily: 'Minecraft, monospace', textShadow: '1px 1px 2px #000', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                 {playerName}
-            </Text>
+            </Html>
 
             {/* Head: 8x8x8 px */}
             <mesh ref={headRef} position={[0, 1.75, 0]} castShadow>

@@ -45,7 +45,10 @@ function fillNoise(ctx: CanvasRenderingContext2D, base: RGB, v: number, seed: nu
     const rng = sRng(seed);
     for (let y = 0; y < TEX_SIZE; y++)
         for (let x = 0; x < TEX_SIZE; x++) {
-            const c = vary(base, v, rng);
+            // Smooth wavy variation across the block
+            const wave = Math.sin(x * 0.4) * Math.cos(y * 0.4) * (v * 0.5);
+            const crisp = (rng() - 0.5) * v;
+            const c = vary(base, wave + crisp, () => 0.5);
             px(ctx, x, y, c[0], c[1], c[2]);
         }
 }
@@ -55,9 +58,10 @@ function fillNoise(ctx: CanvasRenderingContext2D, base: RGB, v: number, seed: nu
 function drawStone(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
     const base: RGB = [125, 125, 125];
-    // Stone base with subtle gray variation
+    // Stone base with horizontal stratification for geological realism
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-        const v = (rng() - 0.5) * 20;
+        const stratification = Math.sin(y * 0.6 + x * 0.15) * 8;
+        const v = (rng() - 0.5) * 18 + stratification;
         px(ctx, x, y, base[0] + v, base[1] + v, base[2] + v);
     }
     // High-frequency craggy noise
@@ -113,7 +117,7 @@ function drawCobble(ctx: CanvasRenderingContext2D, seed: number) {
 function drawDirt(ctx: CanvasRenderingContext2D, seed: number) {
     const rng = sRng(seed);
     const base: RGB = [134, 96, 67];
-    fillNoise(ctx, base, 15, seed);
+    fillNoise(ctx, base, 18, seed);
 
     // High-frequency detail noise (pebbles and dirt clumps)
     for (let i = 0; i < 30; i++) {
@@ -2128,6 +2132,10 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
         case BlockType.MUSIC_DISC_6:
         case BlockType.MUSIC_DISC_7:
         case BlockType.MUSIC_DISC_8:
+        case BlockType.MUSIC_DISC_9:
+        case BlockType.MUSIC_DISC_10:
+        case BlockType.MUSIC_DISC_11:
+        case BlockType.MUSIC_DISC_12:
             ctx.clearRect(0, 0, 16, 16);
             // Disc shape
             const colors = {
@@ -2138,7 +2146,11 @@ function drawBlockTexture(ctx: CanvasRenderingContext2D, blockId: number, face: 
                 [BlockType.MUSIC_DISC_5]: [255, 215, 0],   // Gold/Yellow
                 [BlockType.MUSIC_DISC_6]: [56, 189, 248],  // Sky Blue
                 [BlockType.MUSIC_DISC_7]: [168, 85, 247],  // Purple
-                [BlockType.MUSIC_DISC_8]: [236, 72, 153]   // Pink
+                [BlockType.MUSIC_DISC_8]: [236, 72, 153],  // Pink
+                [BlockType.MUSIC_DISC_9]: [98, 215, 240],
+                [BlockType.MUSIC_DISC_10]: [241, 122, 69],
+                [BlockType.MUSIC_DISC_11]: [126, 205, 226],
+                [BlockType.MUSIC_DISC_12]: [163, 125, 255]
             };
             const discCol = colors[blockId as keyof typeof colors] || [255, 255, 255];
 

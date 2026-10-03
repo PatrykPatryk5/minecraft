@@ -534,16 +534,28 @@ const useGameStore = create<GameState>((set, get) => ({
             const versions = { ...s.chunkVersions };
             const bump = (k: string) => { versions[k] = (versions[k] ?? 0) + 1; };
 
+            const faceChanged = (isXFace: boolean, edge: number) => {
+                for (let y = 0; y < 256; y++) {
+                    for (let offset = 0; offset < 16; offset++) {
+                        const index = isXFace
+                            ? blockIndex(edge, y, offset)
+                            : blockIndex(offset, y, edge);
+                        if ((existing?.[index] ?? 0) !== finalData[index]) return true;
+                    }
+                }
+                return false;
+            };
+
             bump(key);
             const nPx = chunkKey(cx + 1, cz);
             const nNx = chunkKey(cx - 1, cz);
             const nPz = chunkKey(cx, cz + 1);
             const nNz = chunkKey(cx, cz - 1);
 
-            if (s.chunks[nPx]) bump(nPx);
-            if (s.chunks[nNx]) bump(nNx);
-            if (s.chunks[nPz]) bump(nPz);
-            if (s.chunks[nNz]) bump(nNz);
+            if (s.chunks[nPx] && faceChanged(true, 15)) bump(nPx);
+            if (s.chunks[nNx] && faceChanged(true, 0)) bump(nNx);
+            if (s.chunks[nPz] && faceChanged(false, 15)) bump(nPz);
+            if (s.chunks[nNz] && faceChanged(false, 0)) bump(nNz);
 
             let newGen = s.generatedChunks;
             if (!s.generatedChunks.has(key)) {
@@ -570,11 +582,13 @@ const useGameStore = create<GameState>((set, get) => ({
     unloadChunkData: (keys) => set((s) => {
         const newChunks = { ...s.chunks };
         const newVersions = { ...s.chunkVersions };
+        const newLightSources = { ...s.lightSources };
         for (const key of keys) {
             delete newChunks[key];
             delete newVersions[key];
+            delete newLightSources[key];
         }
-        return { chunks: newChunks, chunkVersions: newVersions };
+        return { chunks: newChunks, chunkVersions: newVersions, lightSources: newLightSources };
     }),
 
     getBlock: (x: number, y: number, z: number) => {
@@ -890,18 +904,18 @@ const useGameStore = create<GameState>((set, get) => ({
     removeBlocks: (blocks: [number, number, number][], fromNetwork = false, skipRedstone = false) => {
         const s = get();
         const affectedChunks = new Set<string>();
+        const changedFaces = new Map<string, { west: boolean; east: boolean; north: boolean; south: boolean }>();
         let networkBlockOverrides = s.networkBlockOverrides;
         let overridesChanged = false;
         const clonedOverrideChunks = new Set<string>();
         const redstoneTargets: [number, number, number][] = [];
-        const bumpCounts = new Map<string, number>();
+        const chunksToBump = new Set<string>();
         const newLightSources = { ...s.lightSources };
         let newChests = { ...s.chests };
         let chestsChanged = false;
 
         const queueBump = (cx: number, cz: number) => {
-            const k = chunkKey(cx, cz);
-            bumpCounts.set(k, (bumpCounts.get(k) ?? 0) + 1);
+            chunksToBump.add(chunkKey(cx, cz));
         };
 
         for (const [x, y, z] of blocks) {
@@ -932,6 +946,12 @@ const useGameStore = create<GameState>((set, get) => ({
             const oldType = chunk[idx] & 0x0FFF;
             chunk[idx] = 0;
             affectedChunks.add(key);
+            const faces = changedFaces.get(key) ?? { west: false, east: false, north: false, south: false };
+            if (lx === 0) faces.west = true;
+            if (lx === 15) faces.east = true;
+            if (lz === 0) faces.north = true;
+            if (lz === 15) faces.south = true;
+            changedFaces.set(key, faces);
 
             if (LIGHT_SOURCE_IDS.has(oldType)) {
                 let lights = newLightSources[key] || s.lightSources[key] || [];
@@ -957,18 +977,19 @@ const useGameStore = create<GameState>((set, get) => ({
             const parts = key.split(',');
             const cx = parseInt(parts[0]), cz = parseInt(parts[1]);
             saveChunk(`${s.dimension}:${cx},${cz}`, chunk);
+            const faces = changedFaces.get(key)!;
             queueBump(cx, cz);
-            queueBump(cx + 1, cz);
-            queueBump(cx - 1, cz);
-            queueBump(cx, cz + 1);
-            queueBump(cx, cz - 1);
+            if (faces.west && s.chunks[chunkKey(cx - 1, cz)]) queueBump(cx - 1, cz);
+            if (faces.east && s.chunks[chunkKey(cx + 1, cz)]) queueBump(cx + 1, cz);
+            if (faces.north && s.chunks[chunkKey(cx, cz - 1)]) queueBump(cx, cz - 1);
+            if (faces.south && s.chunks[chunkKey(cx, cz + 1)]) queueBump(cx, cz + 1);
         }
 
-        if (bumpCounts.size > 0 || Object.keys(newLightSources).length !== Object.keys(s.lightSources).length || chestsChanged) {
+        if (chunksToBump.size > 0 || Object.keys(newLightSources).length !== Object.keys(s.lightSources).length || chestsChanged) {
             set((state) => {
                 const chunkVersions = { ...state.chunkVersions };
-                for (const [key, delta] of bumpCounts) {
-                    chunkVersions[key] = (chunkVersions[key] ?? 0) + delta;
+                for (const key of chunksToBump) {
+                    chunkVersions[key] = (chunkVersions[key] ?? 0) + 1;
                 }
                 return {
                     chunkVersions,

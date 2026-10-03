@@ -403,6 +403,10 @@ export const RECIPES: CraftingRecipe[] = [
     { type: 'shapeless', name: 'Płyta Muzyczna (Retro)', result: B.MUSIC_DISC_2, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_RED] },
     { type: 'shapeless', name: 'Płyta Muzyczna (Creepy)', result: B.MUSIC_DISC_3, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_BLUE] },
     { type: 'shapeless', name: 'Płyta Muzyczna (Chill)', result: B.MUSIC_DISC_4, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_YELLOW] },
+    { type: 'shapeless', name: 'Płyta Muzyczna (Orbit)', result: B.MUSIC_DISC_9, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_BLUE, B.REDSTONE] },
+    { type: 'shapeless', name: 'Płyta Muzyczna (Ember)', result: B.MUSIC_DISC_10, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_RED, B.GLOWSTONE_DUST] },
+    { type: 'shapeless', name: 'Płyta Muzyczna (Rainroom)', result: B.MUSIC_DISC_11, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_BLUE, B.LAPIS] },
+    { type: 'shapeless', name: 'Płyta Muzyczna (Glitch)', result: B.MUSIC_DISC_12, count: 1, ingredients: [B.DIAMOND_GEM, B.DYE_BLACK, B.REDSTONE] },
 ];
 
 // ══════════════════════════════════════════════════════════
